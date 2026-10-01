@@ -28,6 +28,15 @@ def test_exterior_doors_only_above_main_deck():
             assert room.ylo >= main_deck
 
 
+def test_legacy_hatches_do_not_cut_bare_holes():
+    spec = resolve_spec(preset="tugboat")
+    without = resolve_spec({"interior": {"hatches": []}}, preset="tugboat")
+    placed, info = build(spec)
+    reference, _ = build(without)
+    assert {v for p in placed for v in p.voxels()} == {v for p in reference for v in p.voxels()}
+    assert any("floor left sealed" in w for w in info["interior"].warnings)
+
+
 @pytest.mark.skipif(definitions.definitions_dir() is None, reason="Stormworks not installed")
 def test_placeholder_engine_fits():
     placed, info = build(resolve_spec(preset="patrol_boat"))

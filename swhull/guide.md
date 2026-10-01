@@ -232,11 +232,12 @@ parts placed are optional placeholder engines. Check the result with `preview_in
   Exterior doors through the hull skin are only allowed above the main deck. The report gives
   each door's sill height above the room floor and how far the floor drops on the other side,
   and marks rises over 0.5 m "ladder".
-- **Hatches.** A 0.75 m square opening in a floor: `deck` index, `"main"`, or `floor` metres.
+- **Hatches.** Requests for vertical access: `deck` index, `"main"`, or `floor` metres.
+  Floors stay sealed unless a complete fitted ladder/hatch assembly can be installed.
   Give a hatch a `name` to patch it by name.
 - **Deck plans.** `preview_interior` draws one plan per floor height. Floors above the main deck
   (rooms inside superstructure) are drawn cropped to their rooms.
-  The player adds a ladder.
+  Unfinished access requests are reported; they never create bare holes.
 - **Engines.** `engine`: small (0.75 x 0.75 x 0.75 m), medium (0.75 x 1.0 x 1.75 m), or large
   (1.25 W x 2.0 H x 2.75 L m). `engine_count` places several side by side. If one does not fit,
   the report says so instead of placing it.

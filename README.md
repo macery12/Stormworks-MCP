@@ -107,6 +107,9 @@ fit doors into. `preview_interior` shows a section down the centreline and a lab
 every level. It also reports each room's clear size, floor width, headroom and doors, and warns
 when something does not fit, such as an engine too tall for its room.
 
+Vertical access requests leave floors sealed until a complete ladder/hatch assembly can be
+installed. The tool never cuts an unfinished square hole for the player to fill later.
+
 ![Interior cutaway of the battleship: a centreline section with 20 labelled rooms and six deck plans](docs/images/interior-battleship.png)
 
 ### Close-up inspection

@@ -327,31 +327,6 @@ def _add_engines(room, size, count, plan):
 
 
 def _add_hatch(h, deck_layers, cfg, skin, region, top_hull, plan):
-    size = max(1, _v(h.get("size", 0.75)))
-    x0, z0 = _v(h.get("x", 0.0)) - size // 2, _v(h["z"]) - size // 2
-    deck = "floor" if h.get("floor") is not None else h.get("deck", "main")
-    decks = sorted(cfg.get("decks") or [])
-    for x in range(x0, x0 + size):
-        for z in range(z0, z0 + size):
-            if deck == "main":
-                t = top_hull(x, z)
-                if t is None:
-                    continue
-                for y in range(t, t - 4, -1):   # the deck plate may be 1-3 blocks thick
-                    v = (x, y, z)
-                    if v in plan.blocks:
-                        del plan.blocks[v]
-                    elif v in skin:
-                        plan.carve.add(v)
-                    else:
-                        break
-            else:
-                if h.get("floor") is not None:
-                    y = _v(h["floor"]) - 1
-                else:
-                    try:
-                        y = _v(decks[int(deck)]) - 1
-                    except (ValueError, IndexError):
-                        plan.warnings.append(f"hatch deck {deck!r} is not an index into interior.decks")
-                        return
-                plan.blocks.pop((x, y, z), None)
+    """Never make an unfinished access opening. Complete assemblies are installed later."""
+    name = h.get("name", f"access at z={h['z']:g} m")
+    plan.warnings.append(f"{name}: floor left sealed; no complete ladder/hatch assembly installed")
