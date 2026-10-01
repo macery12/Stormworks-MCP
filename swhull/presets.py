@@ -1,0 +1,200 @@
+"""Hull archetypes. Each is a partial spec merged over hull.DEFAULT_SPEC.
+
+Proportions follow real-world practice (length/beam ratio, deadrise, bow form), scaled to
+sizes that fit common Stormworks workbenches.
+"""
+
+PRESETS = {
+    "runabout": {
+        "about": "Small planing speedboat: deep-V bow, flat-ish run aft, wide square transom, open cockpit.",
+        "spec": {
+            "length": 7.0, "beam": 2.5, "depth": 1.2, "deck": "open",
+            "bow": {"entry": 0.42, "fullness": 1.5, "rake": 0.55, "rake_curve": 1.6, "flare": 0.2, "deadrise": 42},
+            "stern": {"run": 0.04, "transom_width": 0.92},
+            "sheer": {"bow": 0.3, "stern": 0.0},
+            "section": {"deadrise": 18, "bilge_radius": 0.1, "flare": 0.12, "keel_width": 0.25},
+            "colors": {"bottom": "1E3A5F", "stripe": "F2B705", "topsides": "F0F0F0", "deck": "D8CBB0"},
+        },
+    },
+    "rowboat": {
+        "about": "Classic open dinghy: pointed bow, narrow transom, round bilge, strong sheer.",
+        "spec": {
+            "length": 3.75, "beam": 1.5, "depth": 0.65, "deck": "open",
+            "bow": {"entry": 0.45, "fullness": 1.6, "rake": 0.35, "flare": 0.15, "deadrise": 25},
+            "stern": {"run": 0.3, "transom_width": 0.55, "keel_rise": 0.15},
+            "sheer": {"bow": 0.25, "stern": 0.12},
+            "section": {"deadrise": 10, "bilge_radius": 0.35, "flare": 0.2, "keel_width": 0.25},
+            "colors": {"bottom": "2F4F4F", "stripe": "F0F0F0", "topsides": "7A4B2A", "deck": "B08050"},
+        },
+    },
+    "fishing_trawler": {
+        "about": "Working trawler: high flared bow, strong sheer, round bilge, wheelhouse forward, open work deck aft.",
+        "spec": {
+            "length": 16.0, "beam": 5.0, "depth": 2.6,
+            "bow": {"entry": 0.34, "fullness": 1.9, "rake": 1.0, "rake_curve": 2.2, "flare": 0.25, "deadrise": 30},
+            "stern": {"run": 0.16, "transom_width": 0.7, "keel_rise": 0.3},
+            "sheer": {"bow": 1.0, "stern": 0.25},
+            "section": {"deadrise": 12, "bilge_radius": 0.9, "flare": 0.08, "keel_width": 0.5},
+            "colors": {"bottom": "8B1A1A", "stripe": "F0F0F0", "topsides": "1F4E79", "deck": "6E6E6E",
+                       "waterline": 1.1},
+            "superstructure": [
+                {"name": "wheelhouse", "z": 9.0, "length": 3.5, "width": 3.4, "height": 2.25,
+                 "taper": 0.15, "rake_front": 0.4, "color": "F0F0F0",
+                 "band": {"from": 1.25, "to": 1.9, "color": "1A2530"}},
+            ],
+        },
+    },
+    "tugboat": {
+        "about": "Harbour tug: very beamy (L/B ~2.4), full round bow, deep hull, tall wheelhouse amidships.",
+        "spec": {
+            "length": 14.0, "beam": 5.75, "depth": 2.75,
+            "bow": {"entry": 0.33, "fullness": 2.3, "rake": 0.9, "rake_curve": 2.5, "flare": 0.15, "deadrise": 22},
+            "stern": {"run": 0.24, "transom_width": 0.55, "fullness": 2.2, "keel_rise": 0.5},
+            "sheer": {"bow": 0.85, "stern": 0.2},
+            "section": {"deadrise": 8, "bilge_radius": 1.1, "flare": 0.06, "keel_width": 0.5},
+            "colors": {"bottom": "7A1414", "stripe": "F0F0F0", "topsides": "1A1A1A", "deck": "8C2A1C",
+                       "waterline": 1.2},
+            "superstructure": [
+                {"name": "deckhouse", "z": 4.5, "length": 5.0, "width": 3.8, "height": 2.5, "color": "F0F0F0"},
+                {"name": "wheelhouse", "z": 6.0, "length": 3.0, "width": 3.2, "height": 2.5, "y": 5.25,
+                 "color": "F0F0F0", "band": {"from": 1.1, "to": 1.9, "color": "1A2530"}},
+            ],
+            "interior": {
+                "decks": [0.5],
+                "bulkheads": [2.0, 7.0, 10.5],
+                "rooms": [
+                    {"name": "engine room", "type": "engine", "level": 0, "z": 2.0, "length": 5.0,
+                     "engine": "large", "doors": ["fore"]},
+                    {"name": "crew mess", "type": "mess", "level": 0, "z": 7.0, "length": 3.5,
+                     "doors": ["aft", "fore"]},
+                    {"name": "forepeak store", "type": "storage", "level": 0, "z": 10.5, "length": 2.5,
+                     "doors": ["aft"]},
+                    {"name": "galley", "type": "galley", "level": "main", "z": 4.75, "length": 4.5,
+                     "width": 3.25, "doors": ["port", "starboard"]},
+                    {"name": "wheelhouse", "type": "bridge", "floor": 5.25, "z": 6.25, "length": 2.5,
+                     "width": 2.75},
+                ],
+                "hatches": [{"z": 8.0, "x": 0.0, "deck": "main"}, {"z": 7.0, "x": 0.0, "floor": 5.25}],
+            },
+        },
+    },
+    "motor_yacht": {
+        "about": "Sleek motor yacht: raked fine bow with flare, moderate-V, long superstructure stepped aft.",
+        "spec": {
+            "length": 20.0, "beam": 5.25, "depth": 2.5,
+            "bow": {"entry": 0.4, "fullness": 1.35, "rake": 1.4, "rake_curve": 1.5, "flare": 0.22, "deadrise": 40},
+            "stern": {"run": 0.05, "transom_width": 0.9},
+            "sheer": {"bow": 0.6, "stern": 0.0},
+            "section": {"deadrise": 16, "bilge_radius": 0.35, "flare": 0.1, "keel_width": 0.25},
+            "colors": {"bottom": "14213D", "stripe": "C9A227", "topsides": "F5F5F5", "deck": "C8B28A",
+                       "waterline": 1.0},
+            "superstructure": [
+                {"name": "saloon", "z": 5.0, "length": 9.0, "width": 4.25, "height": 1.75,
+                 "taper": 0.2, "rake_front": 1.2, "color": "F5F5F5",
+                 "band": {"from": 0.6, "to": 1.4, "color": "1B2838"}},
+                {"name": "flybridge", "z": 7.0, "length": 5.0, "width": 3.5, "height": 1.0,
+                 "taper": 0.2, "rake_front": 0.8, "y": 4.25, "color": "F5F5F5"},
+            ],
+        },
+    },
+    "landing_craft": {
+        "about": "Flat-bottomed landing craft: blunt bow ramp (stem_width near 1, big rake), open well deck, boxy.",
+        "spec": {
+            "length": 14.0, "beam": 4.5, "depth": 1.75, "deck": "open",
+            "bow": {"entry": 0.12, "fullness": 1.0, "stem_width": 0.85, "rake": 1.25, "rake_curve": 1.0,
+                    "flare": 0.0, "deadrise": 0},
+            "stern": {"run": 0.0, "transom_width": 1.0},
+            "sheer": {"bow": 0.25, "stern": 0.0},
+            "section": {"deadrise": 0, "bilge_radius": 0.25, "flare": 0.0, "keel_width": 4.0},
+            "colors": {"bottom": "3B3B3B", "stripe": "3B3B3B", "topsides": "5B6B4A", "deck": "4A4A4A",
+                       "waterline": 0.6},
+            "superstructure": [
+                {"name": "control_cabin", "z": 0.5, "length": 2.5, "width": 2.0, "height": 1.5, "x": 1.0,
+                 "y": 0.5, "color": "5B6B4A", "band": {"from": 0.9, "to": 1.3, "color": "1A2530"}},
+            ],
+        },
+    },
+    "lifeboat": {
+        "about": "Double-ended rescue boat: pointed at both ends (canoe stern), round bilge, self-righting look.",
+        "spec": {
+            "length": 10.0, "beam": 3.25, "depth": 1.75,
+            "bow": {"entry": 0.42, "fullness": 1.7, "rake": 0.6, "flare": 0.18, "deadrise": 30},
+            "stern": {"run": 0.35, "transom_width": 0.0, "fullness": 1.8, "keel_rise": 0.4},
+            "sheer": {"bow": 0.5, "stern": 0.35},
+            "section": {"deadrise": 14, "bilge_radius": 0.6, "flare": 0.1, "keel_width": 0.25},
+            "colors": {"bottom": "1A3A6B", "stripe": "F0F0F0", "topsides": "E86A10", "deck": "F0F0F0"},
+            "superstructure": [
+                {"name": "cabin", "z": 3.5, "length": 3.25, "width": 2.25, "height": 1.25,
+                 "taper": 0.25, "rake_front": 0.4, "rake_back": 0.2, "color": "E86A10",
+                 "band": {"from": 0.5, "to": 0.95, "color": "1A2530"}},
+            ],
+        },
+    },
+    "patrol_boat": {
+        "about": "Fast patrol boat: long fine entry, sharply raked stem, hard chine, knuckled flared bow, low bridge.",
+        "spec": {
+            "length": 24.0, "beam": 5.0, "depth": 2.75,
+            "bow": {"entry": 0.45, "fullness": 1.2, "rake": 1.75, "rake_curve": 1.4, "flare": 0.28, "deadrise": 45},
+            "stern": {"run": 0.03, "transom_width": 0.9},
+            "sheer": {"bow": 0.7, "stern": 0.0},
+            "section": {"deadrise": 20, "bilge_radius": 0.0, "flare": 0.12, "keel_width": 0.25},
+            "colors": {"bottom": "2B2B2B", "stripe": "2B2B2B", "topsides": "6B7B85", "deck": "4F5A61",
+                       "waterline": 1.0},
+            "superstructure": [
+                {"name": "bridge", "z": 11.0, "length": 5.5, "width": 3.75, "height": 2.5,
+                 "taper": 0.3, "rake_front": 0.9, "rake_back": 0.3, "color": "6B7B85",
+                 "band": {"from": 1.4, "to": 2.0, "color": "1A2126"}},
+                {"name": "mast_base", "z": 12.5, "length": 1.5, "width": 1.25, "height": 1.5, "y": 5.25,
+                 "taper": 0.2, "color": "6B7B85"},
+            ],
+            "interior": {
+                "decks": [0.5],
+                "bulkheads": [2.0, 7.5, 11.0, 16.5, 20.5],
+                "rooms": [
+                    {"name": "engine room", "type": "engine", "level": 0, "z": 2.0, "length": 5.5,
+                     "engine": "large", "doors": ["fore"]},
+                    {"name": "machinery", "type": "machinery", "level": 0, "z": 7.5, "length": 3.5,
+                     "doors": ["aft", "fore"]},
+                    {"name": "crew quarters", "type": "quarters", "level": 0, "z": 11.0, "length": 5.5,
+                     "doors": ["aft", "fore"]},
+                    {"name": "forward store", "type": "storage", "level": 0, "z": 16.5, "length": 4.0,
+                     "doors": ["aft"]},
+                    {"name": "bridge", "type": "bridge", "level": "main", "z": 11.25, "length": 5.0,
+                     "width": 3.25, "doors": ["port", "starboard"]},
+                ],
+                "hatches": [{"z": 12.5, "x": 0.0, "deck": "main"}, {"z": 9.0, "x": 0.0, "deck": "main"}],
+            },
+        },
+    },
+    "catamaran": {
+        "about": "Twin-hull ferry/workboat: two slender demi-hulls (beam = each hull), bridge deck between them.",
+        "spec": {
+            "length": 14.0, "beam": 1.75, "depth": 1.75, "hulls": 2, "hull_spacing": 5.0,
+            "bow": {"entry": 0.38, "fullness": 1.3, "rake": 0.6, "flare": 0.15, "deadrise": 35},
+            "stern": {"run": 0.03, "transom_width": 0.85},
+            "sheer": {"bow": 0.35, "stern": 0.0},
+            "section": {"deadrise": 22, "bilge_radius": 0.3, "flare": 0.1, "keel_width": 0.25},
+            "colors": {"bottom": "1E3A5F", "stripe": "3FA7D6", "topsides": "F0F0F0", "deck": "9AA5AE"},
+            "superstructure": [
+                {"name": "bridge_deck", "z": 1.0, "length": 11.0, "width": 6.75, "height": 0.5, "y": 1.5,
+                 "color": "F0F0F0"},
+                {"name": "cabin", "z": 3.0, "length": 6.0, "width": 5.5, "height": 1.75, "y": 2.0,
+                 "taper": 0.2, "rake_front": 0.8, "color": "F0F0F0",
+                 "band": {"from": 0.6, "to": 1.3, "color": "1B2838"}},
+            ],
+        },
+    },
+    "barge": {
+        "about": "Flat deck cargo barge: box hull with raked, spoon-ended bow and stern, flat bottom.",
+        "spec": {
+            "length": 20.0, "beam": 6.0, "depth": 1.75,
+            "bow": {"entry": 0.1, "fullness": 1.0, "stem_width": 0.9, "rake": 1.0, "rake_curve": 1.0,
+                    "flare": 0.0, "deadrise": 0},
+            "stern": {"run": 0.0, "transom_width": 1.0},
+            "sheer": {"bow": 0.0, "stern": 0.0},
+            "section": {"deadrise": 0, "bilge_radius": 0.25, "flare": 0.0, "keel_width": 6.0},
+            "colors": {"bottom": "5A1A1A", "stripe": "5A1A1A", "topsides": "2F2F2F", "deck": "7A6A4A",
+                       "waterline": 0.9},
+        },
+    },
+}
