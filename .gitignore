@@ -179,3 +179,12 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# --- Stormworks Hull MCP ---
+# smoke-test and calibration output
+out/
+# generated vehicles and previews should never be committed from a local run
+*.local.*
+# editor / OS
+.vscode/
+.DS_Store
+Thumbs.db

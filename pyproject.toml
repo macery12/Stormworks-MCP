@@ -1,0 +1,35 @@
+[project]
+name = "stormworks-hull-mcp"
+version = "0.1.0"
+description = "MCP server that lets Claude design Stormworks boats (hull, superstructure, interior) and save them as vehicle files"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "macery12" }]
+requires-python = ">=3.10"
+keywords = ["stormworks", "mcp", "model-context-protocol", "claude", "procedural-generation", "voxel"]
+dependencies = [
+    "mcp>=2.2,<3",
+    "numpy>=2.0",
+    "pillow>=10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "PL"]
+ignore = ["PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR0917", "PLR2004", "B905", "E501"]
