@@ -156,7 +156,7 @@ def fitted(spec):
     return out
 
 
-def build(spec):
+def _build_base(spec):
     scale_fit = spec.get("scale") == "fit"
     spec = fitted(spec)
     scale = scale_factor(spec)
@@ -253,6 +253,35 @@ def build(spec):
             "scale_fit": scale_fit,
             "solid_voxels": len(solid), "interior": interior, "warnings": warnings,
             "overlaps": overlaps, "shift": shift}
+    return placed, info
+
+
+def build(spec):
+    """Reuse procedural geometry, then apply fixed-frame overlays before centring."""
+    from . import cache  # noqa: PLC0415 - cache reconstructs interior objects
+    from .editing import apply_edits, identify  # noqa: PLC0415
+    base = {k: v for k, v in spec.items() if k not in ("edits", "components", "fitout", "tanks")}
+    enabled = os.environ.get("SW_BUILD_CACHE", "1") != "0"
+    cache_key = cache.key(base) if enabled else None
+    result = cache.read(cache_key) if enabled else None
+    if result is None:
+        result = _build_base(base)
+        result[1]["cache_hit"] = False
+        if enabled:
+            cache.write(cache_key, *result)
+    placed, info = result
+    shift = info["shift"]
+    for p in placed:
+        p.origin = add(p.origin, shift)
+    identify(placed)
+    if spec.get("edits"):
+        placed = apply_edits(placed, spec["edits"])
+    before = placed[0].origin
+    centre(placed)
+    info["shift"] = tuple(before[i] - placed[0].origin[i] for i in range(3))
+    if spec.get("edits"):
+        info["warnings"] = [w for w in info["warnings"] if not w.startswith(("loose part", "... and"))]
+        info["warnings"] += _loose_parts(placed, info["region"], info["shape"], info["shift"])
     return placed, info
 
 

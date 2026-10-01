@@ -18,6 +18,8 @@ import traceback
 from .build import build, summary
 from .render import VEHICLE_RULER, design_ruler, render_interior, render_png, render_view
 from .vehicle import load_placed, to_xml
+from .drafts import describe, edited, export, materialize
+from .editing import query, revision
 
 HIGHLIGHT = "FF2BD6"
 
@@ -70,6 +72,37 @@ def vehicle_xml(full):
     return to_xml(placed), len(placed), summary(full, placed, info)
 
 
+def query_draft(record, selector, offset, limit):
+    parts, _ = materialize(record)
+    return {**query(parts, selector, offset, limit), "revision": revision(record)}
+
+
+def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None):
+    parts, info = materialize(record, centred=True)
+    ruler = design_ruler(info, info["scale"]) if info else VEHICLE_RULER
+    png = (render_png(parts, title=title, ruler=ruler) if yaw is None else
+           render_view(parts, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus))
+    return png, describe(record, parts, info)
+
+
+def edit_draft(record, operations, title):
+    proposed = edited(record, operations)
+    png, text = preview_draft(proposed, title)
+    return proposed, png, text
+
+
+def import_draft(xml, source):
+    # Parse/validate in a cancellable worker; imports may contain hundreds of thousands of parts.
+    from .editing import VehicleDocument  # noqa: PLC0415
+    document = VehicleDocument.parse(xml)
+    return {"kind": "imported", "source": source, "source_xml": xml, "edits": [],
+            "vehicle": False, "generation": 0}, len(document.parts)
+
+
+def export_draft(record):
+    return export(record)
+
+
 def _highlight(placed, info, box_name, scale):
     """Paint one box's pieces magenta; return its label and a position note."""
     shape, region, (sx, sy, sz) = info["shape"], info["region"], info["shift"]
@@ -98,7 +131,8 @@ def _highlight(placed, info, box_name, scale):
 
 
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
-                                vehicle_xml)}
+                                vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
+                                export_draft)}
 
 
 def _watch_parent():

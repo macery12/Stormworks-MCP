@@ -5,6 +5,7 @@ works on the text with regular expressions instead of an XML parser.
 """
 import os
 import re
+from xml.sax.saxutils import quoteattr
 
 from . import definitions
 from .pieces import BLOCK, BY_NAME, Piece, Placed, parse_r, r_attr, split_mirror, sub, with_mirror
@@ -42,7 +43,7 @@ def _vp(v):
     return f"<vp{attrs}/>"
 
 
-def to_xml(placed):
+def _simple_xml(placed):
     parts = []
     for p in placed:
         d = "" if p.piece.d == "01_block" else f' d="{p.piece.d}"'
@@ -68,6 +69,11 @@ def read_components(path):
     in mirror mode (`t`) comes back with an improper Q (see pieces.with_mirror)."""
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
+    yield from components_from_text(text)
+
+
+def components_from_text(text):
+    """Geometry view only; use editing.VehicleDocument for lossless rewriting."""
     for m in _COMP.finditer(text):
         dm = re.search(r'\bd="([^"]*)"', m.group(1))
         d = dm.group(1) if dm else "01_block"
@@ -88,6 +94,30 @@ def read_components(path):
         elif bcm:
             colour = bcm.group(1)
         yield d, origin, Q, colour
+
+
+def component_xml(p):
+    """Write a new part, or retain an imported component byte for byte."""
+    if p.raw_xml:
+        return p.raw_xml
+    xml = _simple_xml([p]).split("<components>", 1)[1].split("</components>", 1)[0]
+    settings = dict(p.settings)
+    if p.name:
+        settings.setdefault("custom_name", p.name)
+    attrs = ""
+    for key, value in settings.items():
+        if not re.fullmatch(r"[A-Za-z_]\w*", key) or key in ("r", "sc"):
+            raise ValueError(f"invalid component setting {key!r}")
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError(f"component setting {key} must be a scalar")
+        attrs += f" {key}={quoteattr(str(value).lower() if isinstance(value, bool) else str(value))}"
+    return xml.replace("><vp", attrs + "><vp", 1)
+
+
+def to_xml(placed):
+    return _simple_xml([]).replace("<components></components>",
+                                  "<components>" + "".join(component_xml(p) for p in placed)
+                                  + "</components>")
 
 
 def load_placed(path):

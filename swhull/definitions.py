@@ -6,6 +6,7 @@ name. Parts are drawn as a union of cubes over their footprint.
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from functools import cache
 
 from .pieces import Piece
@@ -112,3 +113,64 @@ def display_name(d):
         return m.group(1) if m else d
     except OSError:
         return d
+
+
+@cache
+def metadata(d):
+    """Runtime catalogue data; game assets never leave the player's installation."""
+    base = definitions_dir()
+    if base is None or not isinstance(d, str) or not re.fullmatch(r"[\w.-]+", d):
+        return None
+    try:
+        with open(os.path.join(base, f"{d}.xml"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    try:
+        root = ET.fromstring(re.sub(r'(\s)(\d\w*)=', r'\1sw_\2=', text))
+    except ET.ParseError as exc:
+        raise ValueError(f"cannot read definition {d}: {exc}") from exc
+
+    def position(node):
+        values = [float(node.get(a, "0")) for a in "xyz"] if node is not None else [0.0] * 3
+        return tuple(int(v) if v.is_integer() else v for v in values)
+
+    def surfaces(tag):
+        return [{"position": position(s.find("position")), "orientation": int(s.get("orientation", "0")),
+                 "shape": int(s.get("shape", "0")), "trans_type": int(s.get("trans_type", "0"))}
+                for s in root.findall(f"{tag}/surface")]
+
+    voxels = [{"position": position(v.find("position")), "flags": int(v.get("flags", "0")),
+               "physics_shape": int(v.get("physics_shape", "0"))} for v in root.findall("voxels/voxel")]
+    tooltip = root.find("tooltip_properties")
+    return {"definition": d, "name": root.get("name", d), "mass": float(root.get("mass", "0")),
+            "description": tooltip.get("short_description", "") if tooltip is not None else "",
+            "footprint": [v["position"] for v in voxels] or [(0, 0, 0)], "voxels": voxels,
+            "attachment_surfaces": surfaces("surfaces"), "sealing_surfaces": surfaces("buoyancy_surfaces"),
+            "properties": {k: v for k, v in root.attrib.items() if k in (
+                "electric_charge_capacity", "wheel_radius", "rudder_surface_area", "type",
+                "force_emitter_blade_physics_length", "door_lower_limit", "door_upper_limit")},
+            "directions": {tag: position(root.find(tag)) for tag in (
+                "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up")}}
+
+
+def catalogue(search="", offset=0, limit=50):
+    from .pieces import BY_NAME  # noqa: PLC0415
+    if not isinstance(offset, int) or offset < 0 or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("offset must be nonnegative and limit must be 1-200")
+    base = definitions_dir()
+    names = sorted(p[:-4] for p in os.listdir(base) if p.endswith(".xml")) if base else sorted(BY_NAME)
+    rows = []
+    for d in names:
+        name = display_name(d)
+        if search.lower() not in f"{d} {name}".lower():
+            continue
+        piece = BY_NAME.get(d) or load(d)
+        if piece:
+            size = [max(v[i] for v in piece.footprint) - min(v[i] for v in piece.footprint) + 1
+                    for i in range(3)]
+            rows.append({"definition": d, "name": name, "size_blocks": size,
+                         "size_metres": [n / 4 for n in size], "mass": piece.mass})
+    return {"parts": rows[offset:offset + limit], "total": len(rows),
+            "next_offset": offset + limit if offset + limit < len(rows) else None,
+            "definitions_available": base is not None}

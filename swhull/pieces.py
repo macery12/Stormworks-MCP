@@ -16,7 +16,7 @@ grown from the origin voxel toward -x, +y and -z:
                    (04, 07, 10, 14, 15, 16 inverse pyramids)
 """
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import permutations, product
 
 DIRS = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
@@ -258,6 +258,11 @@ class Placed:
     origin: tuple
     Q: tuple = IDENTITY
     color: str = "C2C3C7"
+    uid: str = ""
+    name: str = ""
+    settings: dict = field(default_factory=dict)
+    raw_xml: str = ""
+    protected: bool = False
 
     def voxels(self):
         return [add(self.origin, apply(self.Q, f)) for f in self.piece.footprint]

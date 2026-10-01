@@ -143,6 +143,13 @@ internet access.
 
 ## Tools
 
+The [staged builder guide](docs/staged-builder.md) covers precise block/region editing,
+safe imports, undo, the installed-part catalogue, and geometry caching. New tools:
+
+- **search_parts / get_part_definition**: installed footprints and surfaces.
+- **import_vehicle / preview_vehicle / save_vehicle**: safe drafts of existing vehicles.
+- **query_parts / edit_parts / undo_edits**: individual parts, regions, batches and undo.
+
 | Tool | What it does |
 | --- | --- |
 | `hull_design_guide` | Returns the design guide Claude reads first: workflow, spec reference, archetype proportions, interior rules ([swhull/guide.md](swhull/guide.md)). |

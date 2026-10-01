@@ -9,6 +9,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from mcp.server.mcpserver.exceptions import ToolError
 from swhull.benches import describe as describe_benches
 from swhull.build import deck_profile as _deck_profile, resolve_spec
 from swhull.hull import merge
+from swhull.editing import revision as _revision
+from swhull import definitions
 from swhull.jobs import run_job
 from swhull.presets import PRESETS
 from swhull.vehicle import vehicles_dir
@@ -26,6 +29,7 @@ from swhull.vehicle import vehicles_dir
 HERE = Path(__file__).resolve().parent
 GUIDE = (HERE / "swhull" / "guide.md").read_text(encoding="utf-8")
 NAME_RE = re.compile(r"^[A-Za-z0-9 _\-()]{1,64}$")
+DESIGN_LOCK = threading.RLock()
 
 
 def designs_dir():
@@ -107,10 +111,40 @@ def _read_spec_file(path):
 def _spec(spec=None, preset=None, design=None, patch=None, spec_path=None):
     """Resolve the spec a tool works on: preset or stored design, then spec_path, then spec,
     then patch."""
-    base = _read_design(design)["spec"] if design else None
+    record = _read_design(design) if design else None
+    if record and record.get("kind") == "imported":
+        raise ValueError("this is an imported draft; use preview_vehicle, query_parts, edit_parts and save_vehicle")
+    base = record["spec"] if record else None
     if spec_path:
         base = merge(base or {}, _read_spec_file(spec_path))
     return resolve_spec(spec, preset, base=base, patch=patch)
+
+
+def _atomic_design(name, record):
+    path = _design_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         suffix=".tmp", delete=False) as f:
+            temporary = Path(f.name)
+            json.dump(record, f, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _commit_record(name, proposed, expected):
+    with DESIGN_LOCK:
+        current = _read_design(name)
+        if _revision(current) != expected:
+            raise ValueError("stale revision; query_parts again before editing")
+        history = current.get("history", [])[-9:] + [{k: v for k, v in current.items() if k != "history"}]
+        proposed = {**proposed, "history": history, "generation": current.get("generation", 0) + 1,
+                    "vehicle": current.get("vehicle", False)}
+        _atomic_design(name, proposed)
+        return proposed
 
 
 def _title(preset, design):
@@ -279,7 +313,132 @@ def list_designs() -> list[str]:
 @_user_errors
 def load_design(name: str) -> dict[str, Any]:
     """Full spec of a stored design. To edit, prefer design=name plus a patch over resending it."""
-    return _read_design(name)["spec"]
+    record = _read_design(name)
+    if record.get("kind") == "imported":
+        return {"kind": "imported", "source": record["source"], "revision": _revision(record),
+                "edits": record.get("edits", []), "coordinates": "original body-local integer blocks"}
+    return record["spec"]
+
+
+@mcp.tool()
+@_user_errors
+def search_parts(search: str = "", offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """Search installed part definitions by name/id; returns actual sizes, mass and pagination."""
+    return definitions.catalogue(search, offset, limit)
+
+
+@mcp.tool()
+@_user_errors
+def get_part_definition(definition: str) -> dict[str, Any]:
+    """Installed footprint, attachment/sealing surfaces and relevant part settings."""
+    result = definitions.metadata(definition)
+    if result is None:
+        raise ValueError(f"definition {definition!r} unavailable; set SW_DEFINITIONS_DIR")
+    return result
+
+
+@mcp.tool()
+@_user_errors
+async def import_vehicle(name: str, design: str) -> str:
+    """Import an existing single-body version-3 vehicle into a new draft; never changes the source.
+    Existing configured/wired parts are protected. Use query_parts/edit_parts and save_vehicle."""
+    _check_name(design)
+    if _design_path(design).exists():
+        raise ValueError("draft already exists; choose a new design name")
+    path = _vehicle_path(name)
+    record, count = await run_job("import_draft", path.read_text(encoding="utf-8"), name)
+    with DESIGN_LOCK:
+        if _design_path(design).exists():
+            raise ValueError("draft already exists; choose a new design name")
+        _atomic_design(design, record)
+    return f"Imported {count} parts into '{design}'. Source '{name}' remains untouched."
+
+
+@mcp.tool()
+@_user_errors
+async def query_parts(design: str, select: dict[str, Any] | None = None,
+                      offset: int = 0, limit: int = 100) -> dict[str, Any]:
+    """Parts and revision for precise editing. select: ids, name, definition or inclusive bounds
+    [[min_x,min_y,min_z],[max_x,max_y,max_z]]. Coordinates are integer blocks (0.25 m), in the
+    uncentred build frame for generated hulls and original body-local frame for imports.
+    Partial multi-voxel selections are rejected; select an id to target the whole component."""
+    return await run_job("query_draft", _read_design(design), select, offset, limit)
+
+
+@mcp.tool()
+@_user_errors
+async def edit_parts(design: str, operations: list[dict[str, Any]], revision: str,
+                     commit: bool = False) -> list:
+    """Atomic part edits; defaults to preview only. Pass the revision from query_parts.
+    Ops: add(part/parts), fill(bounds,color), remove/replace/move/rotate/paint/copy/mirror/repeat.
+    Selection ops need select={ids/bounds/name/definition}. move/copy/repeat use delta in blocks;
+    repeat count is additional copies; rotate uses a local-to-world matrix or r string and pivot;
+    mirror uses axis and plane. replace needs part; paint needs color. Added parts use definition,
+    position in blocks, rotation, color, name and scalar settings. commit=true keeps one undo step."""
+    record = _read_design(design)
+    if _revision(record) != revision:
+        raise ValueError("stale revision; query_parts again before editing")
+    proposed, png, note = await run_job("edit_draft", record, operations, design)
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    return [Image(data=png, format="png"), note,
+            {"committed": commit, "revision": _revision(proposed),
+             "base_revision": revision, "operations": len(operations)}]
+
+
+@mcp.tool()
+@_user_errors
+def undo_edits(design: str, revision: str) -> dict[str, Any]:
+    """Restore the previous committed edit batch. Keeps up to ten batches of undo history."""
+    with DESIGN_LOCK:
+        record = _read_design(design)
+        if _revision(record) != revision:
+            raise ValueError("stale revision; query_parts again")
+        history = record.get("history", [])
+        if not history:
+            raise ValueError("no committed edits to undo")
+        restored = {**history[-1], "history": history[:-1],
+                    "generation": record.get("generation", 0) + 1, "vehicle": record.get("vehicle", False)}
+        _atomic_design(design, restored)
+        return {"revision": _revision(restored), "remaining_undo": len(history) - 1}
+
+
+@mcp.tool()
+@_user_errors
+async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 25,
+                          zoom: float = 1, focus: list[float] | None = None) -> list:
+    """Preview a generated or imported draft; optional yaw/pitch/zoom/focus gives a close-up."""
+    if focus is not None and len(focus) != 3:
+        raise ValueError("focus must contain three fractions")
+    png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus)
+    return [Image(data=png, format="png"), note]
+
+
+@mcp.tool()
+@_user_errors
+async def save_vehicle(name: str, design: str, overwrite: bool = False) -> str:
+    """Save any draft. Imported originals are never overwritten, even with overwrite=true."""
+    _check_name(name)
+    record = _read_design(design)
+    target = Path(vehicles_dir()) / f"{name}.xml"
+    if record.get("kind") == "imported" and name.casefold() == record["source"].casefold():
+        raise ValueError("cannot overwrite the imported original; choose a different vehicle name")
+    if target.exists():
+        owned = _design_path(name).exists() and _read_design(name).get("vehicle", False)
+        if not owned:
+            raise ValueError("target was not made by this tool; choose another name")
+        if not overwrite:
+            raise ValueError("target exists; pass overwrite=true")
+    xml, count, note = await run_job("export_draft", record)
+    # Recheck after the worker to avoid an external file created while building.
+    with DESIGN_LOCK:
+        if target.exists() and (not overwrite or not _design_path(name).exists()
+                                or not _read_design(name).get("vehicle", False)):
+            raise ValueError("target changed while building; choose another name")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(xml, encoding="utf-8")
+        _atomic_design(name, {**record, "vehicle": True})
+    return f"Saved {count} parts to {target}\n{note}"
 
 
 @mcp.tool()

@@ -111,3 +111,39 @@ def test_job_deadline_and_cancel_kill_the_worker():
     anyio.run(cancelled)
     assert time.monotonic() - start < 10
     assert not multiprocessing.active_children()
+
+
+def test_edit_preview_commit_undo_and_stale_revision(dirs):
+    server.store_design("editable", preset="rowboat")
+    query = call(server.query_parts, "editable", limit=1)
+    change = [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "123456"}]
+    before = server.load_design("editable")
+    _, _, report = call(server.edit_parts, "editable", change, query["revision"])
+    assert not report["committed"]
+    assert server.load_design("editable") == before
+    _, _, report = call(server.edit_parts, "editable", change, query["revision"], commit=True)
+    assert report["committed"]
+    with pytest.raises(ToolError, match="stale"):
+        call(server.edit_parts, "editable", change, query["revision"], commit=True)
+    server.undo_edits("editable", report["revision"])
+    assert server.load_design("editable") == before
+
+
+def test_imported_draft_separate_save(dirs):
+    from swhull.pieces import BLOCK, Placed  # noqa: PLC0415
+    from swhull.vehicle import to_xml  # noqa: PLC0415
+    vehicles, _ = dirs
+    text = to_xml([Placed(BLOCK, (0, 0, 0)), Placed(BLOCK, (1, 0, 0))])
+    (vehicles / "original.xml").write_text(text, encoding="utf-8")
+    call(server.import_vehicle, "original", "imported")
+    q = call(server.query_parts, "imported")
+    call(server.edit_parts, "imported",
+         [{"op": "paint", "select": {"ids": [q["parts"][0]["id"]]}, "color": "123456"}],
+         q["revision"], commit=True)
+    call(server.save_vehicle, "copy", "imported")
+    assert (vehicles / "original.xml").read_text(encoding="utf-8") == text
+    assert "123456" in (vehicles / "copy.xml").read_text(encoding="utf-8")
+    with pytest.raises(ToolError, match="original"):
+        call(server.save_vehicle, "original", "imported", overwrite=True)
+    with pytest.raises(ToolError, match="already exists"):
+        call(server.import_vehicle, "original", "imported")

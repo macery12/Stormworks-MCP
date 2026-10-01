@@ -199,6 +199,12 @@ placeholder blocks; the player fits real propellers and rudders.
 
 ## Interior design
 
+For precise local edits, use query_parts followed by edit_parts, passing its revision.
+Those coordinates are integer blocks in the uncentred build frame. Batched operations include
+fills, copies, mirrors, arrays, moves and paint. commit=false previews; commit=true persists.
+Use undo_edits to revert a batch. import_vehicle supports safe copies of existing single-body
+version-3 vehicles; use preview_vehicle and save_vehicle for those drafts.
+
 Add an `interior` object to lay out rooms inside the hull and superstructure. It is all plain
 blocks: floors, bulkheads, room walls, and doorways the player fits doors into. The only
 parts placed are optional placeholder engines. Check the result with `preview_interior`.
