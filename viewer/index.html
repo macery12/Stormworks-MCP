@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stormworks Vehicle Viewer</title>
+<style>
+  :root { --bg: #262d38; --panel: #1b2029; --text: #d6dde6; --muted: #8a96a6; --accent: #3fa7d6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; }
+  #panel { position: fixed; top: 12px; left: 12px; width: 300px; max-height: calc(100% - 24px);
+           overflow: auto; background: var(--panel); border-radius: 8px; padding: 12px 14px;
+           box-shadow: 0 4px 16px #0006; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  button, label.btn { background: #323b48; color: var(--text); border: 1px solid #435063;
+           border-radius: 5px; padding: 5px 9px; cursor: pointer; font: inherit; }
+  button:hover, label.btn:hover { border-color: var(--accent); }
+  input[type=file] { display: none; }
+  #stats { color: var(--muted); font-size: 12.5px; white-space: pre-wrap; }
+  #drop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+          background: #3fa7d633; border: 3px dashed var(--accent); font-size: 22px; }
+  #hint { position: fixed; bottom: 12px; right: 14px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="panel">
+  <h1>Stormworks Vehicle Viewer</h1>
+  <div class="row">
+    <label class="btn">Open vehicle XML<input id="file" type="file" accept=".xml"></label>
+    <button id="shot">Save screenshot</button>
+  </div>
+  <div class="row">
+    <button data-view="iso">3/4</button><button data-view="below">Below</button>
+    <button data-view="side">Side</button><button data-view="top">Top</button>
+    <button data-view="front">Front</button>
+  </div>
+  <div class="row">
+    <button id="edges">Outlines</button><button id="grid">1 m grid</button>
+  </div>
+  <div id="stats">Drop a vehicle .xml anywhere, or use Open.
+Vehicles live in %APPDATA%\Stormworks\data\vehicles</div>
+</div>
+<div id="drop">Drop vehicle XML</div>
+<div id="hint">drag to orbit · right-drag to pan · scroll to zoom</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---- piece geometry (local, voxel centred at 0), matches swhull/pieces.py -------------
+const P = 0.5, N = -0.5;
+const cubeFaces = [
+  [[P,N,N],[P,P,N],[P,P,P],[P,N,P]], [[N,N,N],[N,N,P],[N,P,P],[N,P,N]],
+  [[N,P,N],[N,P,P],[P,P,P],[P,P,N]], [[N,N,N],[P,N,N],[P,N,P],[N,N,P]],
+  [[N,N,P],[P,N,P],[P,P,P],[N,P,P]], [[N,N,N],[N,P,N],[P,P,N],[P,N,N]]];
+function ramp(n) {
+  const z0 = -(n - 1) - 0.5;
+  const A=[N,N,z0],B=[P,N,z0],C=[P,N,P],D=[N,N,P],E=[N,P,P],F=[P,P,P];
+  return { faces: [[A,B,C,D],[D,C,F,E],[A,E,F,B],[A,D,E],[B,F,C]],
+           foot: Array.from({length: n}, (_, k) => [0, 0, -k]) };
+}
+// corner tetrahedron with its right angle at (+x,-y,+z), legs a, b, c along -x, +y, -z
+function tetra(a, b, c) {
+  const O=[P,N,P], X=[P-a,N,P], Y=[P,N+b,P], Z=[P,N,P-c];
+  return { faces: [[O,X,Y],[O,Y,Z],[O,Z,X],[X,Z,Y]] };
+}
+// the a x b x c box with that tetrahedron cut from its (-x,+y,-z) corner
+function inv(a, b, c) {
+  const x0=P-a, y1=N+b, z0=P-c;
+  return { faces: [
+    [[P,N,z0],[P,y1,z0],[P,y1,P],[P,N,P]], [[x0,N,z0],[P,N,z0],[P,N,P],[x0,N,P]],
+    [[x0,N,P],[P,N,P],[P,y1,P],[x0,y1,P]], [[x0,N,z0],[x0,N,P],[x0,y1,P]],
+    [[P,y1,z0],[P,y1,P],[x0,y1,P]], [[x0,N,z0],[P,y1,z0],[P,N,z0]],
+    [[P,y1,z0],[x0,N,z0],[x0,y1,P]]] };
+}
+const PIECES = {
+  '06_pyramid_2': tetra(1,1,2), '09_pyramid_4': tetra(1,1,4), '11_pyramid_2x2': tetra(2,1,2),
+  '12_pyramid_2x4': tetra(2,1,4), '13_pyramid_4x4': tetra(4,1,4),
+  '07_invpyramid_2': inv(1,1,2), '10_invpyramid_4': inv(1,1,4), '14_invpyramid_2x2': inv(2,1,2),
+  '15_invpyramid_2x4': inv(2,1,4), '16_invpyramid_4x4': inv(4,1,4),
+  '01_block': { faces: cubeFaces, foot: [[0,0,0]] },
+  '02_wedge': ramp(1), '05_wedge_2': ramp(2), '08_wedge_4': ramp(4),
+  '03_pyramid': { foot: [[0,0,0]], faces: (() => { const a=[P,N,P],b=[N,N,P],c=[P,P,P],d=[P,N,N];
+                   return [[a,b,c],[a,c,d],[a,d,b],[b,d,c]]; })() },
+  '04_invpyramid': { foot: [[0,0,0]], faces: [
+      [[P,N,N],[P,P,N],[P,P,P],[P,N,P]], [[N,N,N],[P,N,N],[P,N,P],[N,N,P]],
+      [[N,N,P],[P,N,P],[P,P,P],[N,P,P]], [[N,N,N],[N,N,P],[N,P,P]],
+      [[P,P,N],[N,P,P],[P,P,P]], [[N,N,N],[P,P,N],[P,N,N]], [[N,N,N],[N,P,P],[P,P,N]]] },
+};
+// A component with no `r` is not unrotated in Stormworks; it behaves like this rotation.
+const MISSING_R = '0,0,1,-1,0,0,0,-1,0';
+
+// ---- parsing (the game writes attribute names like 00="1", so no DOMParser) -----------
+function parseVehicle(text) {
+  const re = /<c\b([^>]*)>\s*<o\b([^>]*?)(\/?)>(?:\s*<vp\b([^>]*?)\/>)?/g;
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    const d = (m[1].match(/\bd="([^"]*)"/) || [, '01_block'])[1];
+    const vp = m[3] ? '' : (m[4] || '');
+    const get = k => +((vp.match(new RegExp('\\b' + k + '="(-?\\d+)"')) || [, 0])[1]);
+    const r = (m[2].match(/\br="([^"]*)"/) || [, MISSING_R])[1].split(',').map(Number);
+    // mirror mode: `t` flips the part's own axes (bit 0 x, 1 y, 2 z) before `r` rotates it
+    const t = +((m[1].match(/\bt="(\d+)"/) || [, 0])[1]);
+    for (let a = 0; a < 3; a++) if (t >> a & 1) for (let i = 0; i < 3; i++) r[3 * a + i] *= -1;
+    const sc = m[2].match(/\bsc="\d+,([^"]*)"/);
+    let colour = null;
+    if (sc) colour = sc[1].split(',').find(c => /^[0-9A-Fa-f]{6}$/.test(c)) || null;
+    if (!colour) colour = (m[2].match(/\bbc="([0-9A-Fa-f]{6})/) || [, 'C2C3C7'])[1];
+    out.push({ d, origin: [get('x'), get('y'), get('z')], M: r, colour });
+  }
+  return out;
+}
+
+// world = M^T * local + origin, with M stored row-major in `r`. Stormworks axes are
+// left-handed, so x is flipped for display (otherwise the vehicle shows mirrored).
+const xf = (M, v, o) => [0,1,2].map(i => (i === 0 ? -1 : 1) *
+                                  (M[i]*v[0] + M[3+i]*v[1] + M[6+i]*v[2] + o[i]));
+
+function buildMesh(parts) {
+  const pos = [], col = [], counts = {}, unknown = {};
+  const c = new THREE.Color();
+  for (const p of parts) {
+    let piece = PIECES[p.d];
+    counts[p.d] = (counts[p.d] || 0) + 1;
+    if (!piece) { unknown[p.d] = (unknown[p.d] || 0) + 1; piece = PIECES['01_block']; }
+    c.set('#' + p.colour).convertSRGBToLinear();
+    const all = piece.faces.flat().map(v => xf(p.M, v, p.origin));
+    const centre = [0,1,2].map(i => all.reduce((s, v) => s + v[i], 0) / all.length);
+    for (const f of piece.faces) {
+      let w = f.map(v => xf(p.M, v, p.origin));
+      const a = new THREE.Vector3(...w[0]), b = new THREE.Vector3(...w[1]), e = new THREE.Vector3(...w[2]);
+      const n = b.clone().sub(a).cross(e.clone().sub(a));
+      const fc = w.reduce((s, v) => s.add(new THREE.Vector3(...v)), new THREE.Vector3()).divideScalar(w.length);
+      if (n.dot(fc.sub(new THREE.Vector3(...centre))) < 0) w = w.reverse();
+      for (let i = 1; i + 1 < w.length; i++) {
+        for (const v of [w[0], w[i], w[i + 1]]) { pos.push(...v); col.push(c.r, c.g, c.b); }
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  g.scale(0.25, 0.25, 0.25);   // 1 voxel = 0.25 m
+  return { geometry: g, counts, unknown };
+}
+
+// ---- scene ------------------------------------------------------------------------------
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x262d38);
+scene.add(new THREE.HemisphereLight(0xdfe8f5, 0x3a3228, 1.8));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(4, 10, 6);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+let mesh = null, edges = null, grid = null, box = new THREE.Box3(), showEdges = false, showGrid = true;
+
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function setView(name) {
+  if (!mesh) return;
+  const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
+  const dist = Math.max(size.x, size.y, size.z) * 1.25 + 1;
+  const dirs = { iso: [1, 0.75, 1.1], below: [1, -0.8, 1.1], side: [1, 0, 0.0001],
+                 top: [0.0001, 1, 0.0001], front: [0.0001, 0.05, 1] };
+  const d = new THREE.Vector3(...dirs[name]).normalize().multiplyScalar(dist);
+  camera.position.copy(centre).add(d);
+  controls.target.copy(centre);
+  controls.update();
+}
+
+function refreshExtras() {
+  if (edges) { scene.remove(edges); edges.geometry.dispose(); edges = null; }
+  if (grid) { scene.remove(grid); grid = null; }
+  if (!mesh) return;
+  if (showEdges) {
+    edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 20),
+                                   new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
+    scene.add(edges);
+  }
+  if (showGrid) {
+    const size = box.getSize(new THREE.Vector3());
+    const n = Math.ceil(Math.max(size.x, size.z) + 4);
+    grid = new THREE.GridHelper(n, n, 0x4a5668, 0x343d4a);
+    const c = box.getCenter(new THREE.Vector3());
+    grid.position.set(Math.round(c.x), box.min.y - 0.01, Math.round(c.z));
+    scene.add(grid);
+  }
+}
+
+function load(text, name) {
+  const parts = parseVehicle(text);
+  const stats = document.getElementById('stats');
+  if (!parts.length) { stats.textContent = `${name}: no components found`; return; }
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
+  const { geometry, counts, unknown } = buildMesh(parts);
+  mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  scene.add(mesh);
+  box.setFromObject(mesh);
+  const s = box.getSize(new THREE.Vector3());
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8)
+                    .map(([k, v]) => `  ${k} ${v}`).join('\n');
+  const unk = Object.keys(unknown).length
+    ? `\nDrawn as cubes (no geometry yet): ${Object.entries(unknown).map(([k, v]) => `${k} ${v}`).join(', ')}` : '';
+  stats.textContent = `${name}\n${parts.length} parts, ${s.z.toFixed(2)} m long x ${s.x.toFixed(2)} m wide x ${s.y.toFixed(2)} m tall\n${top}${unk}`;
+  document.title = `${name} - Stormworks Vehicle Viewer`;
+  refreshExtras();
+  setView('iso');
+}
+
+async function openFile(f) { load(await f.text(), f.name.replace(/\.xml$/i, '')); }
+document.getElementById('file').addEventListener('change', e => e.target.files[0] && openFile(e.target.files[0]));
+const drop = document.getElementById('drop');
+window.addEventListener('dragover', e => { e.preventDefault(); drop.style.display = 'flex'; });
+window.addEventListener('dragleave', e => { if (!e.relatedTarget) drop.style.display = 'none'; });
+window.addEventListener('drop', e => {
+  e.preventDefault(); drop.style.display = 'none';
+  if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]);
+});
+document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+document.getElementById('edges').addEventListener('click', () => { showEdges = !showEdges; refreshExtras(); });
+document.getElementById('grid').addEventListener('click', () => { showGrid = !showGrid; refreshExtras(); });
+document.getElementById('shot').addEventListener('click', () => {
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = (document.title.split(' - ')[0] || 'vehicle') + '.png';
+  a.click();
+});
+
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+// The MCP's open_in_viewer tool writes a copy of this page with the vehicle embedded.
+if (window.EMBEDDED_VEHICLE) load(window.EMBEDDED_VEHICLE.xml, window.EMBEDDED_VEHICLE.name);
+if (new URLSearchParams(location.search).get('view')) setTimeout(() => setView(new URLSearchParams(location.search).get('view')), 50);
+</script>
+</body>
+</html>
