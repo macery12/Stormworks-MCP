@@ -1,7 +1,8 @@
 # Stormworks hull design guide
 
-You design boat **hulls** (plus simple superstructure blocks) for Stormworks. The player adds
-engines, wiring, and interiors themselves; your job is the shape, proportions, and look.
+Build Stormworks boats in stages: hull, structure, core parts, access, propulsion parts,
+and custom block-built tanks. Preview and save at whichever stage the player wants.
+Wiring, full power systems, engine plumbing and external pipe connections remain player work.
 
 ## Workflow
 
@@ -16,7 +17,7 @@ engines, wiring, and interiors themselves; your job is the shape, proportions, a
 ### Big designs: store once, then send patches
 
 A large spec (dozens of boxes) is expensive to resend on every call. Store it once with
-`store_design(name, spec=...)`; after that every tool takes `design=name` plus an optional
+`store_design(name, spec=...)`; after that parametric hull tools take `design=name` plus an optional
 `patch`, a list of JSON-Patch ops applied on top:
 
 ```json
@@ -31,11 +32,57 @@ patch=...)` tries a change; `store_design(name, design=name, patch=...)` keeps i
 `save_hull(name, design=name)` writes the vehicle.
 
 Stored designs are plain JSON files (`store_design` prints the path), and every call re-reads
-them, so an edit made to the file on disk applies to the next call. Any tool also takes
+them, so an edit made to the file on disk applies to the next call. Parametric hull tools also take
 `spec_path`, a .json file holding a spec, so a whole spec never has to go through a tool call.
 
-Speed: a 118 m, 184k-part ship previews in about 15 s and its interior in about 12 s. Wedge
-smoothing on a ship that size takes about 35 s. If a call is cancelled, its work stops.
+Completed base geometry is cached on disk across workers. Camera changes and component/part
+overlays reuse it; hull/room/smoothing changes rebuild it. If a call is cancelled, its work
+stops. Keep workbench and component-limit warnings visible even when a preview is fast.
+
+### Stages, exact edits and imported copies
+
+Set **fitout.stage** to structure, core, access, propulsion or tanks. Stages are optional:
+the original hull APIs remain usable without components. Core selects one control position
+and the largest battery fitting its bay after access space is reserved. Access fits manual
+door frames and requested complete hatch/ladder assemblies; propulsion requests a real small
+propeller and rudder. Tanks require explicit named enclosures. Inspect every reported choice
+and skipped placement; save_hull or save_vehicle can save any complete stage.
+
+**components** holds named requests addressed by patches such as **/components/house battery/size**:
+
+~~~json
+{"fitout": {"stage": "core"},
+ "components": [{"name": "house battery", "kind": "battery", "size": "medium",
+                 "room": "machinery"}]}
+~~~
+
+Use **search_parts** / **get_part_definition** for installed names, footprints, mounting and
+sealing surfaces. Override kind/definition, size, count (automatic locations) or repeat.count/repeat.step,
+position, rotation, settings, color, bay or room. Set mirror_x for twins. Component positions
+and repeat steps use **game metres**, independent of hull scale; full footprints, mounting,
+occupant/operating space and a supported 0.75 m passage are checked. Explicit invalid placement
+fails the build; automatic placement can skip with a reason.
+
+For a single block or region: **query_parts(design, select)** returns stable ids, footprints
+and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
+mirror and repeat batches. Preview with commit=false, inspect, then repeat with commit=true
+and the original revision. Failed batches do not change the draft; **undo_edits** retains ten
+steps. Query/edit coordinates are **integer blocks**, in the uncentred build frame (or the
+original imported body frame). A partial multi-voxel region selection fails; select the whole
+part by id. Geometry patches can invalidate earlier overlay targets; query again.
+
+**import_vehicle(name, design)** copies a single-body v3 vehicle into a new draft.
+Untouched XML, settings, paint, connections and body data stay intact. Configured/linked
+original parts remain in place and may be repainted; structural edits and new parts are
+supported. Unsupported versions and multi-body imports fail clearly. Use **preview_vehicle**
+and **save_vehicle**; the original cannot be overwritten, even with overwrite=true.
+
+After access/components/edits, use **check_seal(design)**. Generated room seeds are automatic;
+imports need explicit interior integer-block seeds. Results are sealed, leaking or
+indeterminate, with connected compartments and a highlighted escape path. Supported doors
+are closed by default; door_state=open tests their openings. Footprints alone never count
+as seals. Unsupported nearby geometry prevents a confident pass. These checks model geometry;
+the player must still verify attachment, access, orientation and fluid behavior in Stormworks.
 
 ### Measuring
 
@@ -52,7 +99,8 @@ smoothing on a ship that size takes about 35 s. If a call is cancelled, its work
 
 ## Units and axes
 
-Metres everywhere. 1 Stormworks block = 0.25 m (4 blocks per metre).
+Parametric dimensions use metres; query/edit tools use integer blocks.
+1 Stormworks block = 0.25 m (4 blocks per metre).
 `z` runs from the transom (0) to the bow (length). `x` is sideways (0 = centreline, + =
 starboard). `y` is height above the lowest point of the keel. With `scale` set, every number
 you enter for the hull, boxes, skegs and paint is in real-world metres. `interior` stays in
@@ -175,7 +223,7 @@ across come out square: at 0.25 m per block a circle needs room.
 
 Appendages are boxes too: a prop shaft is a `cylinder` with `axis: "z"`, a small negative
 `pitch` and a numeric `y` low on the hull; a rudder is a thin box behind it. These are
-placeholder blocks; the player fits real propellers and rudders.
+placeholder blocks. Use named components or the propulsion stage for real propellers/rudders.
 
 ### Paint
 
@@ -206,8 +254,9 @@ Use undo_edits to revert a batch. import_vehicle supports safe copies of existin
 version-3 vehicles; use preview_vehicle and save_vehicle for those drafts.
 
 Add an `interior` object to lay out rooms inside the hull and superstructure. It is all plain
-blocks: floors, bulkheads, room walls, and doorways the player fits doors into. The only
-parts placed are optional placeholder engines. Check the result with `preview_interior`.
+blocks: floors, bulkheads, room walls, and legacy doorways. Optional staged fit-out places real
+parts. The access stage replaces fitting walls with manual doors and complete hatch/ladder
+assemblies. Check the result with `preview_interior` and **check_seal**.
 
 ```json
 "interior": {
@@ -241,6 +290,9 @@ parts placed are optional placeholder engines. Check the result with `preview_in
 - **Hatches.** Requests for vertical access: `deck` index, `"main"`, or `floor` metres.
   Floors stay sealed unless a complete fitted ladder/hatch assembly can be installed.
   Give a hatch a `name` to patch it by name.
+  Set fitout.stage=access (or later), or assemble=true on the hatch. Assembly requires a flat
+  one-block deck, a lower landing, correctly mounted ladder segments, a 0.75 m climbing/landing
+  path and 2 m headroom. Unsupported sizes or any failed check leave the deck sealed.
 - **Deck plans.** `preview_interior` draws one plan per floor height. Floors above the main deck
   (rooms inside superstructure) are drawn cropped to their rooms.
   Unfinished access requests are reported; they never create bare holes.
@@ -260,6 +312,29 @@ Layout rules of thumb:
 - V and round hulls are narrow low down: check "floor W" in the report. On deep-V hulls, raise
   the lowest deck or accept narrow floors.
 - Every room needs a way in: a door chain to a hatch or an exterior door.
+
+### Custom block-built tanks
+
+Add named **tanks** with an explicit minimum corner and outer size, in game metres:
+
+~~~json
+{"tanks": [{"name": "aft diesel", "position": [-1, 0.25, 3],
+            "size": [2, 1.5, 2], "fluid": "diesel", "fill": 1}]}
+~~~
+
+Sizes are 0.25 m increments, at least 1.5 m on each axis for the complete fluid kit.
+The enclosure builds continuous block walls/floor/roof, with a configured fluid marker,
+an aft outlet and an upper vent using enclosed pipe penetrations. No ordinary door/hatch
+requests may cut the boundary. Existing plain walls may be shared; components/slopes and
+occupied tank interiors fail fit checks. Diesel/full is the default; water and jet_fuel
+and fill fractions 0–1 are supported.
+
+The summary reports geometric usable litres after internal part footprints, fluid/fill,
+and each tank's independent seal status. **check_seal** includes these tank checks and
+connection coordinates. A leak into a neighbouring sealed room still fails the tank.
+Edits that break the enclosure or remove/change its required fluid kit block vehicle export;
+previews remain available for repair. Tanks are never silently repaired. External outlet/vent
+plumbing and in-game confirmation of actual capacity and contents remain player work.
 
 ## Archetype proportions (starting points)
 

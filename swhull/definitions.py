@@ -94,8 +94,11 @@ def load(d):
     voxels = []
     if block:
         for m in re.finditer(r"<voxel\b[^>]*>\s*<position\s+([^/]*)/>", block.group(1)):
-            a = dict(re.findall(r'\b([xyz])="(-?\d+)"', m.group(1)))
-            voxels.append((int(a.get("x", 0)), int(a.get("y", 0)), int(a.get("z", 0))))
+            a = dict(re.findall(r'\b([xyz])="(-?(?:\d+(?:\.\d*)?|\.\d+))"', m.group(1)))
+            xyz = tuple(float(a.get(axis, 0)) for axis in "xyz")
+            if not all(v.is_integer() for v in xyz):
+                raise ValueError(f"definition {d} has a non-grid voxel footprint")
+            voxels.append(tuple(int(v) for v in xyz))
     voxels = voxels or [(0, 0, 0)]
     mass = float((re.search(r'\bmass="([^"]*)"', text) or [None, "0"])[1])
     verts, faces = _cube_union(voxels)
@@ -119,12 +122,26 @@ def display_name(d):
 def metadata(d):
     """Runtime catalogue data; game assets never leave the player's installation."""
     base = definitions_dir()
-    if base is None or not isinstance(d, str) or not re.fullmatch(r"[\w.-]+", d):
+    if not isinstance(d, str) or not re.fullmatch(r"[\w.-]+", d):
         return None
     try:
+        if base is None:
+            raise FileNotFoundError
         with open(os.path.join(base, f"{d}.xml"), encoding="utf-8") as f:
             text = f.read()
     except OSError:
+        from .pieces import BY_NAME, IDENTITY, DIRS  # noqa: PLC0415
+        from .smooth import _full_faces  # noqa: PLC0415
+        piece = BY_NAME.get(d)
+        if piece:
+            faces = [{"position": v, "orientation": DIRS.index(direction), "shape": 1, "trans_type": 0}
+                     for v, direction in _full_faces(piece, IDENTITY)]
+            return {"definition": d, "name": d, "mass": piece.mass, "description": "Built-in building geometry",
+                    "footprint": list(piece.footprint), "voxels": [
+                        {"position": v, "flags": 1, "physics_shape": None} for v in piece.footprint],
+                    "attachment_surfaces": faces, "sealing_surfaces": faces, "properties": {},
+                    "directions": {}, "settings": {"custom_name": {"type": "string"}},
+                    "source": "built-in geometry; exact slope meshes used by seal checker"}
         return None
     try:
         root = ET.fromstring(re.sub(r'(\s)(\d\w*)=', r'\1sw_\2=', text))
@@ -151,7 +168,12 @@ def metadata(d):
                 "electric_charge_capacity", "wheel_radius", "rudder_surface_area", "type",
                 "force_emitter_blade_physics_length", "door_lower_limit", "door_upper_limit")},
             "directions": {tag: position(root.find(tag)) for tag in (
-                "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up")}}
+                "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up")},
+            "settings": {"custom_name": {"type": "string"}, **({
+                "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2}},
+                "fluid_fill": {"type": "number", "min": 0, "max": 1, "default": 1},
+                "fluid_filter": {"type": "integer", "default": 4294967295}
+            } if d == "water_spawner" else {})}}
 
 
 def catalogue(search="", offset=0, limit=50):

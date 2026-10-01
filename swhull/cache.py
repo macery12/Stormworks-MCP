@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +39,8 @@ def key(spec):
 def _plan_data(plan):
     return {"blocks": [[*v, c] for v, c in plan.blocks.items()], "carve": list(plan.carve),
             "rooms": [{k: list(v) if isinstance(v, set) else v for k, v in vars(r).items()}
-                      for r in plan.rooms], "levels": plan.levels, "warnings": plan.warnings}
+                      for r in plan.rooms], "levels": plan.levels, "warnings": plan.warnings,
+            "reserved": list(plan.reserved)}
 
 
 def _plan(data, components):
@@ -47,6 +49,7 @@ def _plan(data, components):
     plan.carve = {tuple(v) for v in data["carve"]}
     plan.rooms = [Room(**{**r, "air": {tuple(v) for v in r["air"]}}) for r in data["rooms"]]
     plan.levels, plan.warnings, plan.components = data["levels"], data["warnings"], components
+    plan.reserved = {tuple(v) for v in data["reserved"]}
     return plan
 
 
@@ -72,7 +75,7 @@ def read(cache_key):
         info["interior"] = _plan(meta["interior"], [p for p in parts if p.piece.d not in BY_NAME])
         info["cache_hit"] = True
         return parts, info
-    except (OSError, ValueError, KeyError, TypeError, EOFError):
+    except (OSError, ValueError, KeyError, TypeError, EOFError, zipfile.BadZipFile):
         return None
 
 
@@ -87,7 +90,8 @@ def write(cache_key, parts, info):
         coords = np.asarray(list(info["region"]), dtype=np.int32)
         tags = np.asarray([0 if t == "hull" else int(t[3:]) + 1 for t in info["region"].values()],
                           dtype=np.int32)
-        with tempfile.NamedTemporaryFile(dir=directory, suffix=".part", delete=False) as f:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=f"worker-{os.getpid()}-",
+                                         suffix=".part", delete=False) as f:
             temporary = Path(f.name)
             np.savez_compressed(f, metadata=json.dumps(meta, separators=(",", ":")), coords=coords, tags=tags)
         if temporary.stat().st_size <= MAX_BYTES:
@@ -110,3 +114,12 @@ def prune(directory):
     for path in directory.glob("*.part"):
         if time.time() - path.stat().st_mtime > 3600:
             path.unlink(missing_ok=True)
+
+
+def discard_worker(pid):
+    """Remove unpublished files left by a killed worker; never touch completed entries."""
+    try:
+        for path in cache_dir().glob(f"worker-{pid}-*.part"):
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass

@@ -33,6 +33,10 @@ DEFAULT_SPEC = {
     "superstructure": [],
     "skegs": [],
     "paint": [],
+    "components": [],
+    "tanks": [],
+    "edits": [],
+    "fitout": None,
 }
 
 LIMITS = {"length": (1.0, 120.0), "beam": (0.5, 40.0), "depth": (0.25, 20.0)}
@@ -241,6 +245,10 @@ def validate(spec):
             problems.append(f"interior.hatches[{i}].z is required (metres)")
     if problems:
         raise ValueError("; ".join(problems))
+    from .components import validate_config  # noqa: PLC0415 - delayed to avoid hull/smooth cycle
+    validate_config(spec)
+    from .tanks import validate_config as validate_tanks  # noqa: PLC0415
+    validate_tanks(spec)
 
 
 class HullForm:

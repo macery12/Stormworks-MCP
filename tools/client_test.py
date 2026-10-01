@@ -1,6 +1,7 @@
 """Drive the server over stdio like Claude Desktop does. Saves into a temp vehicles dir."""
 import asyncio
 import base64
+import json
 import os
 import sys
 import tempfile
@@ -32,6 +33,22 @@ async def main():
         print("save again w/o overwrite -> error expected:", res.is_error, res.content[0].text[:80])
         res = await s.call_tool("preview_hull", {"spec": {"length": 500}})
         print("bad spec -> error expected:", res.is_error, res.content[0].text[:90])
+        res = await s.call_tool("store_design", {"name": "staged client", "preset": "barge"})
+        assert not res.is_error
+        res = await s.call_tool("query_parts", {"design": "staged client", "limit": 1})
+        assert not res.is_error
+        query = json.loads(next(c.text for c in res.content if c.type == "text"))
+        edit = {"design": "staged client", "revision": query["revision"], "commit": True,
+                "operations": [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "FF8800"}]}
+        res = await s.call_tool("edit_parts", edit)
+        assert not res.is_error and any(c.type == "image" for c in res.content)
+        res = await s.call_tool("check_seal", {"design": "staged client"})
+        assert not res.is_error and any(c.type == "image" for c in res.content)
+        report = json.loads(next(c.text for c in res.content if c.type == "text"))
+        assert report["status"] == "sealed"
+        res = await s.call_tool("save_vehicle", {"name": "staged client copy", "design": "staged client"})
+        assert not res.is_error
+        print("staged workflow: query -> committed edit -> seal -> separate save passed")
         print("files:", os.listdir(tmp))
 
 

@@ -98,3 +98,9 @@ def test_mirror_import_preserves_each_surface_color():
     back = list(components_from_text(text))
     assert sorted((-x, y, z) for x, y, z in parts[0].voxels()) == sorted(parts[1].voxels())
     assert len(back) == 2
+
+
+def test_added_block_cannot_obstruct_reserved_access():
+    with pytest.raises(ValueError, match="reserved access"):
+        apply_edits(blocks(), [{"op": "add", "part": {"position": [0, 1, 0]}}],
+                    reserved={(0, 1, 0)})

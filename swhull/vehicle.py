@@ -5,6 +5,7 @@ works on the text with regular expressions instead of an XML parser.
 """
 import os
 import re
+import math
 from xml.sax.saxutils import quoteattr
 
 from . import definitions
@@ -106,10 +107,12 @@ def component_xml(p):
         settings.setdefault("custom_name", p.name)
     attrs = ""
     for key, value in settings.items():
-        if not re.fullmatch(r"[A-Za-z_]\w*", key) or key in ("r", "sc"):
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_]\w*", key) or key in ("r", "sc"):
             raise ValueError(f"invalid component setting {key!r}")
         if not isinstance(value, (str, int, float, bool)):
             raise ValueError(f"component setting {key} must be a scalar")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"component setting {key} must be finite")
         attrs += f" {key}={quoteattr(str(value).lower() if isinstance(value, bool) else str(value))}"
     return xml.replace("><vp", attrs + "><vp", 1)
 

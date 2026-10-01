@@ -16,13 +16,19 @@ a vehicle file you load from any workbench. The game itself is never modified.
   pitch and yaw, mirrored to both sides or repeated in rows, and stacked on each other by name.
   Add a bulbous bow, skegs, and paint: hull numbers, deck markings and painted panels.
 - **Work at real-world scale.** Enter a real ship's dimensions with `scale: "1:4"`.
-- **Lay out interiors.** Add decks, watertight bulkheads, and named rooms with doorways and
-  hatches. You can also place a placeholder Small, Medium or Large Engine.
+- **Build in stages.** Hull → structure → core parts → access → propulsion parts → custom
+  block-built tanks. Preview and save after any stage.
+- **Fit real parts.** Select batteries by footprint, fit a helm or compact seat, and install
+  manual doors, complete hatch/ladder assemblies, propellers and rudders.
+- **Edit individual blocks or whole regions.** Batch edits, preview before committing, undo,
+  and work on a separate draft of an existing single-body vehicle.
+- **Check seals independently.** Trace compartment leaks through finished blocks, slopes and
+  supported component surfaces, with a highlighted escape path.
 - **Review before loading.** Every change comes back as a picture that Claude critiques and
   refines. Claude can also point a camera at any detail, or open the boat in a 3D viewer in your
   browser.
 - **Load it in game.** The server writes the vehicle XML into your Stormworks vehicles folder.
-  Hulls are plain blocks by default, ready for you to smooth, add propulsion and wire.
+  Hulls are plain blocks by default. Optional fit-out places parts; you add wiring and plumbing.
 
 ## Quick start
 
@@ -90,6 +96,9 @@ a workbench, choose **Load**, and pick the name Claude gave it.
 - "Add an interior: engine room aft with a large engine, crew quarters amidships, and a bridge."
 - "Look at my vehicle 'Old Trawler' and design a new hull in the same style."
 - "Try it with wedge smoothing" or "open it in the viewer".
+- "Build the tugboat through the propulsion stage, show every automatic choice, then save it."
+- "Import Old Trawler into a draft, repaint the bridge, and save a separate copy."
+- "Add a block-built diesel tank, check its enclosure, and show the outlet and vent connections."
 
 ## Features
 
@@ -102,8 +111,9 @@ four passes:
 
 ### Interior design
 
-Rooms are built from plain blocks: floors, bulkheads, walls, and 0.75 m × 2 m doorways for you to
-fit doors into. `preview_interior` shows a section down the centreline and a labelled plan of
+Rooms are built from plain blocks: floors, bulkheads, walls, and legacy 0.75 m × 2 m doorways.
+The access stage installs actual manual frames wherever the complete frame fits; failed access
+requests leave the wall or floor sealed. `preview_interior` shows a section down the centreline and a labelled plan of
 every level. It also reports each room's clear size, floor width, headroom and doors, and warns
 when something does not fit, such as an engine too tall for its room.
 
@@ -149,6 +159,11 @@ safe imports, undo, the installed-part catalogue, and geometry caching. New tool
 - **search_parts / get_part_definition**: installed footprints and surfaces.
 - **import_vehicle / preview_vehicle / save_vehicle**: safe drafts of existing vehicles.
 - **query_parts / edit_parts / undo_edits**: individual parts, regions, batches and undo.
+- **check_seal**: independent compartment connectivity and highlighted escape paths.
+
+Generated specs can also include **components** and optional **fitout** stages. The builder
+selects batteries by available footprint, fits helms/seats, and places real propellers/rudders
+with mounting and clearance checks. See the staged builder guide for units and overrides.
 
 | Tool | What it does |
 | --- | --- |
@@ -160,7 +175,7 @@ safe imports, undo, the installed-part catalogue, and geometry caching. New tool
 | `inspect_view` | Renders one view from any angle and zoom, of a design or a saved vehicle, with metre rulers on straight-on views. Can highlight one named box. |
 | `deck_profile` | Lists deck height, default box height and deck half-beam every metre along the hull. |
 | `save_hull` | Writes the vehicle into the Stormworks vehicles folder. Never overwrites a vehicle it did not create. |
-| `store_design` | Keeps a spec on the server so later calls send only a JSON patch (`design` + `patch` work on every tool). |
+| `store_design` | Keeps a spec on the server so later parametric hull calls send only a JSON patch. |
 | `list_designs`, `load_design` | Reopens designs stored earlier. |
 | `list_game_vehicles`, `preview_game_vehicle` | Browses and renders your existing vehicles. |
 | `open_in_viewer` | Opens a vehicle or unsaved design in the 3D viewer in your browser. |
@@ -177,8 +192,12 @@ override the defaults:
 | `SW_DEFINITIONS_DIR` | `<game>\rom\data\definitions` | Part definitions directly. |
 | `SW_DESIGNS_DIR` | `%APPDATA%\stormworks-hull-mcp\designs` | Saved design specs. |
 | `SW_TOOL_TIMEOUT` | `300` | Seconds a preview or save may run before the server stops it. |
+| `SW_BUILD_CACHE` | `1` | Set to `0` to disable geometry caching. |
+| `SW_BUILD_CACHE_DIR` | System temp / `stormworks-mcp-builds` | Shared cache, bounded to 20 entries / 512 MiB. |
 
-Without the game's part definitions, everything works except placeholder engines.
+Without game definitions, procedural blocks/slopes and structural editing work. Installed
+components need definitions; automatic fit-out reports skipped placements. Unsupported
+component sealing geometry produces an indeterminate seal check.
 
 ## Status and limitations
 
@@ -192,11 +211,16 @@ Without the game's part definitions, everything works except placeholder engines
   been loaded yet.
 - **Large designs:** a 118 m, 184k-part ship previews in about 15 s, or about 35 s with wedge
   smoothing. Heavy tools run in a worker process that stops when the call is cancelled.
-- **Not yet verified in game:** interiors, placeholder engines, and everything in
+- **Not yet verified in game:** staged component placement, access, custom tanks, seal
+  diagnostics, interiors, placeholder engines, and everything in
   [the feature list from the Iowa build](docs/feature-requests.md) (round and angled shapes,
   lattice masts, bulbous bows, skegs, paint).
-- **Out of scope:** propellers, rudders, pipes, fuel and electrics, and logic wiring. You add these
-  in the workbench.
+- **Out of scope:** wiring, complete power systems, engine plumbing, external tank pipe
+  connections and automatic control logic. Placement and geometric validation are automated;
+  operating the finished vehicle must be checked in game.
+- **Imports:** single-body version-3 editing only. Untouched XML/settings/connections are
+  preserved; configured originals can be repainted, and structural blocks/new parts can be
+  edited. Save under a different vehicle name.
 - **Paint:** each block gets one colour, so hull blocks show their outside colour on the inside
   of rooms.
 
@@ -219,6 +243,7 @@ uv run pytest                     # unit tests; engine tests skip when the game 
 uv run ruff check .               # lint
 uv run tools/smoke_test.py out    # build and render every preset in both modes into ./out
 uv run tools/client_test.py       # drive the server over MCP stdio, like Claude Desktop does
+uv run tools/staged_builder_test.py out/staged-builder --benchmark
 ```
 
 | Path | Contents |
@@ -234,6 +259,10 @@ uv run tools/client_test.py       # drive the server over MCP stdio, like Claude
 | [swhull/vehicle.py](swhull/vehicle.py) | Vehicle XML reading and writing |
 | [swhull/render.py](swhull/render.py) | Preview, close-up and cutaway rendering |
 | [swhull/definitions.py](swhull/definitions.py) | Game install detection and part definitions |
+| [swhull/editing.py](swhull/editing.py), [swhull/drafts.py](swhull/drafts.py) | Atomic part overlays and lossless imported drafts |
+| [swhull/components.py](swhull/components.py), [swhull/access.py](swhull/access.py) | Mounted fit-out and complete access assemblies |
+| [swhull/seal.py](swhull/seal.py), [swhull/tanks.py](swhull/tanks.py) | Independent seal diagnostics and checked block-built tanks |
+| [swhull/cache.py](swhull/cache.py) | Versioned disk geometry cache shared by workers |
 | [tools/](tools) | Smoke test, MCP client test, in-game calibration vehicles |
 
 ## License

@@ -22,6 +22,11 @@ This page explains how to check generated vehicles in game, and what has been ch
 | `floors` (2.25 m headroom per floor) | Not yet verified in game: check the player can walk upright |
 | Spawn limit of 131,072 components | Seen once: USS Iowa V2 (184k parts) loaded whole in the editor but lost everything past component 131,072 on spawn. Confirm with `hull test component limit` |
 | `facing: "aft"` parts | Not yet verified in game |
+| Precise edits and imported copies | Automated transactional/byte-preservation tests pass; check a copy in game |
+| Batteries, helm/seat, propellers/rudders | Installed definitions and mounting/clearance checked; not yet verified in game |
+| Complete manual hatch/ladder and sliding doors | Real-definition calibrations render and pass geometry checks; not yet verified in game |
+| Seal diagnostics | Automated blocks, wedge junctions, doors and unknown-geometry tests pass; game behavior unverified |
+| Block-built fluid tanks | Marker settings read from saves, enclosed pipe orientation read from definitions, geometry checked; contents/flow/capacity unverified in game |
 
 ## Test vehicles
 
@@ -88,3 +93,36 @@ planes; the ridges between faces run through the middle of a block row and stay 
 4. Spawn it in water and check that it floats level and does not take on water.
 
 When something looks wrong, a screenshot plus the vehicle name is enough to trace it.
+
+## Staged builder calibrations
+
+Run **uv run tools/staged_builder_test.py out/staged-builder --benchmark**. This writes into
+the output directory only. Copy the chosen XML into your vehicles folder under a fresh name.
+The JSON reports include seed positions, connection points, expected connectivity and timings.
+The calibration previews show runtime editor footprints rather than the game's animated meshes.
+
+- **staged-tug.xml** (bench M or larger): load and spawn. Confirm the helm and large battery
+  attach to the vehicle and do not fall away. Sit at the helm, walk its approach, and check
+  that the battery leaves a usable 0.75 m passage. Open the internal manual doors and climb
+  the installed hatch/ladder between the lower compartments and galley. The side-door and
+  higher-hatch requests cannot fit and must remain sealed. Add a temporary shaft drive and rudder input yourself:
+  positive thrust should push toward the bow, and blades/rudder should clear the hull.
+- **staged-access.xml** (bench S): the orange hatch and cyan ladder are highlighted in the
+  preview. Walk both landings, open the hatch, climb in both directions, then close it.
+  The closed geometry report keeps the two floors separate; the open report connects them.
+  Check that the frame seals and that segments face the player and connect without a blocked
+  transition at the top. The surrounding test box stays sealed externally in both states.
+- **staged-tank.xml** (bench M): select the fluid marker and confirm diesel/full. The expected
+  usable geometric volume is **2031.25 L**, after subtracting internal editor footprints.
+  Compare the game's measured capacity/contents; record any difference. Attach a temporary
+  external pipe/pump to the aft enclosed outlet and check extraction. Connect/check the
+  upper gas relief path for venting. Confirm that walls/roof and both penetrations keep the
+  fluid separate from the neighbouring hull space.
+- **Imported copy**: choose a wired single-body v3 vehicle, import a draft, repaint a few
+  structural blocks, add a small mounted part and save a different name. Load both versions
+  and confirm the original is unchanged, and the copy retains switches, settings and wiring.
+
+For a controlled leak, remove one tank wall block with **edit_parts**. Preview and **check_seal**
+should show the escape into the neighbouring space; **save_vehicle/save_hull** must refuse the
+invalid tank. Undo the edit and save the repaired version. Do not treat a geometric seal pass
+as proof of in-game physics until these checks are performed.

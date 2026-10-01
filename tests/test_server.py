@@ -29,7 +29,9 @@ def dirs(tmp_path, monkeypatch):
 def test_tools_registered():
     names = {t.name for t in server.mcp._tool_manager.list_tools()}
     assert {"hull_design_guide", "preview_hull", "preview_interior", "save_hull", "inspect_view",
-            "open_in_viewer", "preview_game_vehicle", "store_design", "deck_profile"} <= names
+            "open_in_viewer", "preview_game_vehicle", "store_design", "deck_profile",
+            "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
+            "undo_edits", "preview_vehicle", "save_vehicle", "check_seal"} <= names
 
 
 def test_preview_returns_image_and_text():
@@ -147,3 +149,73 @@ def test_imported_draft_separate_save(dirs):
         call(server.save_vehicle, "original", "imported", overwrite=True)
     with pytest.raises(ToolError, match="already exists"):
         call(server.import_vehicle, "original", "imported")
+
+
+def test_imported_newlines_and_undo_preserve_source_bytes(dirs):
+    from swhull.pieces import BLOCK, Placed  # noqa: PLC0415
+    from swhull.vehicle import to_xml  # noqa: PLC0415
+    vehicles, _ = dirs
+    source = to_xml([Placed(BLOCK, (0, 0, 0))]).replace("\n", "\r\n").encode()
+    (vehicles / "original.xml").write_bytes(source)
+    call(server.import_vehicle, "original", "draft")
+    q = call(server.query_parts, "draft")
+    _, _, report = call(server.edit_parts, "draft",
+                        [{"op": "paint", "select": {"ids": [q["parts"][0]["id"]]}, "color": "123456"}],
+                        q["revision"], commit=True)
+    record = server._read_design("draft")
+    assert "source_xml" not in record["history"][0]
+    server.undo_edits("draft", report["revision"])
+    call(server.save_vehicle, "unchanged copy", "draft")
+    assert (vehicles / "unchanged copy.xml").read_bytes() == source
+    assert (vehicles / "original.xml").read_bytes() == source
+
+
+def test_seal_tool_generated_and_imported_seed_requirement(dirs):
+    from swhull.pieces import BLOCK, Placed  # noqa: PLC0415
+    from swhull.vehicle import to_xml  # noqa: PLC0415
+    vehicles, _ = dirs
+    server.store_design("closed", preset="barge")
+    image, report = call(server.check_seal, "closed")
+    assert image.data[:4] == b"\x89PNG" and report["status"] == "sealed"
+    (vehicles / "plate.xml").write_text(to_xml([Placed(BLOCK, (0, 0, 0))]), encoding="utf-8")
+    call(server.import_vehicle, "plate", "imported")
+    with pytest.raises(ToolError, match="require explicit"):
+        call(server.check_seal, "imported")
+    _, report = call(server.check_seal, "imported", seeds=[[0, 1, 0]])
+    assert report["status"] == "leaking"
+
+
+def test_edited_tank_can_preview_but_cannot_save_until_undo(dirs):
+    from swhull import definitions  # noqa: PLC0415
+    if definitions.load("water_spawner") is None:
+        pytest.skip("real-definition integration needs installed fluid parts")
+    vehicles, _ = dirs
+    server.store_design("tank draft", preset="barge",
+                        spec={"tanks": [{"name": "fuel", "position": [-1, .25, 3], "size": [2, 1.5, 2]}]})
+    q = call(server.query_parts, "tank draft", select={"bounds": [[-4, 3, 15], [-4, 3, 15]]})
+    _, _, report = call(server.edit_parts, "tank draft",
+                        [{"op": "remove", "select": {"ids": [q["parts"][0]["id"]]}}],
+                        q["revision"], commit=True)
+    image, _ = call(server.preview_vehicle, "tank draft")
+    assert image.data[:4] == b"\x89PNG"
+    _, seal = call(server.check_seal, "tank draft")
+    assert seal["status"] == "leaking" and seal["tanks"][0]["status"] == "leaking"
+    for tool in (server.save_vehicle, server.save_hull):
+        with pytest.raises(ToolError, match="cannot export"):
+            call(tool, "invalid tank", design="tank draft")
+    assert not list(vehicles.iterdir())
+    server.undo_edits("tank draft", report["revision"])
+    call(server.save_vehicle, "valid tank", "tank draft")
+    assert (vehicles / "valid tank.xml").exists()
+
+
+def test_fast_worker_exit_keeps_result_and_leaves_no_children():
+    from swhull.pieces import BLOCK, Placed  # noqa: PLC0415
+    from swhull.vehicle import to_xml  # noqa: PLC0415
+    text = to_xml([Placed(BLOCK, (0, 0, 0))])
+    async def repeated():
+        for _ in range(12):
+            record, count = await run_job("import_draft", text, "original")
+            assert record["source_xml"] == text and count == 1
+    anyio.run(repeated)
+    assert not multiprocessing.active_children()

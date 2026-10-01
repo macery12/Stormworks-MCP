@@ -69,6 +69,8 @@ def game_vehicle(path, name):
 def vehicle_xml(full):
     """(vehicle XML, part count, summary) for a spec."""
     placed, info = build(full)
+    from .tanks import ensure_valid  # noqa: PLC0415
+    ensure_valid(info)
     return to_xml(placed), len(placed), summary(full, placed, info)
 
 
@@ -103,6 +105,35 @@ def export_draft(record):
     return export(record)
 
 
+def seal_draft(record, seeds, door_state, title):
+    import copy  # noqa: PLC0415
+    from .seal import auto_seeds, check  # noqa: PLC0415
+    from .pieces import BLOCK, Placed  # noqa: PLC0415
+    parts, info = materialize(record)
+    if seeds is None:
+        if info is None:
+            raise ValueError("imported drafts require explicit interior seed positions in blocks")
+        seeds = auto_seeds(parts, info)
+    report = check(parts, seeds, door_state)
+    if info and info.get("tank_validation"):
+        report["tanks"] = info["tank_validation"]
+        if any(t["status"] == "leaking" for t in report["tanks"]):
+            report["status"] = "leaking"
+        elif any(t["status"] == "indeterminate" for t in report["tanks"]) and report["status"] == "sealed":
+            report["status"] = "indeterminate"
+    shown = copy.deepcopy(parts)
+    path = next((r["escape_path"] for r in report["compartments"] if r["escape_path"]), [])
+    if not path:
+        path = next((r["escape_path"] for t in report.get("tanks", [])
+                     for r in t.get("compartments", []) if r["escape_path"]), [])
+    # Path markers and a labelled exit help locate the repair in the preview.
+    shown.extend(Placed(BLOCK, v, color=HIGHLIGHT) for v in path[:256])
+    labels = [((-path[-1][0], path[-1][1], path[-1][2]), "escape")] if path else ()
+    png = render_view(shown, title=f"{title}: {report['status']}", labels=labels, yaw=35, pitch=-20,
+                      ruler=design_ruler(info, info["scale"]) if info else VEHICLE_RULER)
+    return png, report
+
+
 def _highlight(placed, info, box_name, scale):
     """Paint one box's pieces magenta; return its label and a position note."""
     shape, region, (sx, sy, sz) = info["shape"], info["region"], info["shift"]
@@ -132,7 +163,7 @@ def _highlight(placed, info, box_name, scale):
 
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
-                                export_draft)}
+                                export_draft, seal_draft)}
 
 
 def _watch_parent():
@@ -170,6 +201,7 @@ async def run_job(name, *args, timeout=None):
     proc.start()
     send.close()
     deadline = time.monotonic() + timeout
+    completed = False
     try:
         while not recv.poll():
             if not proc.is_alive() and not recv.poll():
@@ -180,11 +212,28 @@ async def run_job(name, *args, timeout=None):
                                  "raise SW_TOOL_TIMEOUT")
             await anyio.sleep(0.05)
         ok, value = recv.recv()
+        completed = True
     finally:
-        if proc.is_alive():
-            proc.kill()
-        proc.join(5)
-        recv.close()
+        try:
+            if completed:
+                # The result is complete. Let Python finish shutdown instead of racing a
+                # Windows TerminateProcess call against an already exiting child.
+                proc.join(5)
+            if proc.is_alive():
+                try:
+                    proc.kill()
+                except PermissionError:
+                    # Windows can deny TerminateProcess when the child exits between the
+                    # alive check and kill. Ignore only a confirmed completed exit.
+                    proc.join(5)
+                    if proc.is_alive():
+                        raise
+            proc.join(5)
+        finally:
+            recv.close()
+            if not proc.is_alive():
+                from .cache import discard_worker  # noqa: PLC0415
+                discard_worker(proc.pid)
     if not ok:
         raise ValueError(value)
     return value

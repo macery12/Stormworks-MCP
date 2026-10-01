@@ -42,6 +42,8 @@ def describe(record, parts, info):
 
 def export(record):
     parts, info = materialize(record, centred=True)
+    from .tanks import ensure_valid  # noqa: PLC0415
+    ensure_valid(info)
     if record.get("kind") == "imported":
         xml = VehicleDocument.parse(record["source_xml"]).to_xml(parts)
     else:

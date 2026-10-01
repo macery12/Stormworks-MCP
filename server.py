@@ -49,9 +49,20 @@ server with `store_design` and send only changes: every tool takes `design` (a s
 plus `patch` (JSON-Patch ops). The player loads the saved vehicle from a workbench's Load menu.
 Before designing, ask the player which bench size they will build at (S, M, L, XL, XXL or MAX;
 `list_workbenches` gives sizes) and set `bench` in the spec; the summary checks the fit.
-Everything is plain blocks unless the player asks for wedge smoothing; engines are optional
-placeholders, and the player adds propulsion and wiring. Heavy tools run in a worker process
-that stops when a call is cancelled; very large designs with wedges take about a minute."""
+Build in stages and stop/save wherever the player prefers: hull -> structure -> core ->
+access -> propulsion parts -> custom tanks. Geometry is plain blocks unless wedges are requested.
+Optional fitout.stage places real game-sized batteries and a helm/seat; access adds complete
+manual doors and requested hatch/ladder assemblies; propulsion adds propellers/rudders.
+Named components/tanks remain in game metres when the hull is scaled. Report every automatic
+choice and skipped placement. Never carve a hatch without its complete fitted assembly.
+For exact edits use query_parts -> edit_parts preview -> edit_parts commit with the same revision;
+these tools use integer blocks in the fixed build frame, not centred export coordinates.
+Import single-body v3 vehicles into a draft and save a separate copy; configured originals
+remain in place. Use check_seal after edits, including explicit seed points for imports.
+Unknown sealing geometry is indeterminate. Invalid custom tanks cannot be exported.
+Use search_parts/get_part_definition for installed footprints/surfaces. Wiring, complete power
+systems and external plumbing remain player work. Heavy tools use cancellable workers and a
+shared geometry cache. Read docs/staged-builder.md through the design guide for examples."""
 
 mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS)
 
@@ -140,11 +151,46 @@ def _commit_record(name, proposed, expected):
         current = _read_design(name)
         if _revision(current) != expected:
             raise ValueError("stale revision; query_parts again before editing")
-        history = current.get("history", [])[-9:] + [{k: v for k, v in current.items() if k != "history"}]
+        # Imported source bytes are immutable and can be megabytes; store them once.
+        history = current.get("history", [])[-9:] + [
+            {k: v for k, v in current.items() if k not in ("history", "source_xml")}]
         proposed = {**proposed, "history": history, "generation": current.get("generation", 0) + 1,
                     "vehicle": current.get("vehicle", False)}
         _atomic_design(name, proposed)
         return proposed
+
+
+def _save_target(name, record, overwrite):
+    _check_name(name)
+    if record.get("kind") == "imported" and name.casefold() == record["source"].casefold():
+        raise ValueError("cannot overwrite the imported original; choose a different vehicle name")
+    target = Path(vehicles_dir()) / f"{name}.xml"
+    if target.exists():
+        owned = _design_path(name).exists() and _read_design(name).get("vehicle", False)
+        if not owned:
+            raise ValueError("target was not made by this tool; choose another name")
+        if not overwrite:
+            raise ValueError("target exists; pass overwrite=true")
+        stat = target.stat()
+        return target, (stat.st_mtime_ns, stat.st_size)
+    return target, None
+
+
+def _write_vehicle(target, xml, previous):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=target.parent, suffix=".tmp", delete=False) as f:
+            temporary = Path(f.name)
+            f.write(xml.encode("utf-8"))  # Preserve imported newlines and UTF-8 bytes.
+        now = target.stat() if target.exists() else None
+        stamp = (now.st_mtime_ns, now.st_size) if now else None
+        if stamp != previous:
+            raise ValueError("target changed while building; choose another name")
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _title(preset, design):
@@ -255,23 +301,14 @@ async def save_hull(name: str, spec: dict[str, Any] | None = None, preset: str |
     not made by this tool are never overwritten.
     design/patch: as in preview_hull, e.g. save_hull(name="Iowa", design="Iowa").
     """
-    _check_name(name)
     full = _spec(spec, preset, design, patch, spec_path)
-    target = Path(vehicles_dir()) / f"{name}.xml"
-    design_path = _design_path(name)
-    if target.exists():
-        made_here = design_path.exists() and _read_design(name).get("vehicle", True)
-        if not made_here:
-            raise ValueError(f"'{name}' already exists in the vehicles folder and was not made by "
-                             "this tool; choose another name")
-        if not overwrite:
-            raise ValueError(f"'{name}' exists; pass overwrite=true to replace it")
+    record = {"preset": preset, "vehicle": True, "spec": full}
+    target, stamp = _save_target(name, record, overwrite)
     xml, parts, text = await run_job("vehicle_xml", full)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(xml, encoding="utf-8")
-    design_path.parent.mkdir(parents=True, exist_ok=True)
-    design_path.write_text(json.dumps({"preset": preset, "vehicle": True, "spec": full}, indent=2),
-                           encoding="utf-8")
+    with DESIGN_LOCK:
+        _write_vehicle(target, xml, stamp)
+        previous = _read_design(name) if _design_path(name).exists() else {}
+        _atomic_design(name, {**record, "generation": previous.get("generation", 0) + 1})
     return (f"Saved {parts} parts to {target}\n{text}\n"
             f"In game: open a workbench, press Load, choose '{name}'.")
 
@@ -291,10 +328,10 @@ def store_design(name: str, spec: dict[str, Any] | None = None, preset: str | No
     """
     full = _spec(spec, preset, design, patch, spec_path)
     path = _design_path(name)
-    vehicle = path.is_file() and _read_design(name).get("vehicle", True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"preset": preset, "vehicle": vehicle, "spec": full}, indent=2),
-                    encoding="utf-8")
+    with DESIGN_LOCK:
+        previous = _read_design(name) if path.is_file() else {}
+        _atomic_design(name, {"preset": preset, "vehicle": previous.get("vehicle", False),
+                              "spec": full, "generation": previous.get("generation", 0) + 1})
     boxes = len(full.get("superstructure") or [])
     return (f"Stored design '{name}' ({full['length']} m, {boxes} superstructure entries) at "
             f"{path}. Use design=\"{name}\" with patch=[...] in any tool; edits to that file "
@@ -346,7 +383,7 @@ async def import_vehicle(name: str, design: str) -> str:
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
     path = _vehicle_path(name)
-    record, count = await run_job("import_draft", path.read_text(encoding="utf-8"), name)
+    record, count = await run_job("import_draft", path.read_bytes().decode("utf-8"), name)
     with DESIGN_LOCK:
         if _design_path(design).exists():
             raise ValueError("draft already exists; choose a new design name")
@@ -397,7 +434,8 @@ def undo_edits(design: str, revision: str) -> dict[str, Any]:
         history = record.get("history", [])
         if not history:
             raise ValueError("no committed edits to undo")
-        restored = {**history[-1], "history": history[:-1],
+        restored = {**{k: v for k, v in record.items() if k not in ("history", "edits")},
+                    **history[-1], "history": history[:-1],
                     "generation": record.get("generation", 0) + 1, "vehicle": record.get("vehicle", False)}
         _atomic_design(design, restored)
         return {"revision": _revision(restored), "remaining_undo": len(history) - 1}
@@ -418,27 +456,28 @@ async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 
 @_user_errors
 async def save_vehicle(name: str, design: str, overwrite: bool = False) -> str:
     """Save any draft. Imported originals are never overwritten, even with overwrite=true."""
-    _check_name(name)
     record = _read_design(design)
-    target = Path(vehicles_dir()) / f"{name}.xml"
-    if record.get("kind") == "imported" and name.casefold() == record["source"].casefold():
-        raise ValueError("cannot overwrite the imported original; choose a different vehicle name")
-    if target.exists():
-        owned = _design_path(name).exists() and _read_design(name).get("vehicle", False)
-        if not owned:
-            raise ValueError("target was not made by this tool; choose another name")
-        if not overwrite:
-            raise ValueError("target exists; pass overwrite=true")
+    target, stamp = _save_target(name, record, overwrite)
     xml, count, note = await run_job("export_draft", record)
     # Recheck after the worker to avoid an external file created while building.
     with DESIGN_LOCK:
-        if target.exists() and (not overwrite or not _design_path(name).exists()
-                                or not _read_design(name).get("vehicle", False)):
-            raise ValueError("target changed while building; choose another name")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(xml, encoding="utf-8")
+        if _revision(_read_design(design)) != _revision(record):
+            raise ValueError("draft changed while building; save the new revision")
+        _write_vehicle(target, xml, stamp)
         _atomic_design(name, {**record, "vehicle": True})
     return f"Saved {count} parts to {target}\n{note}"
+
+
+@mcp.tool()
+@_user_errors
+async def check_seal(design: str, seeds: list[Any] | None = None, door_state: str = "closed") -> list:
+    """Trace finished geometry from interior to outside: sealed, leaking or indeterminate.
+    Generated drafts choose room/hull seeds automatically. Imported drafts require seeds:
+    [[x,y,z],...] or [{name,position:[x,y,z]}], in integer blocks in their original body frame.
+    door_state=closed/open models supported doors. Returns connected compartments and a
+    highlighted escape path. Unsupported nearby sealing geometry prevents a confident pass."""
+    png, report = await run_job("seal_draft", _read_design(design), seeds, door_state, design)
+    return [Image(data=png, format="png"), report]
 
 
 @mcp.tool()

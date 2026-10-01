@@ -56,6 +56,7 @@ class InteriorPlan:
     rooms: list = field(default_factory=list)
     levels: list = field(default_factory=list)        # (label, floor layer) for deck plans
     warnings: list = field(default_factory=list)
+    reserved: set = field(default_factory=set)       # completed access climbing/landing paths
 
 
 def plan_interior(spec, shape, solid, region, skin):
@@ -128,7 +129,7 @@ def plan_interior(spec, shape, solid, region, skin):
         room.air = {v for v in room.air if v not in plan.blocks}   # later rooms' walls
     for spec_room, room in made:
         for side in spec_room.get("doors") or []:
-            _add_door(room, side, solid, skin, region, top_hull, plan)
+            _add_door(room, side, solid, skin, region, top_hull, plan, cfg.get("door_parts", False))
         eng = spec_room.get("engine")
         if eng:
             _add_engines(room, eng, int(spec_room.get("engine_count", 1)), plan)
@@ -189,7 +190,7 @@ def _make_room(r, cfg, shape, top_hull, plan, inside):
     return Room(name, r.get("type", "room"), xlo, xhi, ylo, ceiling - 1, zlo, zhi)
 
 
-def _add_door(room, side, solid, skin, region, top_hull, plan):
+def _add_door(room, side, solid, skin, region, top_hull, plan, door_parts=False):
     """Cut a doorway (0.75 m wide, 2 m tall, down to 1.5 m where space is tight) at the lowest,
     most central spot on that side. Each row is bored from the room's last air voxel through
     1-2 wall blocks into free space; exterior doors bore through the hull skin to the outside
@@ -211,6 +212,7 @@ def _add_door(room, side, solid, skin, region, top_hull, plan):
             edge[key] = v
     lats = sorted({k[0] for k in edge})
     centre = (lats[0] + lats[-1]) / 2
+    assembly_failure = None
 
     def bore(u, y):
         """('open'|'interior'|'exterior', path) for one doorway cell, or None."""
@@ -246,6 +248,15 @@ def _add_door(room, side, solid, skin, region, top_hull, plan):
                     cells = [c for r in rows for c in r[1]]
                     if any((t := top_hull(c[0], c[2])) is not None and y0 <= t for c in cells):
                         continue
+                    if door_parts:
+                        from .access import install_door  # noqa: PLC0415
+                        anchor = add(edge[(u, y0)], d)
+                        ok, reason = install_door(room, side, d, anchor, skin, plan, top_hull)
+                        if ok:
+                            room.doors.append(f"{side} (exterior, manual door)")
+                            return
+                        assembly_failure = assembly_failure or reason
+                        continue
                     for c in cells:
                         plan.blocks.pop(c, None)
                         if c in skin:
@@ -253,6 +264,14 @@ def _add_door(room, side, solid, skin, region, top_hull, plan):
                     notes = ["exterior"] + _step_notes(room, side, u, y0, edge, d, solid, skin, plan)
                     room.doors.append(f"{side} ({', '.join(notes)})")
                     return
+                if door_parts:
+                    from .access import install_door  # noqa: PLC0415
+                    ok, reason = install_door(room, side, d, add(edge[(u, y0)], d), skin, plan, top_hull)
+                    if ok:
+                        room.doors.append(f"{side} (manual door)")
+                        return
+                    assembly_failure = assembly_failure or reason
+                    continue
                 for r in rows:
                     for c in r[1]:
                         plan.blocks.pop(c, None)
@@ -260,6 +279,9 @@ def _add_door(room, side, solid, skin, region, top_hull, plan):
                 notes += _step_notes(room, side, u, y0, edge, d, solid, skin, plan)
                 room.doors.append(f"{side} ({', '.join(notes)})" if notes else side)
                 return
+    if assembly_failure:
+        plan.warnings.append(f"room '{room.name}': {side} door left sealed: {assembly_failure}")
+        return
     plan.warnings.append(f"room '{room.name}': no spot for a {side} door (needs 0.75 m x 1.5 m+ of "
                          "wall with space on the other side; exterior doors only above the main deck)")
 
@@ -329,4 +351,11 @@ def _add_engines(room, size, count, plan):
 def _add_hatch(h, deck_layers, cfg, skin, region, top_hull, plan):
     """Never make an unfinished access opening. Complete assemblies are installed later."""
     name = h.get("name", f"access at z={h['z']:g} m")
-    plan.warnings.append(f"{name}: floor left sealed; no complete ladder/hatch assembly installed")
+    reason = "no complete ladder/hatch assembly requested"
+    if h.get("assemble"):
+        from .access import install_hatch  # noqa: PLC0415
+        ok, reason = install_hatch(h, cfg, skin, region, top_hull, plan)
+        if ok:
+            plan.warnings.append(f"{name}: {reason}")
+            return
+    plan.warnings.append(f"{name}: floor left sealed; {reason}")

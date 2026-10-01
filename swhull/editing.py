@@ -38,7 +38,7 @@ def rotation(value=None):
         raise ValueError("rotation must be an r string or 3x3 local-to-world matrix") from exc
     if q not in ROTATIONS:
         raise ValueError("rotation must be one of the 24 axis-aligned proper rotations")
-    return q
+    return tuple(tuple(int(n) for n in row) for row in q)
 
 
 def color(value):
@@ -129,7 +129,10 @@ class VehicleDocument:
             attrs = re.search(r"<o\b([^>]*)>", raw)
             attr_names = set(re.findall(r"\b(\w+)=", attrs[1])) if attrs else set()
             protected = d not in BY_NAME or bool(extras) or bool(attr_names - {"r", "sc", "bc", "ac", "gc"})
-            parts.append(Placed(piece, origin, q, paint, uid, raw_xml=raw, protected=protected))
+            named = re.search(r'\bcustom_name="([^"]*)"', raw)
+            from html import unescape  # noqa: PLC0415
+            parts.append(Placed(piece, origin, q, paint, uid,
+                                unescape(named[1]) if named else "", raw_xml=raw, protected=protected))
             gaps[uid] = body[end:start]
             end = stop
         if not parts:
@@ -250,17 +253,24 @@ def _collisions(parts):
     for p in parts:
         for v in p.voxels():
             for uid in owner.get(v, ()):
-                pairs.add(tuple(sorted((uid, p.uid))))
+                pairs.add((v, *sorted((uid, p.uid))))
             owner.setdefault(v, []).append(p.uid)
     return pairs
 
 
-def apply_edits(parts, operations, prefix="edit"):
+def apply_edits(parts, operations, prefix="edit", reserved=frozenset()):
     """Return a new list; failures never change the input or stored draft."""
     if not isinstance(operations, list) or any(not isinstance(op, dict) for op in operations):
         raise ValueError("operations must be a list of objects")
-    out = identify(copy.deepcopy(parts))
-    previous = _collisions(out)
+    out = []
+    for p in parts:
+        clone = copy.copy(p)  # Piece geometry, tuples and raw XML are immutable.
+        clone.settings = copy.deepcopy(p.settings)
+        out.append(clone)
+    identify(out)
+    original = {p.uid: (p.piece.d, p.origin, p.Q) for p in out}
+    geometric = any(op.get("op") != "paint" for op in operations)
+    previous = _collisions(out) if geometric else set()
     for index, op in enumerate(operations):
         kind, key = op.get("op"), f"{prefix}:{index}"
         if kind == "add":
@@ -328,8 +338,22 @@ def apply_edits(parts, operations, prefix="edit"):
             raise ValueError(f"unsupported edit operation {kind!r}")
         if not out:
             raise ValueError("an edit cannot remove every part")
-        collisions = _collisions(out)
-        if collisions - previous:
-            raise ValueError(f"edit {index}: part footprint collision {next(iter(collisions - previous))}")
-        previous = collisions
+        if kind != "paint":
+            collisions = _collisions(out)
+            if collisions - previous:
+                raise ValueError(f"edit {index}: part footprint collision {next(iter(collisions - previous))}")
+            previous = collisions
+    # Validate the completed batch so a caller can add a component before its mounting blocks.
+    # Untouched configured imports remain in place; their game settings are not reinterpreted.
+    from .components import owners, validate_placement  # noqa: PLC0415
+    changed = [p for p in out if p.piece.d not in BY_NAME
+               and original.get(p.uid) != (p.piece.d, p.origin, p.Q)]
+    owner = owners(out) if changed else {}
+    for p in changed:
+        without_self = {v: other for v, other in owner.items() if other is not p}
+        validate_placement(p, {}, without_self, reserved)
+    if reserved:
+        for p in out:
+            if original.get(p.uid) != (p.piece.d, p.origin, p.Q) and any(v in reserved for v in p.voxels()):
+                raise ValueError("edit blocks a reserved access passage")
     return out

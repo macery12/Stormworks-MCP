@@ -260,7 +260,15 @@ def build(spec):
     """Reuse procedural geometry, then apply fixed-frame overlays before centring."""
     from . import cache  # noqa: PLC0415 - cache reconstructs interior objects
     from .editing import apply_edits, identify  # noqa: PLC0415
+    from .components import place  # noqa: PLC0415
+    from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
     base = {k: v for k, v in spec.items() if k not in ("edits", "components", "fitout", "tanks")}
+    if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks"):
+        interior = merge({}, base.get("interior") or {})
+        interior["door_parts"] = True
+        for h in interior.get("hatches", []):
+            h["assemble"] = True
+        base = merge(base, {"interior": interior})
     enabled = os.environ.get("SW_BUILD_CACHE", "1") != "0"
     cache_key = cache.key(base) if enabled else None
     result = cache.read(cache_key) if enabled else None
@@ -274,12 +282,18 @@ def build(spec):
     for p in placed:
         p.origin = add(p.origin, shift)
     identify(placed)
+    if spec.get("tanks"):
+        placed = place_tanks(placed, info, spec)
+    if spec.get("components") or spec.get("fitout"):
+        placed = place(placed, info, spec)
     if spec.get("edits"):
-        placed = apply_edits(placed, spec["edits"])
+        placed = apply_edits(placed, spec["edits"], reserved=info["interior"].reserved)
+    if spec.get("tanks"):
+        verify_tanks(placed, info)
     before = placed[0].origin
     centre(placed)
     info["shift"] = tuple(before[i] - placed[0].origin[i] for i in range(3))
-    if spec.get("edits"):
+    if spec.get("edits") or spec.get("components") or spec.get("fitout") or spec.get("tanks"):
         info["warnings"] = [w for w in info["warnings"] if not w.startswith(("loose part", "... and"))]
         info["warnings"] += _loose_parts(placed, info["region"], info["shape"], info["shift"])
     return placed, info
@@ -393,6 +407,11 @@ def summary(spec, placed, info):
         if len(overlaps) > 25:
             lines.append(f"  ... and {len(overlaps) - 25} more")
     lines += [f"! {w}" for w in info.get("warnings") or []]
+    lines += ["Components: " + row for row in info.get("components", [])]
+    lines += [f"Tank {t['name']}: {t['usable_litres']:.1f} geometric litres, {t['fluid']}, "
+              f"{t['fill'] * 100:g}% fill; {t['status']}. External pipe connections are user work."
+              for t in info.get("tank_validation", [])]
+    lines.append("Procedural geometry: " + ("cache reused." if info.get("cache_hit") else "rebuilt."))
     lines += spawn_limit_lines(placed, info)
     lines += interior_summary(info)
     lines += fit_lines(spec.get("bench"), lo, hi)
@@ -405,6 +424,9 @@ def interior_summary(info):
         return []
     lines = ["Interior:"]
     for r in plan.rooms:
+        if not r.air:
+            lines.append(f"  ! {r.name}: no usable room air after access construction")
+            continue
         ys = [v[1] for v in r.air]
         xs = [v[0] for v in r.air]
         zs = [v[2] for v in r.air]
