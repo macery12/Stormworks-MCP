@@ -1,0 +1,606 @@
+{
+ "hull test orientations": [
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "orange",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "yellow",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "lime",
+   "r": "-1,0,0,0,-1,0,0,0,1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "teal",
+   "r": "0,-1,0,1,0,0,0,0,1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "cyan",
+   "r": "0,1,0,-1,0,0,0,0,1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "blue",
+   "r": "0,-1,0,-1,0,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "indigo",
+   "r": "0,0,1,1,0,0,0,1,0"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "purple",
+   "r": "0,0,-1,1,0,0,0,-1,0"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "pink",
+   "r": "0,0,-1,-1,0,0,0,1,0"
+  },
+  {
+   "row": 1,
+   "piece": "02_wedge",
+   "colour": "brown",
+   "r": "0,0,1,-1,0,0,0,-1,0"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "orange",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "yellow",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "lime",
+   "r": "-1,0,0,0,-1,0,0,0,1"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "green",
+   "r": "1,0,0,0,0,-1,0,1,0"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "teal",
+   "r": "1,0,0,0,0,1,0,-1,0"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "cyan",
+   "r": "-1,0,0,0,0,1,0,1,0"
+  },
+  {
+   "row": 2,
+   "piece": "03_pyramid",
+   "colour": "blue",
+   "r": "-1,0,0,0,0,-1,0,-1,0"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "orange",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "yellow",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "lime",
+   "r": "-1,0,0,0,-1,0,0,0,1"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "green",
+   "r": "1,0,0,0,0,-1,0,1,0"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "teal",
+   "r": "1,0,0,0,0,1,0,-1,0"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "cyan",
+   "r": "-1,0,0,0,0,1,0,1,0"
+  },
+  {
+   "row": 3,
+   "piece": "04_invpyramid",
+   "colour": "blue",
+   "r": "-1,0,0,0,0,-1,0,-1,0"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 4,
+   "piece": "05_wedge_2",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "08_wedge_4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  }
+ ],
+ "hull test orientations 2": [
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 1,
+   "piece": "06_pyramid_2",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 2,
+   "piece": "07_invpyramid_2",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 3,
+   "piece": "09_pyramid_4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 4,
+   "piece": "10_invpyramid_4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 5,
+   "piece": "11_pyramid_2x2",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 6,
+   "piece": "14_invpyramid_2x2",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 7,
+   "piece": "12_pyramid_2x4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 8,
+   "piece": "15_invpyramid_2x4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 9,
+   "piece": "13_pyramid_4x4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "red",
+   "r": "1,0,0,0,1,0,0,0,1"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "orange",
+   "r": "-1,0,0,0,1,0,0,0,-1"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "yellow",
+   "r": "0,0,-1,0,1,0,1,0,0"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "lime",
+   "r": "0,0,1,0,1,0,-1,0,0"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "green",
+   "r": "0,1,0,1,0,0,0,0,-1"
+  },
+  {
+   "row": 10,
+   "piece": "16_invpyramid_4x4",
+   "colour": "teal",
+   "r": "1,0,0,0,-1,0,0,0,-1"
+  }
+ ]
+}
