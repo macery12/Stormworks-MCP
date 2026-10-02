@@ -16,7 +16,8 @@ async def main():
     tmp = tempfile.mkdtemp()
     params = StdioServerParameters(command=sys.executable, args=[os.path.join(HERE, "..", "server.py")],
                                    env={**os.environ, "SW_VEHICLES_DIR": tmp,
-                                        "SW_DESIGNS_DIR": os.path.join(tmp, "designs")})
+                                        "SW_DESIGNS_DIR": os.path.join(tmp, "designs"),
+                                        "SW_COMPLAINTS_DIR": os.path.join(tmp, "complaints")})
     async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
         init = await s.initialize()
         print("instructions:", (init.instructions or "")[:80], "...")
@@ -33,6 +34,21 @@ async def main():
         print("save again w/o overwrite -> error expected:", res.is_error, res.content[0].text[:80])
         res = await s.call_tool("preview_hull", {"spec": {"length": 500}})
         print("bad spec -> error expected:", res.is_error, res.content[0].text[:90])
+        res = await s.call_tool("complaint", {
+            "title": "Client test: invalid hull size", "description": "Synthetic report from the stdio smoke test.",
+            "category": "tool_error", "severity": "low", "tool": "preview_hull",
+            "actual": res.content[0].text, "context": {"arguments": {"spec": {"length": 500}}}})
+        assert not res.is_error
+        complaint = json.loads(next(c.text for c in res.content if c.type == "text"))
+        res = await s.call_tool("get_complaint", {"complaint_id": complaint["id"]})
+        assert not res.is_error
+        report = json.loads(next(c.text for c in res.content if c.type == "text"))
+        assert report["context"]["arguments"]["spec"]["length"] == 500
+        assert os.path.isfile(complaint["report_path"])
+        res = await s.call_tool("list_complaints", {"search": "Client test"})
+        assert not res.is_error
+        assert json.loads(next(c.text for c in res.content if c.type == "text"))["total"] == 1
+        print("complaint workflow: create -> read -> search passed")
         res = await s.call_tool("store_design", {"name": "staged client", "preset": "barge"})
         assert not res.is_error
         res = await s.call_tool("query_parts", {"design": "staged client", "limit": 1})

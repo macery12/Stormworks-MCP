@@ -62,7 +62,10 @@ remain in place. Use check_seal after edits, including explicit seed points for 
 Unknown sealing geometry is indeterminate. Invalid custom tanks cannot be exported.
 Use search_parts/get_part_definition for installed footprints/surfaces. Wiring, complete power
 systems and external plumbing remain player work. Heavy tools use cancellable workers and a
-shared geometry cache. Read docs/staged-builder.md through the design guide for examples."""
+shared geometry cache. Read docs/staged-builder.md through the design guide for examples.
+Use complaint to record encountered bugs, confusing behavior or missing capabilities with
+expected/actual behavior, reproduction steps and relevant tool arguments/errors. The report is
+saved locally for review; reporting an issue does not fix it. Continue useful work where possible."""
 
 mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS)
 
@@ -372,6 +375,69 @@ def get_part_definition(definition: str) -> dict[str, Any]:
     if result is None:
         raise ValueError(f"definition {definition!r} unavailable; set SW_DEFINITIONS_DIR")
     return result
+
+
+@mcp.tool()
+@_user_errors
+def get_part_orientation(definition: str, targets: dict[str, list[int]] | None = None) -> dict[str, Any]:
+    """Explain local mounting/motion/function axes and solve their requested world directions.
+    Example Fin Rudder targets: mount_normal=[0,0,1], span_axis=[0,1,0]."""
+    from swhull.orientation import describe  # noqa: PLC0415
+    return describe(definition, targets)
+
+
+@mcp.tool()
+@_user_errors
+def get_calibration_observations(definition: str) -> dict[str, Any]:
+    """Read recorded in-game checks for a part; expose stale evidence and contradictory reports."""
+    from swhull.calibration import observations  # noqa: PLC0415
+    directory = os.environ.get("SW_CALIBRATION_DIR", str(Path(__file__).parent / "out/advanced-suite/calibration"))
+    return observations(definition, directory)
+
+
+@mcp.tool()
+@_user_errors
+def complaint(title: str, description: str, category: str = "other", severity: str = "medium",
+              tool: str = "", expected: str = "", actual: str = "", steps: list[str] | None = None,
+              context: dict[str, Any] | None = None, design: str = "", vehicle: str = "",
+              definition: str = "", suggestion: str = "") -> dict[str, Any]:
+    """Report an encountered problem or improvement request; save local JSON and Markdown reports.
+    Required: title and description. Include failing tool/arguments, expected vs actual behavior,
+    error messages, steps, affected design/vehicle/definition and a suggested improvement if known.
+    Categories: placement, rotation, smoothing, connections, definitions, performance, tool_error,
+    usability, missing_feature, other. Severity: low, medium, high, blocker.
+    Returns a report id and file paths; no external issue is published."""
+    from swhull.complaints import create  # noqa: PLC0415
+    return create(title, description, category, severity, tool, expected, actual, steps, context,
+                  design, vehicle, definition, suggestion)
+
+
+@mcp.tool()
+@_user_errors
+def list_complaints(search: str = "", category: str = "", severity: str = "",
+                    offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """List locally recorded complaints newest first; filter by text, category or severity."""
+    from swhull.complaints import catalogue  # noqa: PLC0415
+    return catalogue(search, category, severity, offset, limit)
+
+
+@mcp.tool()
+@_user_errors
+def get_complaint(complaint_id: str) -> dict[str, Any]:
+    """Read a complaint's complete reproduction evidence and Markdown report by its id."""
+    from swhull.complaints import read  # noqa: PLC0415
+    return read(complaint_id)
+
+
+@mcp.tool()
+@_user_errors
+async def analyze_vehicle(name: str, search: str = "", offset: int = 0, limit: int = 50,
+                          section: str = "parts") -> dict[str, Any]:
+    """Read saved-vehicle examples, body groups, link coverage and rudder mounting/motion issues.
+    Supports multi-body references without editing them. Observations are not game verification.
+    Search rudder/propeller/engine/trans to focus evidence. Sections: parts, links, controllers,
+    bodies, placement_issues, connection_candidates, open_transmission_ports. All are paginated."""
+    return await run_job("analyze_reference", str(_vehicle_path(name)), search, offset, limit, section)
 
 
 @mcp.tool()

@@ -19,5 +19,5 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run ruff check .
-      # Stormworks is not installed on CI runners; engine-placement tests skip themselves.
-      - run: uv run pytest -q
+      # Portable synthetic/rotation/motion tests always run; local catalogue/reference tests skip without assets.
+      - run: uv run pytest -q --junitxml=out/pytest.xml

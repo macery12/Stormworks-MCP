@@ -63,6 +63,26 @@ and repeat steps use **game metres**, independent of hull scale; full footprints
 occupant/operating space and a supported 0.75 m passage are checked. Explicit invalid placement
 fails the build; automatic placement can skip with a reason.
 
+Use **get_part_orientation(definition, targets)** to distinguish a part's mount, blade, hinge,
+thrust and connection axes. Components accept **orientation** instead of rotation, for example
+`{"definition":"rudder_surface", "orientation":{"mount_normal":[0,0,1], "span_axis":[0,1,0]}}`:
+the Fin Rudder base faces the bow, its blade extends aft and its span is vertical. Standard
+rudders default to a base facing upward against the hull and a blade extending downward.
+Both require base contact and conservatively clear motion space. Check these placements in game.
+**analyze_vehicle(name, search, section, offset, limit)** reads multi-body references without
+editing them; sections expose parts, links, controllers, bodies, placement_issues,
+connection_candidates and open_transmission_ports. Consult saved examples and missing coverage
+before claiming a rule is verified. **get_calibration_observations(definition)** reads recorded
+player checks and exposes stale or contradictory evidence. See `docs/advanced-testing.md`.
+
+When you encounter a bug, confusing behavior, repeated placement failure or a missing capability,
+use **complaint(title, description, ...)** to save a local report. Include category/severity,
+the affected tool, expected/actual behavior, reproduction steps and relevant tool arguments/errors
+in context. Optional design, vehicle and definition references identify the affected parts;
+suggestion records a possible improvement. Reports include structured JSON and readable Markdown.
+Use **list_complaints** to search/filter previous reports and **get_complaint(id)** for full evidence.
+Report observed problems accurately; recording one does not fix it or publish an external issue.
+
 For a single block or region: **query_parts(design, select)** returns stable ids, footprints
 and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
 mirror and repeat batches. Preview with commit=false, inspect, then repeat with commit=true

@@ -31,7 +31,23 @@ def test_tools_registered():
     assert {"hull_design_guide", "preview_hull", "preview_interior", "save_hull", "inspect_view",
             "open_in_viewer", "preview_game_vehicle", "store_design", "deck_profile",
             "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
-            "undo_edits", "preview_vehicle", "save_vehicle", "check_seal"} <= names
+            "undo_edits", "preview_vehicle", "save_vehicle", "check_seal",
+            "get_part_orientation", "analyze_vehicle", "get_calibration_observations",
+            "complaint", "list_complaints", "get_complaint"} <= names
+
+
+def test_reference_analysis_supports_multiple_bodies(dirs):
+    vehicles, _ = dirs
+    xml = ('<vehicle data_version="3"><bodies><body unique_id="1"><components><c><o><vp/></o></c>'
+           '</components></body><body unique_id="2"><components><c><o><vp/></o></c></components></body>'
+           '</bodies><logic_node_links/></vehicle>')
+    path = vehicles / "reference.xml"
+    path.write_text(xml, encoding="utf-8")
+    report = call(server.analyze_vehicle, "reference")
+    assert report["part_count"] == report["body_count"] == 2
+    assert path.read_text(encoding="utf-8") == xml
+    with pytest.raises(ToolError):
+        call(server.analyze_vehicle, "../secret")
 
 
 def test_preview_returns_image_and_text():

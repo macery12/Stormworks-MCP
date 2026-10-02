@@ -94,9 +94,18 @@ def r_attr(Q):
 
 def parse_r(r):
     """Inverse of r_attr: `r` string -> Q (local -> world)."""
-    v = [int(round(float(x))) for x in r.split(",")]
+    try:
+        values = [float(x) for x in r.split(",")]
+        if len(values) != 9 or any(not math.isfinite(x) or x not in (-1, 0, 1) for x in values):
+            raise ValueError
+        v = [int(x) for x in values]
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("r must contain nine axis-aligned rotation entries") from exc
     M = (v[0:3], v[3:6], v[6:9])
-    return tuple(tuple(M[j][i] for j in range(3)) for i in range(3))
+    q = tuple(tuple(M[j][i] for j in range(3)) for i in range(3))
+    if q not in ROTATIONS:
+        raise ValueError("r must be one of the 24 proper axis-aligned rotations")
+    return q
 
 
 # Mirroring. The game stores a part placed in mirror mode as `t` on the component: a bit per

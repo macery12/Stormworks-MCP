@@ -3,6 +3,10 @@
 This project writes Stormworks files without running the game, so the game is the only real test.
 This page explains how to check generated vehicles in game, and what has been checked so far.
 
+The [advanced testing suite](advanced-testing.md) adds body-aware saved-vehicle analysis,
+all-definition rotation checks, both rudder mounting models, and numbered calibration exhibits
+with recorded player observations. Generated exhibits remain pending until checked in game.
+
 ## What has been verified
 
 | Feature | Status |

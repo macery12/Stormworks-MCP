@@ -160,6 +160,10 @@ safe imports, undo, the installed-part catalogue, and geometry caching. New tool
 - **import_vehicle / preview_vehicle / save_vehicle**: safe drafts of existing vehicles.
 - **query_parts / edit_parts / undo_edits**: individual parts, regions, batches and undo.
 - **check_seal**: independent compartment connectivity and highlighted escape paths.
+- **get_part_orientation / analyze_vehicle / get_calibration_observations**: solve mounting and
+  functional axes, inspect multi-body reference evidence, and read recorded in-game checks.
+- **complaint / list_complaints / get_complaint**: record and review local issue reports with
+  reproduction steps, expected/actual behavior and relevant tool arguments.
 
 Generated specs can also include **components** and optional **fitout** stages. The builder
 selects batteries by available footprint, fits helms/seats, and places real propellers/rudders
@@ -191,6 +195,7 @@ override the defaults:
 | `SW_GAME_DIR` | Found through your Steam libraries | Stormworks install, for part definitions and workbench locations. Workshop tile mods are found through Steam. |
 | `SW_DEFINITIONS_DIR` | `<game>\rom\data\definitions` | Part definitions directly. |
 | `SW_DESIGNS_DIR` | `%APPDATA%\stormworks-hull-mcp\designs` | Saved design specs. |
+| `SW_COMPLAINTS_DIR` | `%APPDATA%\stormworks-hull-mcp\complaints` | Local JSON and Markdown issue reports. |
 | `SW_TOOL_TIMEOUT` | `300` | Seconds a preview or save may run before the server stops it. |
 | `SW_BUILD_CACHE` | `1` | Set to `0` to disable geometry caching. |
 | `SW_BUILD_CACHE_DIR` | System temp / `stormworks-mcp-builds` | Shared cache, bounded to 20 entries / 512 MiB. |
@@ -245,6 +250,10 @@ uv run tools/smoke_test.py out    # build and render every preset in both modes 
 uv run tools/client_test.py       # drive the server over MCP stdio, like Claude Desktop does
 uv run tools/staged_builder_test.py out/staged-builder --benchmark
 ```
+
+The [advanced testing guide](docs/advanced-testing.md) covers all installed definitions across
+24 rotations and 24 reflections, rudder base/motion regressions, saved-vehicle evidence,
+plumbing adjacency, and numbered in-game calibration exhibits.
 
 | Path | Contents |
 | --- | --- |

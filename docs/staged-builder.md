@@ -81,6 +81,13 @@ The propulsion stage requests a small propeller and rudder. Propeller thrust axe
 forward, mirrored twins use the game's mirror convention, and moving parts reserve clearance.
 These are placements: shafts, pipes, electrical connections and controls remain user work.
 
+Use `orientation` constraints instead of a rotation matrix to specify mounting and functional
+axes independently. Both standard and Fin Rudder placements require contact at the intended
+base, and reserve a conservative, rotated blade sweep. `get_part_orientation` explains axes;
+`analyze_vehicle` inspects multi-body saved references and pipe/engine connection candidates.
+The [advanced testing guide](advanced-testing.md) covers the exhaustive installed catalogue,
+saved examples, numbered calibration exhibits and recorded player observations.
+
 ## Complete access
 
 At stage **access** or later, room door requests use the installed manual sliding door's real

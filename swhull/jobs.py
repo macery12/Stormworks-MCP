@@ -101,6 +101,11 @@ def import_draft(xml, source):
             "vehicle": False, "generation": 0}, len(document.parts)
 
 
+def analyze_reference(path, search, offset, limit, section="parts"):
+    from .reference import audit_file  # noqa: PLC0415
+    return audit_file(path, search, offset, limit, section)
+
+
 def export_draft(record):
     return export(record)
 
@@ -163,7 +168,7 @@ def _highlight(placed, info, box_name, scale):
 
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
-                                export_draft, seal_draft)}
+                                export_draft, seal_draft, analyze_reference)}
 
 
 def _watch_parent():

@@ -1,7 +1,7 @@
 """Read Stormworks part definitions (rom/data/definitions/*.xml) for footprints and paint slots.
 
-Only what placement and previews need: the voxel footprint, surface count, mass and display
-name. Parts are drawn as a union of cubes over their footprint.
+Footprints, surfaces, directional axes and connection nodes stay local to the installed game.
+Parts are drawn as a union of cubes over their editor footprint.
 """
 import os
 import re
@@ -86,21 +86,12 @@ def load(d):
     path = os.path.join(base, f"{d}.xml")
     if not os.path.isfile(path):
         return None
-    with open(path, encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    head = text.split("<buoyancy_surfaces", 1)[0]
-    surfaces = len(re.findall(r"<surface\b", head.split("<surfaces", 1)[-1])) if "<surfaces" in head else 0
-    block = re.search(r"<voxels>(.*?)</voxels>", text, re.S)
-    voxels = []
-    if block:
-        for m in re.finditer(r"<voxel\b[^>]*>\s*<position\s+([^/]*)/>", block.group(1)):
-            a = dict(re.findall(r'\b([xyz])="(-?(?:\d+(?:\.\d*)?|\.\d+))"', m.group(1)))
-            xyz = tuple(float(a.get(axis, 0)) for axis in "xyz")
-            if not all(v.is_integer() for v in xyz):
-                raise ValueError(f"definition {d} has a non-grid voxel footprint")
-            voxels.append(tuple(int(v) for v in xyz))
-    voxels = voxels or [(0, 0, 0)]
-    mass = float((re.search(r'\bmass="([^"]*)"', text) or [None, "0"])[1])
+    data = metadata(d)
+    voxels = data["footprint"]
+    if not all(float(v).is_integer() for cell in voxels for v in cell):
+        raise ValueError(f"definition {d} has a non-grid voxel footprint")
+    voxels = [tuple(int(v) for v in cell) for cell in voxels]
+    surfaces, mass = len(data["attachment_surfaces"]), data["mass"]
     verts, faces = _cube_union(voxels)
     return Piece(d, max(1, surfaces), mass, tuple(voxels), verts, faces)
 
@@ -140,7 +131,8 @@ def metadata(d):
                     "footprint": list(piece.footprint), "voxels": [
                         {"position": v, "flags": 1, "physics_shape": None} for v in piece.footprint],
                     "attachment_surfaces": faces, "sealing_surfaces": faces, "properties": {},
-                    "directions": {}, "settings": {"custom_name": {"type": "string"}},
+                    "directions": {}, "logic_nodes": [], "couplings": [],
+                    "settings": {"custom_name": {"type": "string"}},
                     "source": "built-in geometry; exact slope meshes used by seal checker"}
         return None
     try:
@@ -154,21 +146,30 @@ def metadata(d):
 
     def surfaces(tag):
         return [{"position": position(s.find("position")), "orientation": int(s.get("orientation", "0")),
-                 "shape": int(s.get("shape", "0")), "trans_type": int(s.get("trans_type", "0"))}
+                 "shape": int(s.get("shape", "0")), "trans_type": int(s.get("trans_type", "0")),
+                 "rotation": int(s.get("rotation", "0"))}
                 for s in root.findall(f"{tag}/surface")]
 
     voxels = [{"position": position(v.find("position")), "flags": int(v.get("flags", "0")),
-               "physics_shape": int(v.get("physics_shape", "0"))} for v in root.findall("voxels/voxel")]
+               "physics_shape": int(v.get("physics_shape", "0")),
+               "buoy_pipes": int(v.get("buoy_pipes", "0"))} for v in root.findall("voxels/voxel")]
     tooltip = root.find("tooltip_properties")
     return {"definition": d, "name": root.get("name", d), "mass": float(root.get("mass", "0")),
             "description": tooltip.get("short_description", "") if tooltip is not None else "",
             "footprint": [v["position"] for v in voxels] or [(0, 0, 0)], "voxels": voxels,
             "attachment_surfaces": surfaces("surfaces"), "sealing_surfaces": surfaces("buoyancy_surfaces"),
-            "properties": {k: v for k, v in root.attrib.items() if k in (
-                "electric_charge_capacity", "wheel_radius", "rudder_surface_area", "type",
-                "force_emitter_blade_physics_length", "door_lower_limit", "door_upper_limit")},
+            "properties": dict(root.attrib),
             "directions": {tag: position(root.find(tag)) for tag in (
-                "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up")},
+                "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up",
+                "dynamic_body_position", "dynamic_rotation_axes", "dynamic_side_axis",
+                "connector_axis", "connector_up", "voxel_location_child")},
+            "logic_nodes": [{"index": i, "label": n.get("label", ""),
+                             "type": int(n.get("type", "0")), "mode": int(n.get("mode", "0")),
+                             "description": n.get("description", ""), "position": position(n.find("position"))}
+                            for i, n in enumerate(root.findall("logic_nodes/logic_node"))],
+            "couplings": [{"attributes": dict(n.attrib), "position": position(n.find("position")),
+                           "children": [{"tag": c.tag, "attributes": dict(c.attrib)} for c in n]}
+                          for n in root.findall("couplings/*")],
             "settings": {"custom_name": {"type": "string"}, **({
                 "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2}},
                 "fluid_fill": {"type": "number", "min": 0, "max": 1, "default": 1},

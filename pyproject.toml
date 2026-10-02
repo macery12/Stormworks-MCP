@@ -25,6 +25,10 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "installed: exhaustively check installed Stormworks definitions (skips without game assets)",
+    "reference: read-only tests against SW_REFERENCE_VEHICLE (skips when unset)",
+]
 
 [tool.ruff]
 target-version = "py310"

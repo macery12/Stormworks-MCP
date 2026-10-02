@@ -6,6 +6,7 @@ from itertools import product
 
 from . import definitions
 from .editing import color, rotation, vector
+from .orientation import RUDDERS, profile, rudder_clearance, solve
 from .pieces import (BY_NAME, DIRS, IDENTITY, Placed, add, apply, find_rotation, neg, sub)
 from .smooth import _full_faces
 from .vehicle import component_xml
@@ -36,13 +37,24 @@ def owners(parts):
     return {v: p for p in parts for v in p.voxels()}
 
 
-def mounted(p, owner):
+def mounting_contacts(p, owner, local_normal=None):
+    contacts = []
     for cell, direction in full_faces(p.piece.d, p.Q, attachment=True):
+        if local_normal is not None and direction != apply(p.Q, local_normal):
+            continue
         neighbour = add(add(p.origin, cell), direction)
         other = owner.get(neighbour)
-        if other and (sub(neighbour, other.origin), neg(direction)) in full_faces(other.piece.d, other.Q):
-            return True
-    return False
+        if other and other is not p and (sub(neighbour, other.origin), neg(direction)) in full_faces(
+                other.piece.d, other.Q, attachment=True):
+            contacts.append({"position": add(p.origin, cell), "normal": direction,
+                             "support_position": neighbour, "support_definition": other.piece.d,
+                             "support_id": other.uid})
+    return sorted(contacts, key=lambda c: (c["position"], c["normal"]))
+
+
+def mounted(p, owner):
+    normal = (0, -1, 0) if p.piece.d in RUDDERS else None
+    return bool(mounting_contacts(p, owner, normal))
 
 
 def _supported(cells, owner):
@@ -81,9 +93,8 @@ def _clearance(p, cfg):
         axis = next((i for i in range(3) if force[i]), 2)
         return set(product(*(range(lo[i] - (0 if i == axis else margin),
                                    hi[i] + (0 if i == axis else margin) + 1) for i in range(3)))) - set(cells)
-    if p.piece.d == "rudder":
-        # Reserve one block either side of the moving surface.
-        return {add(v, d) for v in cells for d in ((1, 0, 0), (-1, 0, 0))} - set(cells)
+    if p.piece.d in RUDDERS:
+        return rudder_clearance(p)
     return set()
 
 
@@ -126,13 +137,17 @@ def _definitions(cfg, bridge=False):
     if kind in ("helm", "seat"):
         return ["seat_helm", "seat_compact"] if bridge and kind == "helm" else ["seat_compact"]
     if kind == "rudder":
-        return ["rudder"]
+        return ["rudder", "rudder_surface"]
     raise ValueError("component needs definition or kind=battery/helm/seat/propeller/rudder")
 
 
 def _orientation(cfg, d):
+    if "orientation" in cfg:
+        return solve(d, cfg["orientation"])
     if "rotation" in cfg:
         return rotation(cfg["rotation"])
+    if d in RUDDERS:
+        return solve(d, profile(d)["default_targets"])
     if d in PROPELLERS.values():
         direction = tuple(definitions.metadata(d)["directions"]["force_dir"])
         return find_rotation([(direction, (0, 0, 1)), ((1, 0, 0), (1, 0, 0))])
@@ -154,7 +169,7 @@ def _candidates(piece, q, cfg, info, owner):
         rooms = sorted(rooms, key=lambda r: r.kind != "bridge")
     else:
         rooms = sorted(rooms, key=lambda r: r.kind not in ("engine", "machinery"))
-    if cfg.get("kind") in ("propeller", "rudder"):
+    if cfg.get("kind") in ("propeller", "rudder") or piece.d in (*PROPELLERS.values(), *RUDDERS):
         target = (0, round(info["form"].depth * 0.35), -2)
         mounting = full_faces(piece.d, q, attachment=True)
         candidates = set()
@@ -219,6 +234,11 @@ def validate_config(spec):
         if "position" in cfg:
             vector(cfg["position"], integer=False)
         rotation(cfg.get("rotation"))
+        if "orientation" in cfg:
+            if "rotation" in cfg:
+                raise ValueError("use orientation or rotation, not both")
+            if not isinstance(cfg["orientation"], dict) or not cfg["orientation"]:
+                raise ValueError("orientation must be a nonempty object")
         if "color" in cfg:
             color(cfg["color"])
         count = cfg.get("repeat", {}).get("count", cfg.get("count", 1))
