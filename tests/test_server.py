@@ -36,6 +36,25 @@ def test_tools_registered():
             "complaint", "list_complaints", "get_complaint"} <= names
 
 
+@pytest.mark.parametrize("topic", ["workflow", "units", "spec", "interior", "archetypes", "style",
+                                 "limits", "staged", "building", "testing"])
+def test_focused_guides_are_available_to_the_model(topic):
+    assert server.hull_design_guide(topic).startswith("#")
+    assert server.hull_design_guide() == server.GUIDE
+    with pytest.raises(ToolError, match="unknown guide topic"):
+        server.hull_design_guide("missing")
+
+
+def test_runtime_status_explains_missing_game_assets(tmp_path, monkeypatch):
+    monkeypatch.setattr(server.definitions, "definitions_dir", lambda: None)
+    monkeypatch.setenv("SW_VEHICLES_DIR", str(tmp_path / "vehicles"))
+    status = server.get_runtime_status()
+    assert status["version"] == server.mcp.version == server.__version__
+    assert not status["installed_components_available"]
+    assert status["vehicles_dir"] == str(tmp_path / "vehicles")
+    assert not (tmp_path / "vehicles").exists()
+
+
 def test_reference_analysis_supports_multiple_bodies(dirs):
     vehicles, _ = dirs
     xml = ('<vehicle data_version="3"><bodies><body unique_id="1"><components><c><o><vp/></o></c>'

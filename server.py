@@ -6,10 +6,12 @@ and writes vehicle XML straight into the Stormworks vehicles folder.
 import functools
 import inspect
 import json
+import logging
 import os
 import re
 import tempfile
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from swhull.benches import describe as describe_benches
+from swhull._version import __version__
 from swhull.build import deck_profile as _deck_profile, resolve_spec
 from swhull.hull import merge
 from swhull.editing import revision as _revision
@@ -30,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 GUIDE = (HERE / "swhull" / "guide.md").read_text(encoding="utf-8")
 NAME_RE = re.compile(r"^[A-Za-z0-9 _\-()]{1,64}$")
 DESIGN_LOCK = threading.RLock()
+LOG = logging.getLogger("stormworks.tools")
 
 
 def designs_dir():
@@ -41,8 +45,12 @@ def designs_dir():
 
 
 INSTRUCTIONS = """\
-Designs Stormworks boats (hull, superstructure, interior rooms) and saves them where the game
-can load them. Read `hull_design_guide` once before designing. Loop: pick a preset or write a
+Design Stormworks vehicles. Read hull_design_guide(topic="workflow") first. Ask for the bench;
+preview and inspect before saving. Hull dimensions use metres; exact edits use integer blocks
+(0.25 m each). Components stay game-sized when scaling. Query revisions before committing edits.
+Import into a draft and save a separate copy. Report skipped placements and uncertain seals;
+wiring/plumbing and in-game verification are player work.
+Loop: pick a preset or write a
 spec -> `preview_hull` (and `preview_interior` for rooms) -> look at the image and critique it
 against the player's brief -> adjust -> `save_hull`. For big designs, keep the spec on the
 server with `store_design` and send only changes: every tool takes `design` (a stored name)
@@ -67,7 +75,7 @@ Use complaint to record encountered bugs, confusing behavior or missing capabili
 expected/actual behavior, reproduction steps and relevant tool arguments/errors. The report is
 saved locally for review; reporting an issue does not fix it. Continue useful work where possible."""
 
-mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS)
+mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS, version=__version__)
 
 
 def _user_errors(fn):
@@ -75,18 +83,31 @@ def _user_errors(fn):
     if inspect.iscoroutinefunction(fn):
         @functools.wraps(fn)
         async def awrapper(*args, **kwargs):
+            started = time.monotonic()
+            LOG.info("Tool %s started", fn.__name__)
             try:
-                return await fn(*args, **kwargs)
+                result = await fn(*args, **kwargs)
             except (ValueError, OSError) as exc:
+                LOG.warning("Tool %s failed after %.2fs: %s", fn.__name__, time.monotonic() - started, exc)
                 raise ToolError(str(exc)) from exc
+            except BaseException:
+                LOG.warning("Tool %s interrupted after %.2fs", fn.__name__, time.monotonic() - started)
+                raise
+            LOG.info("Tool %s completed in %.2fs", fn.__name__, time.monotonic() - started)
+            return result
         return awrapper
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        started = time.monotonic()
+        LOG.info("Tool %s started", fn.__name__)
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
         except (ValueError, OSError) as exc:
+            LOG.warning("Tool %s failed after %.2fs: %s", fn.__name__, time.monotonic() - started, exc)
             raise ToolError(str(exc)) from exc
+        LOG.info("Tool %s completed in %.2fs", fn.__name__, time.monotonic() - started)
+        return result
     return wrapper
 
 
@@ -213,9 +234,30 @@ def _vehicle_path(name):
 
 @mcp.tool()
 @_user_errors
-def hull_design_guide() -> str:
-    """Design guide: workflow, full spec reference, archetype proportions, style tips. Read first."""
-    return GUIDE
+def hull_design_guide(topic: str = "full") -> str:
+    """Read first. Topics: full, workflow, units, spec, interior, archetypes, style, limits,
+    staged, building, testing. Focused topics avoid resending the entire spec reference."""
+    if topic == "full":
+        return GUIDE
+    files = {"staged": "staged-builder.md", "building": "building.md", "testing": "in-game-testing.md"}
+    if topic in files:
+        return (HERE / "docs" / files[topic]).read_text(encoding="utf-8")
+    headings = {"workflow": "Workflow", "units": "Units and axes", "spec": "Spec reference",
+                "interior": "Interior design", "archetypes": "Archetype proportions (starting points)",
+                "style": "Making it look good", "limits": "Limits"}
+    if topic not in headings:
+        raise ValueError("unknown guide topic; choose full, workflow, units, spec, interior, "
+                         "archetypes, style, limits, staged, building or testing")
+    section = GUIDE.split(f"\n## {headings[topic]}\n", 1)[1].split("\n## ", 1)[0]
+    return f"## {headings[topic]}\n{section}"
+
+
+@mcp.tool()
+@_user_errors
+def get_runtime_status() -> dict[str, Any]:
+    """Diagnose version, runtime paths, game definitions and timeout without writing files."""
+    from swhull.diagnostics import runtime_status  # noqa: PLC0415
+    return runtime_status()
 
 
 @mcp.tool()
@@ -637,4 +679,6 @@ async def open_in_viewer(name: str | None = None, spec: dict[str, Any] | None = 
 
 
 if __name__ == "__main__":
+    import multiprocessing  # noqa: PLC0415
+    multiprocessing.freeze_support()
     mcp.run()

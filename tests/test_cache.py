@@ -5,6 +5,13 @@ from swhull.build import resolve_spec
 from swhull.vehicle import to_xml
 
 
+def test_cache_key_changes_across_packaged_releases(monkeypatch):
+    spec = resolve_spec(preset="rowboat")
+    first = cache.key(spec)
+    monkeypatch.setattr(cache, "__version__", cache.__version__ + "-changed")
+    assert cache.key(spec) != first
+
+
 def test_cache_reuses_geometry_and_overlays_without_rebuild(tmp_path, monkeypatch):
     monkeypatch.setenv("SW_BUILD_CACHE_DIR", str(tmp_path))
     spec = resolve_spec(preset="rowboat")

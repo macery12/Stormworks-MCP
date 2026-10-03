@@ -20,6 +20,9 @@ from .vehicle import SPAWN_LIMIT, centre
 
 def resolve_spec(spec=None, preset=None, base=None, patch=None):
     """Full spec: defaults <- preset <- base (a saved design's spec) <- spec <- patch ops."""
+    for label, value in (("spec", spec), ("base", base)):
+        if value is not None and not isinstance(value, dict):
+            raise ValueError(f"{label} must be a JSON object")
     full = DEFAULT_SPEC
     if preset:
         if preset not in PRESETS:

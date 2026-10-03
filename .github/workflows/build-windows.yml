@@ -1,0 +1,54 @@
+name: Build Windows desktop executable
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          python-version: "3.12"
+          version: "0.11.21"
+      - run: uv sync --locked --group build
+      - name: Check version and release tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            uv run python tools/release_assets.py --check --tag $env:GITHUB_REF_NAME
+          } else {
+            uv run python tools/release_assets.py --check
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: uv run --group build python tools/build_windows.py
+      - name: Exercise two clients against one frozen shared server
+        run: uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
+      - name: Test portable GUI controls from a path with spaces
+        shell: pwsh
+        run: |
+          $portable = Join-Path $env:RUNNER_TEMP 'Stormworks MCP portable smoke'
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item -LiteralPath dist/stormworks-mcp.exe -Destination (Join-Path $portable 'stormworks-mcp.exe')
+          uv run python tools/desktop_test.py --exe (Join-Path $portable 'stormworks-mcp.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Assemble release files and checksums
+        shell: pwsh
+        run: |
+          $arguments = @('--commit', $env:GITHUB_SHA, '--repository', $env:GITHUB_REPOSITORY)
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('--tag', $env:GITHUB_REF_NAME) }
+          uv run python tools/release_assets.py @arguments
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-release
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

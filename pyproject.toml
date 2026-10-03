@@ -1,7 +1,7 @@
 [project]
 name = "stormworks-hull-mcp"
 version = "0.1.0"
-description = "MCP server that lets Claude design Stormworks boats (hull, superstructure, interior) and save them as vehicle files"
+description = "Local MCP server for designing, inspecting and editing Stormworks vehicles"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -12,12 +12,16 @@ dependencies = [
     "mcp>=2.2,<3",
     "numpy>=2.0",
     "pillow>=10",
+    "tomlkit>=0.13,<1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+]
+build = [
+    "pyinstaller>=6.22,<7",
 ]
 
 [tool.uv]

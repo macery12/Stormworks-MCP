@@ -43,3 +43,25 @@ def test_invalid_specs_are_rejected(bad):
 def test_unknown_preset():
     with pytest.raises(ValueError, match="unknown preset"):
         resolve_spec(preset="submarine")
+
+
+@pytest.mark.parametrize("bad,message", [
+    ({"lenght": 8}, "did you mean 'length'"),
+    ({"bow": {"fulness": 2}}, "did you mean 'fullness'"),
+    ({"section": []}, "section must be an object"),
+    ({"superstructure": {}}, "superstructure must be a list of objects"),
+    ({"interior": {"rooms": ["bridge"]}}, "interior.rooms must be a list of objects"),
+    ({"interior": {"hatches": [1]}}, "interior.hatches must be a list of objects"),
+    ({"interior": {"decks": 2}}, "interior.decks must be a list of numbers"),
+    ({"bow": {"flare": float("nan")}}, "spec.bow.flare must be finite"),
+    ({"scale": "fit", "bench": "S", "length": float("inf")}, "spec.length must be finite"),
+    ([], "spec must be a JSON object"),
+])
+def test_bad_shape_parameters_produce_actionable_errors(bad, message):
+    with pytest.raises(ValueError, match=message):
+        resolve_spec(bad)
+
+
+def test_misspelled_patch_cannot_silently_leave_design_unchanged():
+    with pytest.raises(ValueError, match="unknown field spec.lenght"):
+        resolve_spec(patch=[{"op": "replace", "path": "/lenght", "value": 8}])

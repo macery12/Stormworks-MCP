@@ -7,6 +7,7 @@ on integers), and to `m * VOX` along x. The finished vehicle is re-centred on th
 origin in vehicle.py.
 """
 import copy
+import difflib
 import math
 import re
 
@@ -151,6 +152,7 @@ def _num(v):
 
 
 def validate(spec):
+    _validate_structure(spec)
     problems = []
     fit = spec.get("scale") == "fit"
     if fit and spec.get("bench") is None:
@@ -249,6 +251,54 @@ def validate(spec):
     validate_config(spec)
     from .tanks import validate_config as validate_tanks  # noqa: PLC0415
     validate_tanks(spec)
+
+
+def _validate_structure(spec):
+    """Catch misspelled shape parameters and malformed containers before geometry touches them."""
+    if not isinstance(spec, dict):
+        raise ValueError("spec must be a JSON object")
+
+    def known_fields(data, allowed, where):
+        for key in data:
+            if key not in allowed:
+                close = difflib.get_close_matches(key, allowed, n=1)
+                suggestion = f"; did you mean '{close[0]}'?" if close else ""
+                raise ValueError(f"unknown field {where}.{key}{suggestion}; see hull_design_guide")
+
+    known_fields(spec, set(DEFAULT_SPEC) | {"interior"}, "spec")
+    for group in ("bow", "stern", "sheer", "section", "colors"):
+        data = spec.get(group)
+        if not isinstance(data, dict):
+            raise ValueError(f"{group} must be an object")
+        known_fields(data, DEFAULT_SPEC[group], group)
+    for group in ("superstructure", "skegs", "paint", "components", "tanks", "edits"):
+        data = spec.get(group)
+        if data is not None and (not isinstance(data, list) or any(not isinstance(item, dict) for item in data)):
+            raise ValueError(f"{group} must be a list of objects")
+    interior = spec.get("interior")
+    if interior is not None:
+        if not isinstance(interior, dict):
+            raise ValueError("interior must be an object")
+        for group in ("rooms", "hatches"):
+            data = interior.get(group)
+            if data is not None and (not isinstance(data, list) or any(not isinstance(item, dict) for item in data)):
+                raise ValueError(f"interior.{group} must be a list of objects")
+        for group in ("decks", "bulkheads"):
+            data = interior.get(group)
+            if data is not None and not isinstance(data, list):
+                raise ValueError(f"interior.{group} must be a list of numbers")
+
+    def finite(data, where):
+        if isinstance(data, float) and not math.isfinite(data):
+            raise ValueError(f"{where} must be finite (NaN and infinity are not supported)")
+        if isinstance(data, dict):
+            for key, value in data.items():
+                finite(value, f"{where}.{key}")
+        elif isinstance(data, list):
+            for index, value in enumerate(data):
+                finite(value, f"{where}[{index}]")
+
+    finite(spec, "spec")
 
 
 class HullForm:

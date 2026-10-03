@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from . import definitions
+from ._version import __version__
 from .hull import HullShape
 from .interior import InteriorPlan, Room
 from .pieces import BY_NAME, Placed
@@ -25,6 +26,8 @@ def cache_dir():
 def key(spec):
     digest = hashlib.sha256(json.dumps(spec, sort_keys=True, separators=(",", ":")).encode())
     digest.update(b"geometry-cache-v1")
+    # Frozen distributions have no loose .py files; keep their caches distinct across releases too.
+    digest.update(__version__.encode())
     for path in sorted(Path(__file__).parent.glob("*.py")):
         digest.update(path.read_bytes())
     base = definitions.definitions_dir()

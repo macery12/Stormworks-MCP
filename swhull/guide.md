@@ -6,6 +6,11 @@ Wiring, full power systems, engine plumbing and external pipe connections remain
 
 ## Workflow
 
+Ask which workbench the player will use; set `bench` before committing to dimensions.
+For step-by-step tool calls, read `hull_design_guide(topic="building")`. The `staged` and
+`testing` topics return the actual references inside the installed server, including offline.
+Use `get_runtime_status` if game parts are missing or the save location is unclear.
+
 1. Talk through the idea: role (fishing, rescue, speed, cargo, patrol, yacht), size, vibe.
 2. Start from the closest preset (`list_hull_presets`), or from scratch.
 3. `preview_hull` with your spec. **Always look at the image and critique it** against the

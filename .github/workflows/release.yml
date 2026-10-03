@@ -1,0 +1,69 @@
+name: Tagged release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-and-build:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-release
+          path: release
+      - name: Verify download checksums
+        working-directory: release
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Attest the binaries built from this tag
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            release/*.exe
+            release/build-info.json
+            release/SHA256SUMS.txt
+      - name: Include the signed provenance bundle
+        env:
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" release/provenance.sigstore.json
+      - name: Create a draft release and upload the actual executables
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft > is-draft.txt; then
+            if [ "$(cat is-draft.txt)" != "true" ]; then
+              echo "Refusing to replace assets on a published release. Create a new version/tag."
+              exit 1
+            fi
+          else
+            cat > release-notes.md <<'NOTES'
+          Windows packages built by GitHub Actions from the release tag with locked Python dependencies.
+
+          Download the portable `.exe` and double-click it. Use the MCP menu to set up Claude Desktop or the ChatGPT / Codex Windows app.
+          Press Start to run one shared server for all clients. Closing the window stops the server.
+
+          `SHA256SUMS.txt`, `build-info.json`, and `provenance.sigstore.json` record checksums and build provenance.
+          Add the release description and publish this draft when ready.
+          NOTES
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Stormworks MCP $GITHUB_REF_NAME" --notes-file release-notes.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" release/* --clobber

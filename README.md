@@ -1,9 +1,13 @@
 # Stormworks MCP: AI boat designer
 
-Describe a boat and Claude designs it for [Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/).
-This [MCP](https://modelcontextprotocol.io) server gives Claude tools to shape a hull, add
+Describe a boat in Claude Desktop or the ChatGPT / Codex Windows app and design it for
+[Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/).
+This local [MCP](https://modelcontextprotocol.io) server gives your AI client tools to shape a hull, add
 superstructure and interior rooms, check its work in rendered previews, and save the result as
 a vehicle file you load from any workbench. The game itself is never modified.
+Start with a [Windows release package](https://github.com/macery12/Stormworks-MCP/releases),
+or [run from source](#run-from-source). Read the [building walkthrough](docs/building.md)
+to understand stages, units, edits and in-game checks.
 
 ![Preview of a 50 m battleship designed with this server: 3/4 views from above and below, front, side and top](docs/images/preview-battleship.png)
 
@@ -32,10 +36,51 @@ a vehicle file you load from any workbench. The game itself is never modified.
 
 ## Quick start
 
+### Windows desktop EXE (recommended)
+
+You need Windows 10/11 x64, your own Steam installation of Stormworks, and either Claude
+Desktop or the **ChatGPT / Codex Windows app using a local Windows host**. The release packages
+include Python and dependencies; installing Python, uv or Git is unnecessary.
+
+1. Download `stormworks-mcp-0.1.0-windows-x64.exe` from
+   [Releases](https://github.com/macery12/Stormworks-MCP/releases).
+2. Keep it in a permanent folder and double-click it. There is no installation step.
+3. Open **MCP > Set up Claude Desktop** or **MCP > Set up ChatGPT / Codex**. Close the client,
+   check its displayed configuration path, and press **Add to client**. Existing settings are
+   preserved and backed up. Replacing an existing Stormworks entry requires the checkbox.
+4. Press **Start server**, then restart the client and ask: **List the Stormworks hull presets.**
+
+The window shows server status and live logs. All clients connect to one shared server;
+they do not launch another server. **Stop server**, or closing the window, stops the shared
+server and disconnects all clients. After starting it again, reconnect/restart your client.
+Launching a second desktop window or host is refused.
+
+Use **MCP > Custom client / raw configuration** to copy MCP JSON, Codex TOML or a PowerShell
+add command. **View** provides diagnostics and log copy/clear. All commands use the EXE's
+actual location. If you move it, reopen it and replace its old client entry.
+
+**Updating an older setup:** close your MCP clients and any older server, replace the EXE,
+then use the replacement checkbox to update each client to `--connect`. Remove any duplicate
+Stormworks extension/entry. Older configurations launching `server.py` directly are independent
+servers and must be replaced to use the shared desktop server.
+
+### Release downloads
+
+| Download | Use |
+| --- | --- |
+| `*-windows-x64.exe` | Portable desktop app containing Python, dependencies, setup menus and the shared server. |
+| `SHA256SUMS.txt` / `build-info.json` / `provenance.sigstore.json` | Verify download checksums and the tagged GitHub Actions source build; see [release verification](docs/releases.md#verify-a-download). |
+
+The local app configuration is shared with Codex CLI and the IDE extension on the same host.
+ChatGPT web and cloud execution use a separate connection path; this desktop app targets the
+local Windows app. See the [official OpenAI MCP guide](https://learn.chatgpt.com/docs/extend/mcp?surface=app).
+
+### Run from source
+
 ### Prerequisites
 
 - Windows with Stormworks installed through Steam (tested on Windows 11).
-- [Claude Desktop](https://claude.ai/download).
+- [Claude Desktop](https://claude.ai/download) or the ChatGPT / Codex Windows app.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/), the Python package manager.
   uv installs Python and the dependencies for you.
 
@@ -44,10 +89,26 @@ a vehicle file you load from any workbench. The game itself is never modified.
 ```bash
 git clone https://github.com/macery12/Stormworks-MCP.git
 cd Stormworks-MCP
-uv sync
+uv sync --locked
 ```
 
-### 2. Add the server to Claude Desktop
+### 2. Connect a client
+
+Open the desktop window from the repository root:
+
+```powershell
+uv run python launcher.py
+```
+
+Use the MCP menu for setup and press Start. For custom clients, print the current configuration:
+
+```powershell
+uv run python launcher.py --config json
+uv run python launcher.py --config toml
+uv run python launcher.py --doctor
+```
+
+Or configure Claude Desktop manually:
 
 In Claude Desktop, open **Settings > Developer > Edit Config**. That opens
 `claude_desktop_config.json`. Add a `stormworks-hulls` entry under `mcpServers`, using the folder
@@ -57,19 +118,21 @@ you cloned into:
 {
   "mcpServers": {
     "stormworks-hulls": {
-      "command": "uv",
-      "args": ["run", "--directory", "C:\\path\\to\\Stormworks-MCP", "server.py"]
+      "command": "C:\\path\\to\\Stormworks-MCP\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\Stormworks-MCP\\launcher.py", "--connect"]
     }
   }
 }
 ```
 
-If Claude Desktop reports that it cannot find `uv`, replace `"uv"` with the full path, which is
-usually `C:\\Users\\<you>\\.local\\bin\\uv.exe`.
+Replace the example paths with your own, or use `--config json` for the exact current paths.
+Keep the desktop window open with its server running; `--connect` never starts a host.
 
-### 3. Restart Claude Desktop
+### 3. Restart your client
 
-Quit Claude Desktop completely: right-click the tray icon and choose **Quit**. Then open it again.
+Quit the selected client completely and open it again. For Claude Desktop, right-click
+the tray icon and choose **Quit**. In the ChatGPT / Codex app, use Settings > MCP servers
+to check the entry and restart its connection.
 
 ### 4. Check that it works
 
@@ -77,8 +140,9 @@ Start a new chat and ask:
 
 > List the Stormworks hull presets.
 
-Claude calls `list_hull_presets` and lists 10 archetypes, from `runabout` to `barge`. If the tool
-is missing, open **Settings > Developer**, which shows the server's status and error log.
+The client calls `list_hull_presets` and lists 10 archetypes, from `runabout` to `barge`. If the
+tool is missing, check Claude's **Settings > Developer** status/log, or the ChatGPT / Codex
+app's **Settings > MCP servers**. Run `--doctor` to check local paths and available game assets.
 
 ### 5. Design a boat and load it
 
@@ -86,7 +150,7 @@ Ask for a boat, for example:
 
 > Design me a chunky fishing boat for bench size S. Show me a preview, then save it.
 
-Claude reads the design guide, previews and refines the hull, then saves it. In Stormworks, open
+The client reads the design guide, previews and refines the hull, then saves it. In Stormworks, open
 a workbench, choose **Load**, and pick the name Claude gave it.
 
 ## Example prompts
@@ -134,7 +198,9 @@ hide:
 With `smoothing: "wedges"`, the hull is skinned with the game's whole slope catalogue: Wedge
 1x1/1x2/1x4, and Pyramid and Inverse Pyramid in 1x1, 1x2, 1x4, 2x2, 2x4 and 4x4. Every piece is
 tried in every rotation and scored on how well its surface follows the hull: the right volume, and
-faces that point the way the hull does, so steps, spikes and zigzags lose to clean slopes. A face
+faces that point the way the hull does, so steps, spikes and zigzags lose to clean slopes.
+
+A face
 sloping two ways is laid the way players build it, a pyramid stacked on an inverse pyramid of the
 same size, repeated, and a slope that stops dead against blocks costs extra, so lone pyramids
 with hard edges are rare. Sharp edges such as deck edges and box corners stay crisp, painted areas
@@ -152,6 +218,12 @@ internet access.
 ![The 3D viewer showing the battleship](docs/images/viewer.png)
 
 ## Tools
+
+`hull_design_guide(topic="workflow")` returns a focused starting guide. Other topics are
+`building`, `units`, `spec`, `interior`, `archetypes`, `style`, `limits`, `staged` and `testing`.
+The no-argument call still returns the full guide. `get_runtime_status` reports version,
+save locations, available game definitions and timeout settings without changing files.
+Misspelled hull fields now produce actionable errors instead of silently leaving defaults in use.
 
 The [staged builder guide](docs/staged-builder.md) covers precise block/region editing,
 safe imports, undo, the installed-part catalogue, and geometry caching. New tools:
@@ -243,13 +315,29 @@ the paint string means unpainted, and the game's axes are left-handed.
 ## Development
 
 ```bash
-uv sync                           # install dependencies, including pytest and ruff
+uv sync --locked                  # install locked dependencies, including pytest and ruff
 uv run pytest                     # unit tests; engine tests skip when the game is not installed
 uv run ruff check .               # lint
 uv run tools/smoke_test.py out    # build and render every preset in both modes into ./out
 uv run tools/client_test.py       # drive the server over MCP stdio, like Claude Desktop does
 uv run tools/staged_builder_test.py out/staged-builder --benchmark
+uv run python tools/package_test.py # two clients, shared host, guide assets, workers, export and stop
 ```
+
+On Windows, build the portable desktop executable:
+
+```powershell
+uv sync --locked --group build
+uv run --group build python tools/build_windows.py
+uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
+uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
+```
+
+Tagging `v0.1.0` (or `v0.1`) runs the tests, builds and tests the executable, and uploads it
+to a draft GitHub release with checksums and signed build provenance. See
+[releasing and verification](docs/releases.md) and the [project audit](docs/project-audit.md).
+Contribution changes should pass lint and tests; geometry changes also need rendered review
+and a specific in-game check, as described in [CLAUDE.md](CLAUDE.md).
 
 The [advanced testing guide](docs/advanced-testing.md) covers all installed definitions across
 24 rotations and 24 reflections, rudder base/motion regressions, saved-vehicle evidence,
