@@ -1,6 +1,6 @@
 """Turn a solid voxel set into a hollow, watertight skin of Stormworks pieces.
 
-Two modes:
+Three modes:
 
 - "blocks": plain blocks only. Always watertight; the player smooths it by hand.
 - "wedges": fits the game's whole slope catalogue (wedges 1x1/1x2/1x4, pyramids and inverse
@@ -31,12 +31,17 @@ Two modes:
      face of a partial piece that would open into the hollow interior is backed by a block,
      so slopes never leak, and pieces left floating in the air are dropped.
 
+- "wedges_v2": measures continuous boundary planes inside partial cells, including depth,
+  preserves uncertain/creased cells, and compares the two final skins. Refined geometry is
+  used only when a fit metric improves without more seams or excessive shape loss.
+
   Hard rules: no piece puts material in a voxel the shape does not reach (no spike tips),
   painted voxels stay blocks, and a piece spanning voxels of different colours is not used.
 
 Hollowing keeps every solid voxel that touches the outside on any of its 26 neighbours.
 """
 import heapq
+from functools import cache
 
 import numpy as np
 
@@ -61,6 +66,7 @@ W_EDGE = 6.0      # per voxel face where a sloped edge runs into a flat face or 
                   # matching slope (pyramid to inverse pyramid or wedge end) or not be there
 W_TILT = 3.0      # per unit of slope area: a slope tilted along an axis the surface is not
                   # (it can only follow the surface as a zigzag of mirrored pieces)
+W_POSITION = 8.0   # V2: per block of normal displacement per unit of slope area
 MIN_GAIN = 6.0    # a piece must lower the energy by this much to replace blocks / empty space
 CELL_MAX = 24     # quick reject: no single voxel of a piece may get more samples wrong than this
 ALLOW = 24.0      # keep pieces this far from paying off against plain blocks for later passes
@@ -147,7 +153,7 @@ def _face_bits(test, centre, d):
     return bits
 
 
-def _slope(piece):
+def _slope(piece, with_centres=False):
     """(outward unit normal, {local cell: area}) of the piece's one sloped face, in voxels."""
     verts = piece.verts
     centre = [sum(v[i] for v in verts) / len(verts) for i in range(3)]
@@ -166,7 +172,7 @@ def _slope(piece):
         fc = [sum(p[i] for p in pts) / len(pts) for i in range(3)]
         if sum(n[i] * (fc[i] - centre[i]) for i in range(3)) < 0:
             n = [-c for c in n]
-        area, steps = {}, 24
+        area, moments, steps = {}, {}, 24
         for k in range(1, len(pts) - 1):        # fan triangles, sampled at their sub-centres
             a, b, c = pts[0], pts[k], pts[k + 1]
             tri = 0.5 * sum(x * x for x in (
@@ -179,7 +185,15 @@ def _slope(piece):
                 u, v = i / steps, j / steps
                 p = [a[m] + u * (b[m] - a[m]) + v * (c[m] - a[m]) - 1e-6 * n[m] for m in range(3)]
                 cell = tuple(round(x) for x in p)
-                area[cell] = area.get(cell, 0.0) + tri / (steps * steps)
+                weight = tri / (steps * steps)
+                area[cell] = area.get(cell, 0.0) + weight
+                if with_centres:
+                    moment = moments.setdefault(cell, [0.0, 0.0, 0.0])
+                    for axis in range(3):
+                        moment[axis] += (p[axis] + 1e-6 * n[axis]) * weight
+        if with_centres:
+            centres = {cell: tuple(v / area[cell] for v in moment) for cell, moment in moments.items()}
+            return tuple(n), area, centres
         return tuple(n), area
     raise ValueError(f"{piece.d} has no sloped face")
 
@@ -197,7 +211,7 @@ def _catalogue():
         out = []
         for piece in SLOPES:
             test = CONTAINS[piece.d]
-            n_local, area_local = _slope(piece)
+            n_local, area_local, centre_local = _slope(piece, with_centres=True)
             for Q, cells in _placements(piece):
                 QT = _transpose(Q)
                 offs = [w for w, _ in cells]
@@ -214,6 +228,8 @@ def _catalogue():
                     "inner": np.array([[add(w, d) in offs for d in DIRS] for w in offs], dtype=bool),
                     "area": np.array([area_local.get(f, 0.0) for f in local], dtype=np.float64),
                     "normal": np.array(apply(Q, n_local), dtype=np.float64),
+                    "centre": np.array([sub(apply(Q, centre_local.get(f, f)), w)
+                                        for f, w in zip(local, offs)], dtype=np.float64),
                 })
         _CACHE["placements"] = out
         _CACHE["full"] = {}
@@ -230,13 +246,30 @@ def shell(S):
 
 
 def deck_plates(S, keep):
-    """Voxels forming the top plate of the hull, removed for an open deck."""
+    """Top-facing skin, including the lower layer under a stepped/sheer deck.
+
+    A 26-neighbour skin can be two layers thick at a height step. Removing only
+    the topmost voxel leaves transverse ribs across an open cockpit. Preserve
+    side-facing rim cells, but remove every cell kept solely for upward exposure.
+    """
     out = set()
     horiz = [(x, 0, z) for x in (-1, 0, 1) for z in (-1, 0, 1) if (x, z) != (0, 0)]
+    tops = {}
+    for x, y, z in S:
+        tops[(x, z)] = max(y, tops.get((x, z), y))
+
+    def deck_neighbour(v, h):
+        n = add(v, h)
+        if n in S:
+            return True
+        # Along the length, a lower neighboring roof is a sheer step, not a
+        # side wall. The adjacent column must exist; never remove transom/stem.
+        return (h[2] != 0 and tops.get((n[0], n[2]), v[1]) < v[1]
+                and (n[0], v[1], v[2]) in S)
+
     for v in keep:
-        if add(v, UP) in S:
-            continue
-        if sub(v, UP) in S and all(add(v, h) in S for h in horiz):
+        if (sub(v, UP) in S and all(deck_neighbour(v, h) for h in horiz)
+                and any(add(add(v, h), UP) not in S for h in [(0, 0, 0)] + horiz)):
             out.add(v)
     return out
 
@@ -389,12 +422,65 @@ def _pen(a, b, pa, pb):
     return np.bitwise_count(a & ~b) * pa + np.bitwise_count(b & ~a) * pb
 
 
-def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset(), colour=None):
+def _refined_planes(cells, masks, gradients, inside, active):
+    """Measure continuous boundary crossings, rather than infer angles from voxel fill.
+
+    Six bisections locate each crossing to 1/256 block. PCA supplies the local plane;
+    its residual keeps sharp corners from being treated as a smooth diagonal. Only
+    partial cells are visited, and no nearby cells are averaged into this plane.
+    """
+    normals = np.zeros((len(cells), 3))
+    flatness = np.zeros(len(cells))
+    offsets = np.zeros(len(cells))
+    samples = np.array(SAMPLES)
+    for c in np.flatnonzero(active):
+        mask = int(masks[c])
+        points = []
+        origin = np.array(cells[c])
+        for stride in _STRIDE:
+            for i in range(64):
+                if (i // stride) % 4 == 3:
+                    continue
+                j = i + stride
+                a_in, b_in = bool(mask >> i & 1), bool(mask >> j & 1)
+                if a_in == b_in:
+                    continue
+                a, b = samples[i].copy(), samples[j].copy()
+                for _ in range(6):
+                    mid = (a + b) * 0.5
+                    if inside(tuple(origin + mid)) == a_in:
+                        a = mid
+                    else:
+                        b = mid
+                points.append((a + b) * 0.5)
+        if len(points) < 6:
+            continue
+        pts = np.array(points)
+        centre = pts.mean(axis=0)
+        pts -= centre
+        values, vectors = np.linalg.eigh(pts.T @ pts / len(pts))
+        if values[1] < 1e-5:  # collinear crossings cannot determine a surface normal
+            continue
+        normal = vectors[:, 0]
+        if normal @ gradients[c] < 0:
+            normal = -normal
+        normals[c] = normal
+        offsets[c] = normal @ centre
+        # Gentle curvature is allowed; a crease with > 0.08 block RMS deviation is not.
+        rms = max(0.0, values[0]) ** 0.5
+        flatness[c] = np.clip((0.08 - rms) / 0.06, 0.0, 1.0)
+    return normals, flatness, offsets
+
+
+def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset(), colour=None,
+               refined=False):
     """Choose slope pieces. `inside(point)` tests the continuous shape; `sample_mask(voxel)`,
     when given, returns the SAMPLES bit mask for a whole voxel at once (much faster).
     `fixed` voxels never get a slope piece (painted areas stay crisp blocks). With `colour`,
     a piece covering more than one voxel is only used where every voxel has the same colour,
     because a piece takes the colour of one cell.
+    `refined` additionally measures continuous boundary planes and their position. The public
+    V2 path in to_pieces compares final sealed skins and can retain the original fitter.
 
     Returns {cell: (piece, origin, Q, paint cell)} for every cell covered by a non-block
     piece; the paint cell is the one the piece fills most, whose colour it should take.
@@ -406,8 +492,9 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     xyz = np.array(cells, dtype=np.int64)
     M = np.array([mask_map[c] for c in cells], dtype=np.uint64)
     solid = np.array([c in S for c in cells], dtype=bool)
+    volume_weight = 1.5 if refined else 1.0
     base = np.where(solid, np.bitwise_count(M ^ np.uint64(FULL_MASK)),
-                    np.bitwise_count(M)).astype(np.float64)
+                    np.bitwise_count(M)).astype(np.float64) * volume_weight
     if colour is not None:     # empty air takes any colour: a piece only has a sliver there
         ids = {}
         reach = (np.bitwise_count(M) > 0) | solid
@@ -462,6 +549,14 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     if partial.any():
         crease = _crease(M[partial], grad[partial])
         flat[partial] = np.clip(1.0 - (crease - 2.0) / 3.0, 0.0, 1.0)
+    plane_offset = np.zeros(n)
+    measured_ok = np.zeros(n, dtype=bool)
+    if refined:
+        measured, confidence, plane_offset = _refined_planes(cells, M, grad, inside, partial)
+        measured_ok = ((np.linalg.norm(measured, axis=1) > 0) & (flat >= 0.66)
+                       & (confidence >= 0.66))
+        nrm[measured_ok] = measured[measured_ok]
+        flat[measured_ok] = np.minimum(flat[measured_ok], confidence[measured_ok])
     nrm *= flat[:, None]
     conf = np.linalg.norm(nrm, axis=1)
     # Error per exposed bit of each cell face, in DIRS order: against the mean of the two
@@ -469,7 +564,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     # face (a box wall: all samples in on one side, none on the other).
     face_pa = np.zeros((n, 6))      # error per exposed bit facing +d
     face_pb = np.zeros((n, 6))      # and facing -d
-    edge_w = np.full((n, 6), W_EDGE)   # cost of a hard edge on each cell face
+    edge_w = np.full((n, 6), W_EDGE * (2 if refined else 1))
     face_pp = np.zeros((n, 6))      # facing +d from a piece: a tip in empty air or a dent in
                                     # solid is wrong whatever the neighbourhood says
     for di, d in enumerate(DIRS):
@@ -513,13 +608,15 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     # how far each axis of the true normal is from zero, for the tilt term
     tilt_ref = np.abs(nrm) + (1.0 - conf)[:, None]
 
-    def slope_err(c, normal):
+    def slope_err(c, normal, centre):
         f = slope_flat[c]
         tilt = np.maximum(0.0, np.abs(normal)[None, :] - tilt_ref[c] - 0.05).sum(axis=1)
         to_face = np.sqrt(np.maximum(0.0, 2 - 2 * (dvec @ normal)))     # chord to each axis
         crease = np.minimum(np.where(faces_of[c], to_face[None, :], 1.0).min(axis=1), 1.0)
+        position = np.abs(np.sum(nrm[c] * centre, axis=1) - f * plane_offset[c])
+        position *= measured_ok[c]
         return (f * _chord(conf[c], nrm[c] @ normal) + (1.0 - f) * crease
-                + W_TILT / W_SURF * tilt)
+                + W_TILT / W_SURF * tilt + W_POSITION / (16 * W_SURF) * position)
 
     # what is on the other side of each cell face as plain blocks, how much a mismatch there
     # counts while building, and what that face costs now
@@ -548,12 +645,12 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
             ok = idx >= 0
             safe = np.where(ok, idx, 0)
             c = np.bitwise_count(M[safe] ^ vol[k]).astype(np.float64)
-            ok &= c <= CELL_MAX
+            ok &= c <= (32 if refined else CELL_MAX)
             if vol[k]:      # never put material where the design has none (a spike tip)
                 ok &= (count[safe] > 0) | solid[safe]
             anchors, idx, c = anchors[ok], idx[ok], c[ok]
             cols = [x[ok] for x in cols] + [idx]
-            costs = [x[ok] for x in costs] + [c]
+            costs = [x[ok] for x in costs] + [c * volume_weight]
             if not len(anchors):
                 break
         if not len(anchors):
@@ -570,7 +667,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
         res = np.full(len(cix), W_PART)
         for k in range(k_n):
             c = cix[:, k]
-            own = costs[k] + W_SURF * 16 * pl["area"][k] * slope_err(c, pl["normal"])
+            own = costs[k] + W_SURF * 16 * pl["area"][k] * slope_err(c, pl["normal"], pl["centre"][k])
             dE += own - base[c]
             res += own
             for di in range(6):
@@ -604,6 +701,8 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     area_l = [pl["area"].tolist() for pl in cat]
     pn_l = [pl["normal"].tolist() for pl in cat]
     vol_l = [pl["vol"].tolist() for pl in cat]
+    centre_l = [pl["centre"].tolist() for pl in cat]
+    offsets_l, measured_l = plane_offset.tolist(), measured_ok.tolist()
     label = [None] * n          # (type, position in footprint) once a piece covers the cell
     # neighbours of each cell, and when anything next to it last changed: a candidate scored
     # before that is stale
@@ -632,7 +731,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
         dE = W_PART * (1 - sum(solid_l[c] for c in row))
         res = W_PART
         for k, c in enumerate(row):
-            v = (M_l[c] ^ vol[k]).bit_count()
+            v = (M_l[c] ^ vol[k]).bit_count() * volume_weight
             dE += v - base_l[c]
             res += v
             if area[k]:
@@ -645,6 +744,10 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
                 err += W_TILT / W_SURF * (max(0.0, abs(pn[0]) - tr[0] - 0.05)
                                           + max(0.0, abs(pn[1]) - tr[1] - 0.05)
                                           + max(0.0, abs(pn[2]) - tr[2] - 0.05))
+                if measured_l[c]:
+                    sc = centre_l[t][k]
+                    distance = abs(sum(nc[a] * sc[a] for a in range(3)) - f * offsets_l[c])
+                    err += W_POSITION / (16 * W_SURF) * distance
                 dE += W_SURF * 16 * area[k] * err
                 res += W_SURF * 16 * area[k] * err
             mine_old = FACE if solid_l[c] else 0
@@ -859,10 +962,224 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     return plan
 
 
+def _fit_metrics(placed, cells, masks):
+    """Compare actual pieces after seal backing, on identical target cells and joints."""
+    owner = {v: p for p in placed for v in p.voxels()}
+    wrong, samples = 0, 0
+    for v in cells:
+        target = masks[v]
+        if not 0 < target < FULL_MASK:
+            continue
+        part = owner.get(v)
+        actual = 0
+        if part is not None:
+            back, test = _transpose(part.Q), CONTAINS[part.piece.d]
+            local = sub(v, part.origin)
+            actual = sum(1 << i for i, point in enumerate(SAMPLES)
+                         if test(apply(back, add(local, point))))
+        wrong += (actual ^ target).bit_count()
+        samples += 64
+
+    @cache
+    def face(d, q, offset, direction):
+        if d == "01_block":
+            return FACE
+        back, test = _transpose(q), CONTAINS[d]
+        return _face_bits(lambda p: test(apply(back, p)), offset, direction)
+
+    mismatches = 0
+    for v, part in owner.items():
+        for direction in DIRS[::2]:
+            n = add(v, direction)
+            other = owner.get(n)
+            if other is None or other is part or part.piece.d == other.piece.d == "01_block":
+                continue
+            a = face(part.piece.d, part.Q, sub(v, part.origin), direction)
+            b = face(other.piece.d, other.Q, sub(n, other.origin), tuple(-x for x in direction))
+            if a != b and (a not in (0, FACE) or b not in (0, FACE)):
+                mismatches += 1
+    return {"wrong_samples": wrong, "tested_samples": samples, "mismatched_joints": mismatches}
+
+
+def _prefer_refined(original, refined):
+    """A smoother joint count must not buy a large increase in shape error.
+
+    Allow at most 0.5 percentage points of extra sampled partial-cell error. This is
+    an approximation tradeoff, not a measured percentage of visual correctness.
+    """
+    improved = (refined["mismatched_joints"] < original["mismatched_joints"]
+                or refined["wrong_samples"] < original["wrong_samples"])
+    return (improved and refined["mismatched_joints"] <= original["mismatched_joints"]
+            and refined["wrong_samples"] <= original["wrong_samples"] + original["tested_samples"] * 0.005)
+
+
+def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=frozenset()):
+    """Refit complete parts around a crease, including wedge ends facing empty air.
+
+    A seam count between occupied footprints misses a notch at a wedge's empty end.
+    Compare exposed face bits to the continuous target instead. Changes must improve
+    both sampled volume and exposed-face error locally; full/empty cells and protected
+    floors are never used as new corner material.
+    """
+    M = np.array([masks[v] for v in cells], dtype=np.uint64)
+    allowed = set(cells)
+    partial = (M > 0) & (M < FULL_MASK)
+    trans = _transitions(M, lambda di: np.array([
+        masks.get(add(v, DIRS[di]), FULL_MASK if add(v, DIRS[di]) in S else 0)
+        for v in cells], dtype=np.uint64))
+    gradients = _mask_gradient(trans)
+    creased = _crease(M[partial], gradients[partial]) > 2.5
+    corners = {cells[i] for i in np.flatnonzero(partial)[creased]}
+    if not corners:
+        return placed, 0
+    corners |= {add(v, d) for v in corners for d in NEIGHBOURS_26
+                if add(v, d) in allowed and 0 < masks[add(v, d)] < FULL_MASK}
+    owner = {v: i for i, p in enumerate(placed) for v in p.voxels()}
+    parts = dict(enumerate(placed))
+    next_id = len(parts)
+    cat = _catalogue()["placements"]
+    full_cache = _catalogue()["full"]
+
+    @cache
+    def target_face(v, di):
+        return _face_bits(inside, v, DIRS[di])
+
+    @cache
+    def material(d, Q, offset):
+        test, back = CONTAINS[d], _transpose(Q)
+        return sum(1 << i for i, p in enumerate(SAMPLES) if test(apply(back, add(offset, p))))
+
+    @cache
+    def part_face(d, Q, offset, di):
+        if d == BLOCK.d:
+            return FACE
+        test, back = CONTAINS[d], _transpose(Q)
+        return _face_bits(lambda p: test(apply(back, p)), offset, DIRS[di])
+
+    def actual(v, replacement):
+        if v in replacement:
+            return replacement[v]
+        i = owner.get(v)
+        return parts[i] if i is not None else None
+
+    def face_at(v, di, replacement):
+        p = actual(v, replacement)
+        return part_face(p.piece.d, p.Q, sub(v, p.origin), di) if p else 0
+
+    def errors(changed, replacement):
+        volume = 0
+        partial_volume = 0
+        joints = set()
+        for v in changed:
+            p = actual(v, replacement)
+            m = material(p.piece.d, p.Q, sub(v, p.origin)) if p else 0
+            target = masks.get(v, FULL_MASK if v in S else 0)
+            wrong = (m ^ target).bit_count()
+            volume += wrong
+            if 0 < target < FULL_MASK:
+                partial_volume += wrong
+            for di, d in enumerate(DIRS):
+                q = add(v, d)
+                joints.add((v, di) if di % 2 == 0 else (q, di ^ 1))
+        steps = 0
+        seams = 0
+        for v, di in joints:
+            q = add(v, DIRS[di])
+            a, b = face_at(v, di, replacement), face_at(q, di ^ 1, replacement)
+            if not (masks.get(v, FULL_MASK if v in S else 0)
+                    == masks.get(q, FULL_MASK if q in S else 0) == FULL_MASK):
+                ta, tb = target_face(v, di), target_face(q, di ^ 1)
+                steps += ((a & ~b & FACE) ^ (ta & ~tb & FACE)).bit_count()
+                steps += ((b & ~a & FACE) ^ (tb & ~ta & FACE)).bit_count()
+            left, right = actual(v, replacement), actual(q, replacement)
+            if (left is not None and right is not None and left is not right and a != b
+                    and (a not in (0, FACE) or b not in (0, FACE))):
+                seams += 1
+        return volume, steps, partial_volume, seams
+
+    candidates = []
+    for t, pl in enumerate(cat):
+        offsets = [tuple(int(x) for x in o) for o in pl["offs"]]
+        anchors = {sub(v, o) for v in corners for o in offsets}
+        for origin in sorted(anchors):
+            row = [add(origin, o) for o in offsets]
+            if any(v not in allowed or v in fixed for v in row):
+                continue
+            if any(not masks[v] and int(m) for v, m in zip(row, pl["vol"])):
+                continue
+            if any((masks[v] ^ int(m)).bit_count() > CELL_MAX for v, m in zip(row, pl["vol"])):
+                continue
+            # Do not extend into the deliberately hollow core or cross a paint boundary.
+            if any(v not in owner and masks[v] == FULL_MASK for v in row):
+                continue
+            colors = {colour(v) for v in row if masks[v]}
+            if len(colors) != 1:
+                continue
+            candidates.append((t, origin, row, next(iter(colors))))
+    changes = 0
+    for _round in range(2):
+        scored = []
+        for j, (t, origin, row, color) in enumerate(candidates):
+            here = {owner[v] for v in row if v in owner}
+            if any(v in fixed or v not in allowed for i in here for v in parts[i].voxels()):
+                continue
+            changed = set(row) | {v for i in here for v in parts[i].voxels()}
+            new = Placed(cat[t]["piece"], origin, cat[t]["Q"], color)
+            replacement = {v: (Placed(BLOCK, v, color=colour(v)) if v in S else None)
+                           for v in changed}
+            replacement.update(dict.fromkeys(row, new))
+            key = (new.piece.d, new.Q)
+            if key not in full_cache:
+                full_cache[key] = _full_faces(new.piece, new.Q)
+            # Score the backing along with the corner, rather than add it after
+            # accepting a change that turns out to introduce an interior seam.
+            for f in new.piece.footprint:
+                w = apply(new.Q, f)
+                for d in DIRS:
+                    v = add(add(new.origin, w), d)
+                    if (v in S and v not in removed and actual(v, replacement) is None
+                            and (w, d) not in full_cache[key]):
+                        replacement[v] = Placed(BLOCK, v, color=colour(v))
+                        changed.add(v)
+            before, after = errors(changed, {}), errors(changed, replacement)
+            if (after[0] <= before[0] and after[1] < before[1]
+                    and after[2] <= before[2] and after[3] <= before[3]):
+                scored.append((1.5 * (after[0] - before[0]) + 4 * (after[1] - before[1]),
+                               j, here, changed, replacement))
+        scored.sort(key=lambda item: (item[0], item[1]))
+        touched = set()
+        for _gain, _j, here, changed, replacement in scored:
+            # Re-evaluate next round when a neighbour has changed; use exact costs only.
+            neighbourhood = changed | {add(v, d) for v in changed for d in DIRS}
+            if neighbourhood & touched:
+                continue
+            for i in here:
+                for v in parts.pop(i).voxels():
+                    owner.pop(v, None)
+            unique = {}
+            for v, p in replacement.items():
+                if p is not None:
+                    key = (p.piece.d, p.origin, p.Q)
+                    if key not in unique:
+                        unique[key] = next_id
+                        parts[next_id] = p
+                        next_id += 1
+                    owner[v] = unique[key]
+            touched |= neighbourhood
+            changes += 1
+        if not touched:
+            break
+    return list(parts.values()), changes
+
+
 def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, region=None,
-              skin=None, extra=None, carve=frozenset(), sample_mask=None, fixed=frozenset()):
+              skin=None, extra=None, carve=frozenset(), sample_mask=None, fixed=frozenset(),
+              diagnostics=None):
     """Skin of S as pieces. `extra` adds interior blocks {voxel: colour}; `carve` opens holes
     in the skin (doors, hatches)."""
+    source_skin = skin
+    if smoothing == "wedges_v2" and sample_mask is not None:
+        sample_mask = cache(sample_mask)
     skin = set(skin if skin is not None else shell(S))
     extra = extra or {}
     removed = set()
@@ -871,23 +1188,28 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
         removed = deck_plates(S, hull_only)
         skin -= removed
     skin -= carve
-    plan = (fit_pieces(S, inside, removed | set(carve), sample_mask, fixed, color_of)
-            if smoothing == "wedges" else {})
+    # Interior plates and walls are functional geometry, not a surface approximation.
+    # Also keep their bordering cells solid so an inverse pyramid cannot undercut a floor.
+    protected = set(fixed) | set(extra)
+    protected |= {add(v, d) for v in extra for d in DIRS if add(v, d) in S}
+    plan = (fit_pieces(S, inside, removed | set(carve), sample_mask, protected, color_of,
+                       refined=smoothing == "wedges_v2")
+            if smoothing in ("wedges", "wedges_v2") else {})
     plan = {c: e for c, e in plan.items()
             if not any(add(e[1], apply(e[2], f)) in carve for f in e[0].footprint)}
     keep = set(skin) | set(plan)
 
     # seal: a partial piece must not open into the hollow interior
-    cache = _catalogue()["full"] if plan else None
+    full_cache = _catalogue()["full"] if plan else None
     seen = set()
     for piece, origin, Q, _paint in plan.values():
         if (origin, Q, piece.d) in seen:
             continue
         seen.add((origin, Q, piece.d))
         key = (piece.d, Q)
-        full = cache.get(key)
+        full = full_cache.get(key)
         if full is None:
-            full = cache[key] = _full_faces(piece, Q)
+            full = full_cache[key] = _full_faces(piece, Q)
         for f in piece.footprint:
             w = apply(Q, f)
             cell = add(origin, w)
@@ -910,4 +1232,27 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
             continue
         placed.append(Placed(BLOCK, v, color=extra.get(v) or color_of(v)))
         done.add(v)
+    if smoothing == "wedges_v2":
+        original = to_pieces(S, color_of, inside, "wedges", open_deck, region, source_skin,
+                             extra, carve, sample_mask, fixed)
+        cells, masks = _cells(S, inside, removed | set(carve), sample_mask, protected)
+        old_metrics, new_metrics = _fit_metrics(original, cells, masks), _fit_metrics(placed, cells, masks)
+        use_refined = _prefer_refined(old_metrics, new_metrics)
+        if diagnostics is not None:
+            diagnostics.update({"selected": "refined" if use_refined else "original",
+                                "original": old_metrics, "refined": new_metrics,
+                                "shape_error_allowance": "0.5 percentage points on sampled partial cells"})
+        selected = placed if use_refined else original
+        before = new_metrics if use_refined else old_metrics
+        repaired, changes = _corner_closeouts(selected, S, cells, masks, inside, protected,
+                                              color_of, removed | set(carve))
+        after = _fit_metrics(repaired, cells, masks) if changes else before
+        accept = (changes > 0 and after["wrong_samples"] <= before["wrong_samples"]
+                  and after["mismatched_joints"] <= before["mismatched_joints"])
+        if diagnostics is not None:
+            diagnostics["corners"] = {"replacements": changes if accept else 0,
+                                      "attempted_replacements": changes,
+                                      "before": before, "after": after if accept else before,
+                                      "proposal": after}
+        return repaired if accept else selected
     return placed

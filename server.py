@@ -50,6 +50,10 @@ preview and inspect before saving. Hull dimensions use metres; exact edits use i
 (0.25 m each). Components stay game-sized when scaling. Query revisions before committing edits.
 Import into a draft and save a separate copy. Report skipped placements and uncertain seals;
 wiring/plumbing and in-game verification are player work.
+For realistic hulls read hull_design_guide(topic="smoothing"). Use analyze_hull to measure
+keel, walking floor and rim separately; a part's footprint is not its solid material.
+Use suggest_hull_blocks for slope families, then check position, orientation and neighboring
+faces. Try smoothing="wedges_v2" for guarded continuous-surface fitting; compare the previews.
 Loop: pick a preset or write a
 spec -> `preview_hull` (and `preview_interior` for rooms) -> look at the image and critique it
 against the player's brief -> adjust -> `save_hull`. For big designs, keep the spec on the
@@ -236,10 +240,11 @@ def _vehicle_path(name):
 @_user_errors
 def hull_design_guide(topic: str = "full") -> str:
     """Read first. Topics: full, workflow, units, spec, interior, archetypes, style, limits,
-    staged, building, testing. Focused topics avoid resending the entire spec reference."""
+    staged, building, testing, smoothing. Focused topics avoid resending the entire spec reference."""
     if topic == "full":
         return GUIDE
-    files = {"staged": "staged-builder.md", "building": "building.md", "testing": "in-game-testing.md"}
+    files = {"staged": "staged-builder.md", "building": "building.md", "testing": "in-game-testing.md",
+             "smoothing": "hull-smoothing.md"}
     if topic in files:
         return (HERE / "docs" / files[topic]).read_text(encoding="utf-8")
     headings = {"workflow": "Workflow", "units": "Units and axes", "spec": "Spec reference",
@@ -247,7 +252,7 @@ def hull_design_guide(topic: str = "full") -> str:
                 "style": "Making it look good", "limits": "Limits"}
     if topic not in headings:
         raise ValueError("unknown guide topic; choose full, workflow, units, spec, interior, "
-                         "archetypes, style, limits, staged, building or testing")
+                         "archetypes, style, limits, staged, building, testing or smoothing")
     section = GUIDE.split(f"\n## {headings[topic]}\n", 1)[1].split("\n## ", 1)[0]
     return f"## {headings[topic]}\n{section}"
 
@@ -480,6 +485,45 @@ async def analyze_vehicle(name: str, search: str = "", offset: int = 0, limit: i
     Search rudder/propeller/engine/trans to focus evidence. Sections: parts, links, controllers,
     bodies, placement_issues, connection_candidates, open_transmission_ports. All are paginated."""
     return await run_job("analyze_reference", str(_vehicle_path(name)), search, offset, limit, section)
+
+
+@mcp.tool()
+@_user_errors
+def suggest_hull_blocks(normal: list[float], limit: int = 6) -> dict[str, Any]:
+    """Rank real block slope families by an outward x/y/z normal. Read the selection rules:
+    the angle alone cannot choose pyramid vs inverse, location, or a watertight joint."""
+    from swhull.hull_analysis import block_choices  # noqa: PLC0415
+    return block_choices(normal, limit)
+
+
+@mcp.tool()
+@_user_errors
+async def analyze_hull(name: str | None = None, spec: dict[str, Any] | None = None,
+                       preset: str | None = None, design: str | None = None,
+                       patch: list[dict[str, Any]] | None = None,
+                       body_id: str | None = None, stations: list[int] | None = None,
+                       x: int = 0, source: str = "vehicles") -> dict[str, Any]:
+    """Measure actual hull material, floor gaps, and partial-face seams at z stations.
+    x/stations are integer BLOCK coordinates. name reads a saved v3 vehicle (one body at
+    a time); otherwise build spec/preset/design in the fixed build frame. Procedural reports
+    include floor height above keel and drop from rim, so verify depth before saving.
+    Imported saved vehicles use their original body-local frame; choose body_id explicitly
+    when the largest structural body isn't the hull. source="backups" reads data/backups/vehicles,
+    e.g. name="autosave9". This is read-only geometry, not a seal test."""
+    if source not in ("vehicles", "backups"):
+        raise ValueError('source must be "vehicles" or "backups"')
+    if name is not None:
+        if any(v is not None for v in (spec, preset, design, patch)):
+            raise ValueError("choose name or procedural spec/preset/design, not both")
+        path = _vehicle_path(name) if source == "vehicles" else (
+            Path(vehicles_dir()).parent / "backups" / "vehicles" / f"{name}.xml")
+        _check_name(name)
+        return await run_job("hull_analysis", None, str(path), body_id, stations, x)
+    if source != "vehicles":
+        raise ValueError("source applies only to a saved vehicle name")
+    if body_id is not None:
+        raise ValueError("body_id applies only to a saved vehicle name")
+    return await run_job("hull_analysis", _spec(spec, preset, design, patch), None, None, stations, x)
 
 
 @mcp.tool()

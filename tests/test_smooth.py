@@ -4,11 +4,14 @@ import re
 from collections import Counter
 
 import pytest
+import numpy as np
 
 from swhull.build import build, resolve_spec
 from swhull.definitions import definitions_dir, load
 from swhull.pieces import BY_NAME, CONTAINS, DIRS, SLOPES, _inv, _tetra, add, apply
-from swhull.smooth import SAMPLES, _face_bits, _full_faces, _placements, _slope, fit_pieces
+from swhull.smooth import (SAMPLES, _face_bits, _full_faces, _placements,
+                          _refined_planes, _slope, fit_pieces, to_pieces, _prefer_refined,
+                          deck_plates, shell)
 
 ORIENT = {0: (1, 0, 0), 1: (-1, 0, 0), 2: (0, 1, 0), 3: (0, -1, 0), 4: (0, 0, 1), 5: (0, 0, -1)}
 
@@ -161,11 +164,12 @@ def test_mirror_images_fit_alike():
     assert len(origins ^ mirrored) <= len(origins) // 4
 
 
+@pytest.mark.parametrize("mode", ["wedges", "wedges_v2"])
 @pytest.mark.parametrize("preset", ["fishing_trawler", "runabout"])
-def test_no_material_where_the_shape_is_empty(preset):
+def test_no_material_where_the_shape_is_empty(preset, mode):
     # a piece may reach a sliver into an empty voxel only if the shape reaches it too:
     # otherwise its tip reads as a spike sticking out of the hull
-    placed, info = build(resolve_spec({"smoothing": "wedges"}, preset=preset))
+    placed, info = build(resolve_spec({"smoothing": mode}, preset=preset))
     shape, shift = info["shape"], info["shift"]
     for p in placed:
         if p.piece.d not in BY_NAME or p.piece.d == "01_block":
@@ -179,10 +183,11 @@ def test_no_material_where_the_shape_is_empty(preset):
             assert shape.sample_mask(w, SAMPLES) or w in info["region"], (p.piece.d, w)
 
 
+@pytest.mark.parametrize("mode", ["wedges", "wedges_v2"])
 @pytest.mark.parametrize("preset", ["tugboat", "fishing_trawler"])
-def test_wedge_skin_is_watertight(preset):
+def test_wedge_skin_is_watertight(preset, mode):
     # every face of a slope piece toward the hollow inside of the hull is a full face
-    placed, info = build(resolve_spec({"smoothing": "wedges"}, preset=preset))
+    placed, info = build(resolve_spec({"smoothing": mode}, preset=preset))
     shift = info["shift"]
     solid = {tuple(v[i] - shift[i] for i in range(3)) for v in info["region"]}
     taken = {v for p in placed for v in p.voxels()}
@@ -201,3 +206,85 @@ def test_wedge_skin_is_watertight(preset):
                     checked += 1
                     assert (w, d) in full, (p.piece.d, cell, d)
     assert checked
+
+
+@pytest.mark.parametrize("normal", [(0.0, 1.0, 0.25), (0.5, -1.0, 0.25), (-1.0, 0.25, -0.5)])
+def test_refined_planes_recover_off_grid_angle_and_depth(normal):
+    # Occupancy gradients quantize these offsets; continuous intersections should recover
+    # the actual plane, even upside down or facing another axis.
+    unit = np.array(normal) / np.linalg.norm(normal)
+    offset = 0.071
+    def inside(p):
+        return np.dot(unit, p) <= offset
+    mask = sum(1 << i for i, p in enumerate(SAMPLES) if inside(p))
+    normals, confidence, offsets = _refined_planes([(0, 0, 0)], np.array([mask], dtype=np.uint64),
+                                                  unit[None, :], inside, np.array([True]))
+    assert normals[0] == pytest.approx(unit, abs=0.002)
+    assert confidence[0] == 1
+    assert offsets[0] == pytest.approx(offset, abs=0.002)
+
+
+def test_refined_corner_is_not_a_diagonal_plane():
+    def inside(p):
+        return p[0] <= 0.11 and p[1] <= 0.07
+    mask = sum(1 << i for i, p in enumerate(SAMPLES) if inside(p))
+    _, confidence, _ = _refined_planes([(0, 0, 0)], np.array([mask], dtype=np.uint64),
+                                      np.array([[1, 1, 0]]), inside, np.array([True]))
+    assert confidence[0] < 0.5
+
+
+@pytest.mark.parametrize("mode", ["wedges", "wedges_v2"])
+def test_floor_at_sloped_skin_remains_full_blocks(mode):
+    solid, inside = _on_plate(_hip_roof(6.5, 4))
+    floor = {v: "112233" for v in solid if v[1] == 0}
+    parts = to_pieces(solid, lambda _: "334455", inside=inside, smoothing=mode, extra=floor)
+    owner = {v: p for p in parts for v in p.voxels()}
+    assert floor
+    for v in floor:
+        assert owner[v].piece.d == "01_block"
+        assert owner[v].color == "112233"
+
+
+@pytest.mark.parametrize("run,piece", [(1, "02_wedge"), (2, "05_wedge_2"), (4, "08_wedge_4")])
+def test_v2_still_uses_matching_wedge_for_exact_planes(run, piece):
+    solid, inside = _on_plate(_hip_roof(6.5 if run == 4 else 4.5, run))
+    plan = fit_pieces(solid, inside, refined=True)
+    allowed = {piece, "03_pyramid"} if run == 1 else {piece}
+    assert {entry[0].d for entry in plan.values()} <= allowed
+    assert any(entry[0].d == piece for entry in plan.values())
+
+
+def test_v2_guard_rejects_more_seams_and_excess_shape_loss():
+    original = {"wrong_samples": 100, "tested_samples": 1000, "mismatched_joints": 40}
+    assert _prefer_refined(original, {**original, "wrong_samples": 102, "mismatched_joints": 30})
+    assert not _prefer_refined(original, {**original, "wrong_samples": 110, "mismatched_joints": 20})
+    assert not _prefer_refined(original, {**original, "wrong_samples": 80, "mismatched_joints": 41})
+    assert not _prefer_refined(original, original)
+
+
+def test_open_deck_removes_lower_skin_ribs_under_height_steps():
+    solid = {(x, y, z) for x in range(-5, 6) for z in range(12)
+             for y in range(5 + z // 3)}
+    skin = shell(solid)
+    removed = deck_plates(solid, skin)
+    # These cells have a solid voxel directly above, but are retained in the shell
+    # because the diagonal above is outside. They used to become cockpit stripes.
+    lower_ribs = {v for v in skin if v[0] == 0 and 1 <= v[2] <= 10
+                  and (v[0], v[1] + 1, v[2]) in solid and v[1] >= 4}
+    assert lower_ribs
+    assert lower_ribs <= removed
+    assert not any(v in removed for v in skin if abs(v[0]) == 5)
+
+
+@pytest.mark.parametrize("mode", ["blocks", "wedges", "wedges_v2"])
+def test_sheered_cockpit_has_no_skin_above_walking_floor(mode):
+    parts, info = build(resolve_spec({"length": 8, "beam": 4, "depth": 2,
+                                     "deck": "open", "smoothing": mode,
+                                     "sheer": {"bow": 1, "stern": 0},
+                                     "interior": {"decks": [1.5]}}))
+    owner = {tuple(v[i] + info["shift"][i] for i in range(3)): p
+             for p in parts for v in p.voxels()}
+    # A centreline walking path must be air from its floor up through the opening.
+    for z in range(4, 26):
+        for y in range(6, 12):
+            assert (0, y, z) not in owner, (mode, y, z)

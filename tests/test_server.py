@@ -33,11 +33,11 @@ def test_tools_registered():
             "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
             "undo_edits", "preview_vehicle", "save_vehicle", "check_seal",
             "get_part_orientation", "analyze_vehicle", "get_calibration_observations",
-            "complaint", "list_complaints", "get_complaint"} <= names
+            "complaint", "list_complaints", "get_complaint", "analyze_hull", "suggest_hull_blocks"} <= names
 
 
 @pytest.mark.parametrize("topic", ["workflow", "units", "spec", "interior", "archetypes", "style",
-                                 "limits", "staged", "building", "testing"])
+                                 "limits", "staged", "building", "testing", "smoothing"])
 def test_focused_guides_are_available_to_the_model(topic):
     assert server.hull_design_guide(topic).startswith("#")
     assert server.hull_design_guide() == server.GUIDE
@@ -67,6 +67,35 @@ def test_reference_analysis_supports_multiple_bodies(dirs):
     assert path.read_text(encoding="utf-8") == xml
     with pytest.raises(ToolError):
         call(server.analyze_vehicle, "../secret")
+
+
+def test_hull_analysis_reports_floor_depth_and_original_body_frame(dirs):
+    from swhull.pieces import BLOCK, Placed  # noqa: PLC0415
+    from swhull.vehicle import to_xml  # noqa: PLC0415
+    vehicles, _ = dirs
+    path = vehicles / "hull.xml"
+    xml = to_xml([Placed(BLOCK, (0, 7, 9)), Placed(BLOCK, (0, 16, 9))])
+    path.write_text(xml)
+    report = call(server.analyze_hull, name="hull", stations=[9])
+    assert report["sections"][0]["gaps"][0]["clear_height_m"] == 2
+    assert report["body_id"] == "1"
+    assert path.read_text() == xml
+    backup_dir = vehicles.parent / "backups" / "vehicles"
+    backup_dir.mkdir(parents=True)
+    backup = backup_dir / "autosave9.xml"
+    backup.write_text(xml)
+    backup_report = call(server.analyze_hull, name="autosave9", source="backups", stations=[9])
+    assert backup_report["sections"] == report["sections"]
+    assert backup.read_text() == xml
+    generated = call(server.analyze_hull, preset="rowboat", stations=[8])
+    assert "depths" in generated
+    assert "build blocks" in generated["frame"]
+    with pytest.raises(ToolError, match="choose name"):
+        call(server.analyze_hull, name="hull", preset="rowboat")
+    with pytest.raises(ToolError):
+        call(server.analyze_hull, name="../secret")
+    with pytest.raises(ToolError):
+        call(server.analyze_hull, name="../secret", source="backups")
 
 
 def test_preview_returns_image_and_text():

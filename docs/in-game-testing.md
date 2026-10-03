@@ -17,6 +17,10 @@ with recorded player observations. Generated exhibits remain pending until check
 | Rotation of every slope piece | Verified for Wedge 1x1/1x2/1x4, Pyramid and Inverse Pyramid: all 40 orientations in `hull test orientations` |
 | Pyramid and Inverse Pyramid 1x2, 1x4, 2x2, 2x4, 4x4 | Not yet verified in game: load `hull test orientations 2`. Their shapes are read from the game's definition files and checked by tests |
 | Wedge smoothing (`smoothing: "wedges"`) | The old fitter floated. Rewritten to use every slope piece (2026-10-01), including mirrored Pyramid 2x4 / Inverse Pyramid 2x4 (`t` read from a save made with mirror mode); not yet loaded in game |
+| Guarded V2 smoothing (`smoothing: "wedges_v2"`) | Automated continuous-plane, floor, no-spike and skin tests; measured comparisons and rendered QA. In-game appearance, sealing and attachment remain unverified |
+| V2 deckhouse corner closeouts | Player screenshot confirms wedge-end notches and protruding cubes on the Zumwalt. Matching pyramid-family replacements now check complete footprints and backing; automated and rendered checks pass. Load the new test copy and compare the same corner in game |
+| Open sheered cockpit skin ribs | Both layers of top skin and longitudinal height-step faces now removed; walking-path tests and Benchy preview checked. Confirm the lines across the walking area are gone in game |
+| Open-deck fixture supports | Minimal supports to explicit walking floors are reported and confined to hull volume; automated attachment checks pass. Inspect cabin, arch and bollard bases and walking clearance in game |
 | Interiors (rooms, doors, hatches) | Not yet verified in game |
 | Placeholder engines | Not yet verified in game |
 | Cylinders, domes, spheres, lattice masts | Not yet verified in game |

@@ -136,7 +136,49 @@ def plan_interior(spec, shape, solid, region, skin):
 
     for h in cfg.get("hatches") or []:
         _add_hatch(h, deck_layers, cfg, skin, region, top_hull, plan)
+    if spec.get("deck") == "open" and deck_layers:
+        _open_deck_supports(shape, solid, region, plan, deck_layers)
     return plan
+
+
+def _open_deck_supports(shape, solid, region, plan, deck_layers):
+    """Keep a deckhouse/fixture base attached after opening the surrounding hull roof.
+
+    The floor under a box can be higher than the walking sole. Formerly transverse
+    remnants of sheered top skin accidentally bridged them. Use minimal vertical
+    supports beneath the outboard base edges, confined to existing hull volume.
+    """
+    bases = {}
+    for v in solid:
+        above = region.get(add(v, UP), "")
+        if region.get(v) == "hull" and above.startswith("box"):
+            plan.blocks.setdefault(v, PLATE)
+            bases.setdefault(int(above[3:]), []).append(v)
+    blocked = plan.carve | plan.reserved | {v for room in plan.rooms for v in room.air}
+    for index, cells in sorted(bases.items()):
+        paths = []
+        for x, y, z in cells:
+            floors = [floor for floor in deck_layers if floor < y and (x, floor, z) in plan.blocks]
+            if not floors:
+                continue
+            floor = max(floors)
+            path = [(x, yy, z) for yy in range(floor + 1, y)]
+            if all(v in solid and region.get(v) == "hull" and v not in blocked for v in path):
+                paths.append((x, z, floor, path))
+        if not paths:
+            continue
+        # One support at each outboard edge (one for a one-cell-wide fixture).
+        selected = [min(paths, key=lambda p: (p[0], len(p[3]), p[1])),
+                    max(paths, key=lambda p: (p[0], -len(p[3]), -p[1]))]
+        added = set()
+        for _x, _z, _floor, path in selected:
+            for v in path:
+                if v not in plan.blocks:
+                    plan.blocks[v] = PLATE
+                    added.add(v)
+        if added:
+            plan.warnings.append(f"open deck: added {len(added)} support blocks beneath "
+                                 f"'{shape.boxes[index].name}' to the walking floor; inspect their clearance")
 
 
 def _make_room(r, cfg, shape, top_hull, plan, inside):

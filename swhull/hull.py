@@ -176,8 +176,8 @@ def validate(spec):
         parse_bench(spec.get("bench"))
     except ValueError as exc:
         problems.append(str(exc))
-    if spec.get("smoothing") not in ("blocks", "wedges"):
-        problems.append('smoothing must be "blocks" or "wedges"')
+    if spec.get("smoothing") not in ("blocks", "wedges", "wedges_v2"):
+        problems.append('smoothing must be "blocks", "wedges" or "wedges_v2"')
     if spec.get("deck") not in ("closed", "open"):
         problems.append('deck must be "closed" or "open"')
     if spec.get("hulls") not in (1, 2, 3):

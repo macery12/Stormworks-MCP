@@ -106,6 +106,23 @@ def analyze_reference(path, search, offset, limit, section="parts"):
     return audit_file(path, search, offset, limit, section)
 
 
+def hull_analysis(full, path, body_id, stations, x):
+    from pathlib import Path  # noqa: PLC0415
+    from .hull_analysis import design_depths, reference_structure, structural_report  # noqa: PLC0415
+    from .pieces import add  # noqa: PLC0415
+
+    if path:
+        parts, context = reference_structure(Path(path).read_text(encoding="utf-8-sig"), body_id)
+        return {**context, **structural_report(parts, stations, x)}
+    parts, info = build(full)
+    for p in parts:
+        p.origin = add(p.origin, info["shift"])
+    report = structural_report(parts, stations, x)
+    zs = [row["z_blocks"] for row in report["sections"]]
+    return {**report, "frame": "build blocks: x centreline, y keel layer, z from transom",
+            "metres_per_block": 0.25, "depths": design_depths(info, zs)}
+
+
 def export_draft(record):
     return export(record)
 
@@ -168,7 +185,7 @@ def _highlight(placed, info, box_name, scale):
 
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
-                                export_draft, seal_draft, analyze_reference)}
+                                export_draft, seal_draft, analyze_reference, hull_analysis)}
 
 
 def _watch_parent():

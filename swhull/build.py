@@ -108,7 +108,7 @@ def _extent(spec, s):
     _, solid, _ = build_solid(game)
     lo = [min(v[i] for v in solid) for i in range(3)]
     hi = [max(v[i] for v in solid) for i in range(3)]
-    pad = 1 if spec.get("smoothing") == "wedges" else 0   # slope pieces may sit one block out
+    pad = 1 if spec.get("smoothing") in ("wedges", "wedges_v2") else 0
     return [max(hi[i] - (lo[i] + hi[i]) // 2, (lo[i] + hi[i]) // 2 - lo[i]) + pad for i in range(3)]
 
 
@@ -232,11 +232,13 @@ def _build_base(spec):
 
     skin = shell(solid)
     interior = plan_interior(spec, shape, solid, region, skin)
+    smoothing_report = {}
     placed = to_pieces(solid, color_of, inside=lambda p: shape.contains(*p),
                        sample_mask=lambda v: shape.sample_mask(v, SAMPLES),
                        smoothing=spec["smoothing"], open_deck=spec["deck"] == "open",
                        region=region, skin=skin, extra=interior.blocks, carve=interior.carve,
-                       fixed={add(v, d) for v in painted for d in DIRS} | set(painted))
+                       fixed={add(v, d) for v in painted for d in DIRS} | set(painted),
+                       diagnostics=smoothing_report)
     # hull skin that never faces the outside is the inner surface (cockpit floor, bilge)
     for p in placed:
         if p.origin in interior.blocks:
@@ -254,6 +256,7 @@ def _build_base(spec):
     warnings += _loose_parts(placed, region, shape, shift)
     info = {"form": form, "shape": shape, "spec": spec, "region": region, "scale": scale,
             "scale_fit": scale_fit,
+            "smoothing_report": smoothing_report,
             "solid_voxels": len(solid), "interior": interior, "warnings": warnings,
             "overlaps": overlaps, "shift": shift}
     return placed, info
@@ -402,6 +405,30 @@ def summary(spec, placed, info):
                                      + ". Reports are in game metres." if s != 1 else "."),
         "Deck height at every metre: deck_profile.",
     ]
+    fit = info.get("smoothing_report")
+    if fit:
+        old, new = fit["original"], fit["refined"]
+        lines.append(f"V2 smoothing selected {fit['selected']} fit; mismatched partial joints "
+                     f"{old['mismatched_joints']} original / {new['mismatched_joints']} refined. "
+                     "Shape-error guard: " + fit["shape_error_allowance"] + ".")
+        corners = fit.get("corners")
+        if corners and corners["replacements"]:
+            lines.append(f"Corner closeouts: {corners['replacements']} local replacements; final "
+                         f"mismatched partial joints {corners['after']['mismatched_joints']}. "
+                         "Neither sampled shape error nor joint count increased.")
+    if spec.get("deck") == "open":
+        floors = (spec.get("interior") or {}).get("decks") or []
+        if floors:
+            floor = max(floors)
+            drops = [form.deck(s) / VOX - floor for s in (0.0, 0.5, 1.0)]
+            lines.append(f"Open-deck walking floor requested at {floor:.2f} m above keel; "
+                         "drop from rim at stern / midship / bow: "
+                         + " / ".join(f"{h:.2f}" for h in drops) + " m. "
+                         "Use analyze_hull to check actual support and floor surfaces.")
+        else:
+            lines.append("Open deck: no interior.decks walking floor specified; the visible "
+                         "floor follows the bottom skin. Set its height above keel separately "
+                         "from hull depth; check analyze_hull before saving.")
     overlaps = info.get("overlaps") or []
     if overlaps:
         lines.append(f"Overlapping superstructure ({len(overlaps)} pairs; the earlier box in the list "

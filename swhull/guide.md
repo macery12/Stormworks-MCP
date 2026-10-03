@@ -167,7 +167,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `beam` | max width at deck, m (for multihulls: each hull's width) | L/B 2.3 (tug) to 5+ (patrol, catamaran hulls 7-10) |
 | `depth` | keel to deck at midship, m | 0.6 (dinghy) to 4 |
 | `deck` | `"closed"` (sealed, floats reliably) or `"open"` (cockpit/well deck) | |
-| `smoothing` | `"blocks"` (default: plain blocks, the player smooths by hand) or `"wedges"` (auto-fit from the whole slope catalogue: wedges 1x1/1x2/1x4, pyramids and inverse pyramids 1x1 to 4x4) | ask the player |
+| `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 when smoothing is requested; inspect the result |
 | `hulls` / `hull_spacing` | 1 mono, 2 catamaran, 3 trimaran; spacing is centreline to centreline, m | |
 | `bow.entry` | fraction of length over which the bow narrows | 0.1 blunt, 0.3 normal, 0.45 very fine |
 | `bow.fullness` | plan shape of the bow: 1 = straight V, 2 = rounded, 3 = bluff | 1.2-2.3 |
@@ -403,5 +403,12 @@ plumbing and in-game confirmation of actual capacity and contents remain player 
   perfectly smooth; slopes in between, and ridges running through the middle
   of a block row, come out as a mix of pieces. Look at the preview before saving. The larger
   corner pieces are not yet checked in game.
+- `smoothing: "wedges_v2"` measures the continuous boundary within partial cells and checks
+  where the sloped surface lies, as well as its angle. It compares both final skins after
+  seal backing and retains the original fit if V2 adds seams or exceeds a small shape-error
+  allowance. Interior floors/walls and their immediate backing stay full blocks in both modes.
+  V2 takes longer. Read `hull_design_guide(topic="smoothing")`, call `analyze_hull` to check
+  floor-to-rim depth, and use `suggest_hull_blocks` for real slope families. This does not
+  make an arbitrary curve exactly representable by the game's limited block catalogue.
 - Previews show a 3/4 view from below too; check the hull bottom there. For details, use
   `inspect_view` (any angle and zoom). `open_in_viewer` gives the player an interactive 3D view.

@@ -208,6 +208,16 @@ stay blocks, and the skin stays watertight. This mode is still being checked in 
 
 ![A fishing boat hull smoothed with wedges](docs/images/preview-fishing-boat-wedges.png)
 
+`smoothing: "wedges_v2"` adds continuous surface angle and position measurements, protects
+interior floor plates, and compares both finished skins. It retains the original fit when
+the refined result adds seams or exceeds its shape-error allowance. Open sheered decks also
+remove the lower skin ribs that previously crossed the walking area. V2 takes longer and
+still needs in-game review; see [block selection and depth guidance](docs/hull-smoothing.md).
+
+`analyze_hull` measures actual structural surfaces, floor gaps and partial-face seams in an
+explicit coordinate frame. `suggest_hull_blocks` ranks real slope families and supplies
+example rotations and mirror flags. Use both when checking a realistic ship's proportions.
+
 ### 3D viewer
 
 [viewer/index.html](viewer/index.html) is a standalone browser viewer for any vehicle file, yours or

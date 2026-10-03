@@ -81,8 +81,9 @@ async def exercise(command, args):
                         init = await session.initialize()
                         assert init.instructions and init.server_info.version
                         tools = {tool.name for tool in (await session.list_tools()).tools}
-                        assert {"preview_hull", "save_hull", "get_runtime_status", "hull_design_guide"} <= tools
-                        for topic in ("workflow", "staged", "building", "testing"):
+                        assert {"preview_hull", "save_hull", "get_runtime_status", "hull_design_guide",
+                                "analyze_hull", "suggest_hull_blocks"} <= tools
+                        for topic in ("workflow", "staged", "building", "testing", "smoothing"):
                             response = await session.call_tool("hull_design_guide", {"topic": topic})
                             assert not response.is_error and response.content[0].text
                         response, status = await asyncio.gather(
@@ -95,6 +96,11 @@ async def exercise(command, args):
                         assert not response.is_error, response.content
                         assert "cache reused" in response.content[0].text
                         assert (temporary / "vehicles" / "packaged smoke test.xml").is_file()
+                        choices = await session.call_tool("suggest_hull_blocks", {"normal": [0, 1, 0.25]})
+                        assert not choices.is_error and "08_wedge_4" in choices.content[0].text
+                        analysis = await session.call_tool("analyze_hull", {"preset": "rowboat", "stations": [8],
+                                                                          "spec": {"smoothing": "wedges_v2"}})
+                        assert not analysis.is_error and "material_y_blocks" in analysis.content[0].text
                         response = await session.call_tool("preview_hull", {"spec": {"length": 500}})
                         assert response.is_error
                     # Disconnecting one client must leave the shared host and another client alive.
