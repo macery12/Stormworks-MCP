@@ -51,7 +51,8 @@ _SCALED = {
     "bow": ("rake",), "stern": ("keel_rise",), "sheer": ("bow", "stern"),
     "section": ("bilge_radius", "keel_width"), "colors": ("waterline", "stripe_height"),
 }
-_SCALED_BOX = ("z", "length", "width", "height", "x", "taper", "rake_front", "rake_back")
+_SCALED_BOX = ("z", "length", "width", "height", "x", "taper", "rake_front", "rake_back",
+               "corner_radius", "corner_chamfer", "roof_radius")
 _SCALED_BULB = ("length", "width", "height", "y", "protrude")
 _SCALED_SKEG = ("z", "length", "x", "width", "bottom")
 _SCALED_PAINT = ("z", "length", "y", "height", "x", "width", "radius", "thickness")
@@ -131,6 +132,8 @@ def _scale_lengths(out, s):
             box["y"] = f"{ref}{off * s:+g}" if off else ref
         if isinstance(box.get("band"), dict):
             mul(box["band"], ("from", "to"))
+        if isinstance(box.get("waist"), dict):
+            mul(box["waist"], ("from", "peak", "to", "inset"))
         if isinstance(box.get("repeat"), dict):
             mul(box["repeat"], ("dx", "dy", "dz"))
     for skeg in out.get("skegs") or []:
@@ -204,9 +207,51 @@ def validate(spec):
             problems.append(f"{where}.axis must be x, y or z")
         if box.get("pivot", "base") not in PIVOTS:
             problems.append(f"{where}.pivot must be one of {', '.join(PIVOTS)}")
-        for k in ("pitch", "yaw", "taper", "rake_front", "rake_back", "x"):
+        for k in ("pitch", "yaw", "taper", "rake_front", "rake_back", "x", "corner_radius",
+                  "corner_chamfer", "roof_radius"):
             if box.get(k) is not None and not _num(box[k]):
                 problems.append(f"{where}.{k} must be a number")
+        if _num(box.get("corner_radius", 0)) and _num(box.get("corner_chamfer", 0)) and (
+                box.get("corner_radius", 0) > 0 and box.get("corner_chamfer", 0) > 0):
+            problems.append(f"{where}: choose corner_radius or corner_chamfer, not both")
+        for key, dimensions in (("corner_radius", ("width", "length")),
+                                ("corner_chamfer", ("width", "length")),
+                                ("roof_radius", ("width", "length", "height"))):
+            radius = box.get(key, 0)
+            if not _num(radius):
+                continue
+            if radius < 0:
+                problems.append(f"{where}.{key} must be nonnegative")
+            elif radius and box.get("shape", "box") not in ("box", "lattice"):
+                problems.append(f"{where}.{key} applies only to box or lattice shapes")
+            elif all(_num(box.get(k)) for k in dimensions):
+                limits = [box["width"] / 2, box["length"] / 2]
+                if key == "roof_radius":
+                    limits.append(box["height"])
+                if radius > min(limits):
+                    problems.append(f"{where}.{key} exceeds the box dimensions")
+            elif (key == "roof_radius" and isinstance(box.get("floors"), int)
+                  and all(_num(box.get(k)) for k in ("width", "length"))
+                  and radius > min(box["width"] / 2, box["length"] / 2,
+                                   box["floors"] * FLOOR_HEIGHT)):
+                problems.append(f"{where}.{key} exceeds the box dimensions")
+        waist = box.get("waist")
+        if waist is not None:
+            keys = ("from", "peak", "to", "inset")
+            if not isinstance(waist, dict) or any(not _num(waist.get(k)) or
+                                                  not math.isfinite(waist[k]) for k in keys):
+                problems.append(f"{where}.waist needs numeric from, peak, to and inset (metres)")
+            elif box.get("shape", "box") not in ("box", "lattice"):
+                problems.append(f"{where}.waist applies only to box or lattice shapes")
+            else:
+                height = (box.get("height") if _num(box.get("height")) else
+                          box.get("floors", 0) * FLOOR_HEIGHT)
+                if not (0 <= waist["from"] < waist["peak"] < waist["to"] <= height):
+                    problems.append(f"{where}.waist must satisfy 0 <= from < peak < to <= height")
+                if (waist["inset"] <= 0 or
+                        (all(_num(box.get(k)) for k in ("width", "length")) and
+                         waist["inset"] >= min(box["width"], box["length"]) / 2)):
+                    problems.append(f"{where}.waist.inset must fit inside half the box")
         rep = box.get("repeat")
         if rep is not None and (not isinstance(rep, dict) or not isinstance(rep.get("count"), int)
                                 or not 1 <= rep["count"] <= 100):
@@ -434,6 +479,12 @@ class Box:
         self.shape = box.get("shape", "box")
         self.axis = box.get("axis", "y")
         self.taper = box.get("taper", 0.0) * VOX
+        self.corner_radius = box.get("corner_radius", 0.0) * VOX
+        self.corner_chamfer = box.get("corner_chamfer", 0.0) * VOX
+        self.roof_radius = box.get("roof_radius", 0.0) * VOX
+        waist = box.get("waist")
+        self.waist = ({k: waist[k] * VOX for k in ("from", "peak", "to", "inset")}
+                      if waist else None)
         self.rake_f = box.get("rake_front", 0.0) * VOX
         self.rake_b = box.get("rake_back", 0.0) * VOX
         self.ring = max(1, round(box.get("ring_every", 1.0) * VOX))
@@ -464,12 +515,35 @@ class Box:
                                "top and changes nothing; use 0 or at least 0.25 m")
         elif self.rake_f or self.rake_b:
             out.append(f"box '{self.name}': rake_front/rake_back only apply to shape box")
+        for key, radius in (("corner_radius", self.corner_radius),
+                            ("corner_chamfer", self.corner_chamfer),
+                            ("roof_radius", self.roof_radius)):
+            if 0 < radius < 0.5:
+                out.append(f"box '{self.name}': {key} under 0.125 m may not change any blocks")
+        if self.corner_chamfer:
+            levels = [0.0, float(self.h)]
+            if self.waist:
+                levels.extend(self.waist[k] for k in ("from", "peak", "to"))
+            narrowest = self.hw - 0.5 - max(self._wall_inset(v) for v in levels)
+            if self.corner_chamfer > narrowest:
+                out.append(f"box '{self.name}': corner_chamfer is wider than the remaining "
+                           "half-width at the narrowest wall; reduce the chamfer, taper or waist inset")
         if self.spec.get("_mirror_on_centre"):
             out.append(f"box '{self.name}': mirror_x does nothing at x = 0")
         return out
 
     def top(self):
         return self.y0 + self.h
+
+    def _wall_inset(self, v):
+        inset = self.taper * min(1.0, max(0.0, v / self.h))
+        if self.waist:
+            a, b, c, depth = (self.waist[k] for k in ("from", "peak", "to", "inset"))
+            if a < v <= b:
+                inset += depth * (v - a) / (b - a)
+            elif b < v < c:
+                inset += depth * (c - v) / (c - b)
+        return inset
 
     # local <-> build coordinates
     def _origin(self):
@@ -518,13 +592,33 @@ class Box:
         if not vlo - 1e-6 <= v <= vhi + 1e-6:
             return False
         f = min(1.0, max(0.0, v / h))
-        inset = self.taper * f
+        inset = self._wall_inset(v)
         shape = self.shape
         if shape in ("box", "lattice"):
-            wlo, whi = _span(inset + self.rake_b * f, zl - inset - self.rake_f * f, pad)
+            roof_inset = 0.0
+            if self.roof_radius and v > h - self.roof_radius:
+                rise = min(self.roof_radius, v - (h - self.roof_radius))
+                roof_inset = self.roof_radius - math.sqrt(max(0.0, self.roof_radius ** 2 - rise ** 2))
+            wlo, whi = _span(inset + roof_inset + self.rake_b * f,
+                             zl - inset - roof_inset - self.rake_f * f, pad)
             if not wlo - 1e-6 <= w <= whi + 1e-6:
                 return False
-            return abs(u) <= max(self.hw - inset - 0.5, pad) + 1e-6
+            half_width = max(self.hw - inset - roof_inset - 0.5, pad)
+            if abs(u) > half_width + 1e-6:
+                return False
+            if not (self.corner_radius or self.corner_chamfer):
+                return True
+            half_length = (whi - wlo) / 2
+            radius = min(self.corner_radius or self.corner_chamfer, half_width, half_length)
+            du = max(0.0, abs(u) - (half_width - radius))
+            dw = max(0.0, abs(w - (wlo + whi) / 2) - (half_length - radius))
+            if self.corner_chamfer:
+                # Both side spans already include the shared taper. Without
+                # compensation their sum makes the diagonal wall retreat twice
+                # as fast as either adjoining wall, so no pyramid family can
+                # continue the wedges cleanly around the corner.
+                return du + dw <= radius + inset + roof_inset + 1e-6
+            return du * du + dw * dw <= radius * radius + 1e-6
         if shape == "cylinder" and self.axis != "y":
             rv = max(h / 2 - 0.25, pad)
             if self.axis == "z":       # along the hull; taper narrows it toward the fore end

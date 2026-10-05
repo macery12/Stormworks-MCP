@@ -198,6 +198,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 ```json
 {"name": "wheelhouse", "z": 9.0, "length": 3.5, "width": 3.4, "height": 2.25,
  "x": 0, "y": null, "taper": 0.15, "rake_front": 0.4, "rake_back": 0.0,
+ "corner_chamfer": 0.5,
  "color": "F0F0F0", "band": {"from": 1.25, "to": 1.9, "color": "1A2530"}}
 ```
 
@@ -206,6 +207,24 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
   catamaran bridge deck. The preview summary lists deck heights at stern/midship/bow.
 - `taper` slopes all sides inward toward the top (m); `rake_front` slopes the front face back
   (raked windscreen); `rake_back` slopes the rear face.
+- `corner_radius` rounds the four vertical corners of a box or lattice footprint in plan view.
+  It is in metres, defaults to 0 (sharp corners), and must fit within half the width and length.
+  The same radius follows tapered and raked walls; use at least 0.25 m for a visible curve.
+- `corner_chamfer` cuts a straight diagonal face across each vertical corner. It uses the same
+  units and limits as `corner_radius`; choose one of the two. A chamfer is useful when a deliberate
+  faceted corner suits the vehicle and pyramid pairs can follow it. A 0.25 m chamfer on a
+  vertical wall can be built with sideways 1x1 wedges.
+- `waist` makes a shallow indentation that returns to the original width above it. Give
+  `from`, `peak`, `to`, and `inset` in metres above the box bottom, for example
+  `"waist": {"from": 0, "peak": 0.5, "to": 1, "inset": 0.25}`. On a 1 m tall wall this
+  makes a 1:2 inward slope followed by a 1:2 outward slope. With a chamfered corner,
+  matching inverse pyramids can meet vertically at the waist. Use dimensions that leave
+  room for the chamfer at the narrowest point, and inspect the preview.
+- `roof_radius` rounds the upper side and end edges into the roof of a box or lattice. It also
+  defaults to 0; use it for a curved wheelhouse roof rather than stacking smaller boxes.
+  The radius must fit within the height and half the width and length. Large values reduce
+  usable headroom near the edges. Combined roof rounding, taper, and corner rounding can leave
+  visible facets; inspect a close-up preview and the interior before saving.
 - `band` paints a horizontal stripe (window band) between `from` and `to` metres above the box
   bottom. Taper and rakes under 0.25 m barely register at 0.25 m per block; the summary warns
   when one changes nothing.

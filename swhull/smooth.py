@@ -64,6 +64,7 @@ W_PART = 1.0      # per part: prefer one long piece over several short ones on a
 W_EDGE = 6.0      # per voxel face where a sloped edge runs into a flat face or open air (a
                   # lone pyramid on blocks, a sawtooth of wedge ends): a slope should join a
                   # matching slope (pyramid to inverse pyramid or wedge end) or not be there
+LONG_WEDGE_EDGE = 2.0  # a 1x4 wedge needs a matching side run or a deliberate closeout
 W_TILT = 3.0      # per unit of slope area: a slope tilted along an axis the surface is not
                   # (it can only follow the surface as a zigzag of mirrored pieces)
 W_POSITION = 8.0   # V2: per block of normal displacement per unit of slope area
@@ -637,6 +638,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
                   #  error left once placed (m,))
     for t, pl in enumerate(cat):
         offs, vol = pl["offs"], pl["vol"]
+        edge_factor = LONG_WEDGE_EDGE if pl["piece"].d == "08_wedge_4" else 1.0
         k_n = len(offs)
         anchors = np.arange(n)
         cols, costs = [], []
@@ -678,7 +680,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
                     nb = nb_all[c, di]
                     mine = pl["face"][k, di]
                     new = (W_SURF * _pen(mine, nb, pp_w[c, di], pb_w[c, di])
-                           + edge_ww[c, di] * _edge(mine, nb))
+                           + edge_factor * edge_ww[c, di] * _edge(mine, nb))
                     dE += new - old
                     res += new
         keep = dE <= ALLOW
@@ -728,6 +730,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
         hope=1 the exact change; by default undecided neighbours are taken as likely to
         match (see OPTIMISM). With `both`, also the error the piece itself leaves."""
         faces, inner, area, pn, vol = face_l[t], inner_l[t], area_l[t], pn_l[t], vol_l[t]
+        edge_factor = LONG_WEDGE_EDGE if cat[t]["piece"].d == "08_wedge_4" else 1.0
         dE = W_PART * (1 - sum(solid_l[c] for c in row))
         res = W_PART
         for k, c in enumerate(row):
@@ -768,7 +771,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
                     new = W_SURF * ((mine & ~nb & FACE).bit_count() * pps[di] * w
                                     + (nb & ~mine & FACE).bit_count() * pb)
                     if mine != nb and (mine not in nb_flat or nb not in nb_flat):
-                        new += eds[di] * w
+                        new += edge_factor * eds[di] * w
                     dE += new - old
                     res += new
         return (dE, res) if both else dE
@@ -988,6 +991,7 @@ def _fit_metrics(placed, cells, masks):
         return _face_bits(lambda p: test(apply(back, p)), offset, direction)
 
     mismatches = 0
+    long_wedge_mismatches = 0
     for v, part in owner.items():
         for direction in DIRS[::2]:
             n = add(v, direction)
@@ -998,7 +1002,10 @@ def _fit_metrics(placed, cells, masks):
             b = face(other.piece.d, other.Q, sub(n, other.origin), tuple(-x for x in direction))
             if a != b and (a not in (0, FACE) or b not in (0, FACE)):
                 mismatches += 1
-    return {"wrong_samples": wrong, "tested_samples": samples, "mismatched_joints": mismatches}
+                if part.piece.d == "08_wedge_4" or other.piece.d == "08_wedge_4":
+                    long_wedge_mismatches += 1
+    return {"wrong_samples": wrong, "tested_samples": samples,
+            "mismatched_joints": mismatches, "long_wedge_mismatches": long_wedge_mismatches}
 
 
 def _prefer_refined(original, refined):
@@ -1013,7 +1020,58 @@ def _prefer_refined(original, refined):
             and refined["wrong_samples"] <= original["wrong_samples"] + original["tested_samples"] * 0.005)
 
 
-def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=frozenset()):
+def _diagonal_corner_templates(cat):
+    """Whole wedge/pyramid/inverse corners copied from the Green_Test build pattern.
+
+    The second pyramid starts one cell along local -x after the inverse. Keeping
+    the pieces in one candidate lets the fitter replace a bad wedge-to-wedge
+    joint without first accepting a lone pyramid against the old wedges.
+    """
+    by_shape = {(pl["piece"].d, pl["Q"]): t for t, pl in enumerate(cat)}
+    families = (("02_wedge", "03_pyramid", "04_invpyramid"),
+                ("05_wedge_2", "06_pyramid_2", "07_invpyramid_2"),
+                ("08_wedge_4", "09_pyramid_4", "10_invpyramid_4"))
+    templates = []
+    for wedge, pyramid, inverse in families:
+        for name, Q in by_shape:
+            if name != pyramid or (inverse, Q) not in by_shape or (wedge, Q) not in by_shape:
+                continue
+            p, i, w = (by_shape[(d, Q)] for d in (pyramid, inverse, wedge))
+            # A: toward the inverse; B: the diagonal turn. The initial wedge is
+            # attached to the pyramid's compatible end face (local +x).
+            A, B, lead = (apply(Q, v) for v in ((0, -1, 0), (-1, 0, 0), (1, 0, 0)))
+            chain = ((p, (0, 0, 0)), (i, A), (p, add(A, B)),
+                     (i, add(add(A, A), B)))
+            templates.extend((chain[:3], chain, ((w, lead),) + chain[:3],
+                              ((w, lead),) + chain))
+            turn = tuple((Q[a][1], -Q[a][0], Q[a][2]) for a in range(3))
+            w_turn = by_shape.get((wedge, turn))
+            if w_turn is None:
+                # A 1x1 wedge has fewer distinct placements than rotations:
+                # another Q can encode the same turned shape.
+                normal, _ = _slope(cat[w]["piece"])
+                wanted_normal = apply(turn, normal)
+                wanted_offs = {apply(turn, f) for f in cat[w]["piece"].footprint}
+                w_turn = next((t for t, pl in enumerate(cat)
+                               if pl["piece"].d == wedge
+                               and {tuple(int(x) for x in o) for o in pl["offs"]} == wanted_offs
+                               and np.allclose(pl["normal"], wanted_normal)), None)
+            if w_turn is not None:
+                for steps in range(2, 7):
+                    diagonal = []
+                    for j in range(steps):
+                        at = add(tuple(j * a for a in A), tuple(j * b for b in B))
+                        diagonal.append((p, at))
+                        if j + 1 < steps:
+                            diagonal.append((i, add(at, A)))
+                    tail = add(tuple(steps * a for a in A),
+                               tuple((steps - 1) * b for b in B))
+                    templates.append(((w, lead), *diagonal, (w_turn, tail)))
+    return templates
+
+
+def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=frozenset(),
+                      diagnostics=None):
     """Refit complete parts around a crease, including wedge ends facing empty air.
 
     A seam count between occupied footprints misses a notch at a wedge's empty end.
@@ -1030,10 +1088,6 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
     gradients = _mask_gradient(trans)
     creased = _crease(M[partial], gradients[partial]) > 2.5
     corners = {cells[i] for i in np.flatnonzero(partial)[creased]}
-    if not corners:
-        return placed, 0
-    corners |= {add(v, d) for v in corners for d in NEIGHBOURS_26
-                if add(v, d) in allowed and 0 < masks[add(v, d)] < FULL_MASK}
     owner = {v: i for i, p in enumerate(placed) for v in p.voxels()}
     parts = dict(enumerate(placed))
     next_id = len(parts)
@@ -1055,6 +1109,46 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
             return FACE
         test, back = CONTAINS[d], _transpose(Q)
         return _face_bits(lambda p: test(apply(back, p)), offset, DIRS[di])
+
+    # A rounded corner has no sharp target crease, yet an unmatched wedge end can leave a
+    # visible triangular dent. Include both occupied joins and exposed 1x4 wedge ends as
+    # closeout sites. The cap keeps a large vessel's repair pass bounded.
+    seams = []
+    for v, i in owner.items():
+        if v not in allowed:
+            continue
+        left = parts[i]
+        if left.piece.d == "08_wedge_4":
+            for di, d in enumerate(DIRS):
+                if add(v, d) in owner:
+                    continue
+                a = part_face(left.piece.d, left.Q, sub(v, left.origin), di)
+                if a in (0, FACE):
+                    continue
+                target = _face_bits(inside, v, d)
+                gap = (a ^ target).bit_count()
+                if gap >= 4:
+                    seams.append((gap, v, v))
+        for di in range(0, len(DIRS), 2):
+            q = add(v, DIRS[di])
+            j = owner.get(q)
+            if j is None or i == j or q not in allowed:
+                continue
+            if not (0 < masks[v] < FULL_MASK or 0 < masks[q] < FULL_MASK):
+                continue
+            right = parts[j]
+            a = part_face(left.piece.d, left.Q, sub(v, left.origin), di)
+            b = part_face(right.piece.d, right.Q, sub(q, right.origin), di ^ 1)
+            if a != b and (a not in (0, FACE) or b not in (0, FACE)):
+                gap = (a ^ b).bit_count()
+                seams.append((gap, v, q))
+    seams.sort(reverse=True)
+    for _gap, v, q in seams[:512]:
+        corners.update((v, q))
+    if not corners:
+        return placed, 0
+    corners |= {add(v, d) for v in corners for d in NEIGHBOURS_26
+                if add(v, d) in allowed and 0 < masks[add(v, d)] < FULL_MASK}
 
     def actual(v, replacement):
         if v in replacement:
@@ -1115,32 +1209,103 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
             colors = {colour(v) for v in row if masks[v]}
             if len(colors) != 1:
                 continue
-            candidates.append((t, origin, row, next(iter(colors))))
+            candidates.append((((t, origin),), row, next(iter(colors))))
+    # Anchor a whole corner to an existing wedge run. Searching outward from the
+    # wedge's side avoids selecting unrelated pyramids elsewhere on a curved hull.
+    all_templates = _diagonal_corner_templates(cat)
+    templates = {}
+    for template in all_templates:
+        if "wedge" in cat[template[0][0]]["piece"].d:
+            key = (cat[template[0][0]]["piece"].d, cat[template[0][0]]["Q"])
+            templates.setdefault(key, []).append(template)
+    run_sites = []
+    for i, part in parts.items():
+        if "wedge" not in part.piece.d or (part.piece.d, part.Q) not in templates:
+            continue
+        d = apply(part.Q, (-1, 0, 0))
+        di = DIRS.index(d)
+        gap = 0
+        for v in part.voxels():
+            q = add(v, d)
+            if v not in allowed or q not in allowed:
+                continue
+            a = part_face(part.piece.d, part.Q, sub(v, part.origin), di)
+            j = owner.get(q)
+            b = (part_face(parts[j].piece.d, parts[j].Q, sub(q, parts[j].origin), di ^ 1)
+                 if j is not None else 0)
+            gap += (a ^ b).bit_count()
+        if gap:
+            run_sites.append((gap, i))
+    seen_chains = set()
+    valid_chains = 0
+
+    def offer(entries):
+        if entries in seen_chains:
+            return None
+        seen_chains.add(entries)
+        volumes = {}
+        for t, part_origin in entries:
+            for o, m in zip(cat[t]["offs"], cat[t]["vol"]):
+                v = add(part_origin, tuple(int(x) for x in o))
+                if v in volumes:
+                    break
+                volumes[v] = int(m)
+            else:
+                continue
+            break
+        if len(volumes) != sum(len(cat[t]["offs"]) for t, _ in entries):
+            return None
+        row = list(volumes)
+        if any(v not in allowed or v in fixed for v in row):
+            return None
+        if any((masks[v] ^ m).bit_count() > 32 or (not masks[v] and m)
+               or (v not in owner and masks[v] == FULL_MASK) for v, m in volumes.items()):
+            return None
+        colors = {colour(v) for v in row if masks[v]}
+        if len(colors) != 1:
+            return None
+        return entries, row, next(iter(colors))
+
+    for _, i in sorted(run_sites, reverse=True)[:128]:
+        part = parts[i]
+        for template in templates[(part.piece.d, part.Q)]:
+            base = sub(part.origin, template[0][1])
+            entries = tuple((t, add(base, shift)) for t, shift in template)
+            result = offer(entries)
+            if result is not None:
+                candidates.append(result)
+                valid_chains += 1
+    if diagnostics is not None:
+        diagnostics.update({"run_sites": len(run_sites), "run_candidates": valid_chains})
     changes = 0
+    run_changes = 0
     for _round in range(2):
         scored = []
-        for j, (t, origin, row, color) in enumerate(candidates):
+        for j, (entries, row, color) in enumerate(candidates):
             here = {owner[v] for v in row if v in owner}
             if any(v in fixed or v not in allowed for i in here for v in parts[i].voxels()):
                 continue
             changed = set(row) | {v for i in here for v in parts[i].voxels()}
-            new = Placed(cat[t]["piece"], origin, cat[t]["Q"], color)
+            new_parts = [Placed(cat[t]["piece"], origin, cat[t]["Q"], color)
+                         for t, origin in entries]
             replacement = {v: (Placed(BLOCK, v, color=colour(v)) if v in S else None)
                            for v in changed}
-            replacement.update(dict.fromkeys(row, new))
-            key = (new.piece.d, new.Q)
-            if key not in full_cache:
-                full_cache[key] = _full_faces(new.piece, new.Q)
+            for new in new_parts:
+                replacement.update(dict.fromkeys(new.voxels(), new))
             # Score the backing along with the corner, rather than add it after
             # accepting a change that turns out to introduce an interior seam.
-            for f in new.piece.footprint:
-                w = apply(new.Q, f)
-                for d in DIRS:
-                    v = add(add(new.origin, w), d)
-                    if (v in S and v not in removed and actual(v, replacement) is None
-                            and (w, d) not in full_cache[key]):
-                        replacement[v] = Placed(BLOCK, v, color=colour(v))
-                        changed.add(v)
+            for new in new_parts:
+                key = (new.piece.d, new.Q)
+                if key not in full_cache:
+                    full_cache[key] = _full_faces(new.piece, new.Q)
+                for f in new.piece.footprint:
+                    w = apply(new.Q, f)
+                    for d in DIRS:
+                        v = add(add(new.origin, w), d)
+                        if (v in S and v not in removed and actual(v, replacement) is None
+                                and (w, d) not in full_cache[key]):
+                            replacement[v] = Placed(BLOCK, v, color=colour(v))
+                            changed.add(v)
             before, after = errors(changed, {}), errors(changed, replacement)
             if (after[0] <= before[0] and after[1] < before[1]
                     and after[2] <= before[2] and after[3] <= before[3]):
@@ -1167,8 +1332,11 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
                     owner[v] = unique[key]
             touched |= neighbourhood
             changes += 1
+            run_changes += len(candidates[_j][0]) > 1
         if not touched:
             break
+    if diagnostics is not None:
+        diagnostics["run_replacements"] = run_changes
     return list(parts.values()), changes
 
 
@@ -1244,8 +1412,9 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
                                 "shape_error_allowance": "0.5 percentage points on sampled partial cells"})
         selected = placed if use_refined else original
         before = new_metrics if use_refined else old_metrics
+        corner_diagnostics = {}
         repaired, changes = _corner_closeouts(selected, S, cells, masks, inside, protected,
-                                              color_of, removed | set(carve))
+                                              color_of, removed | set(carve), corner_diagnostics)
         after = _fit_metrics(repaired, cells, masks) if changes else before
         accept = (changes > 0 and after["wrong_samples"] <= before["wrong_samples"]
                   and after["mismatched_joints"] <= before["mismatched_joints"])
@@ -1253,6 +1422,6 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
             diagnostics["corners"] = {"replacements": changes if accept else 0,
                                       "attempted_replacements": changes,
                                       "before": before, "after": after if accept else before,
-                                      "proposal": after}
+                                      "proposal": after, **corner_diagnostics}
         return repaired if accept else selected
     return placed

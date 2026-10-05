@@ -31,6 +31,7 @@ more parts as an improvement. Inspect the underside, bow, stern, and cross secti
 | A face slopes in two directions | Pyramid and inverse-pyramid family, joined on matching partial faces | An isolated pyramid against full blocks, or mismatched triangle edges |
 | Two sloped wedge runs meet at a convex corner | Test a pyramid of the matching run size and orientation against both adjoining faces | Extending one side's wedge through the corner or leaving a protruding cube |
 | Long shallow uniform run | Longer pieces if the full footprint fits | A 1x4 piece across a rapidly changing bow curve |
+| The side edge of a 1x4 run | Matching pyramid/inverse closeout or a shorter wedge run | An exposed partial side face repeated down the edge |
 | Changing curvature or a transition | Progressively different slope families, checked from both axes | Jumping between opposite rotations to gain a few volume samples |
 | Walking floor or clearance next to the skin | Full floor cells and solid backing | Letting the large corner of an inverse pyramid cut into the floor |
 
@@ -77,6 +78,13 @@ Two wedge runs meeting at a corner are distinct from one plane sloping in two ax
 Preserve the intended intersection and test the actual neighbour coverage; a pyramid's
 name or angle alone does not prove that its size, rotation and depth fit that corner.
 The summary states which result was selected. This costs additional build time.
+
+For a deckhouse, `corner_chamfer` creates a straight diagonal corner face, while
+`corner_radius` makes a round plan-view corner. `roof_radius` rolls the top edge. These
+geometry controls can give the fitter a more intentional surface, but combining a large
+roof radius with tapered and raked walls is still difficult to tile cleanly. Review those
+corners in a close-up preview. A long wedge should be selected with its side closeout in
+mind; a good volume fit alone does not make its edge coherent.
 
 These are approximation metrics. A seam can be an intentional edge, and a sample cannot
 prove a subvoxel seal. Neither metric is a percentage of visual correctness. Keep reviewing

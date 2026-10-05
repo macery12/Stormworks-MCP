@@ -2,6 +2,7 @@
 import pytest
 
 from swhull.build import build, resolve_spec
+from swhull.hull import Box, game_units
 from swhull.presets import PRESETS
 from swhull.vehicle import read_components, to_xml
 
@@ -65,3 +66,94 @@ def test_bad_shape_parameters_produce_actionable_errors(bad, message):
 def test_misspelled_patch_cannot_silently_leave_design_unchanged():
     with pytest.raises(ValueError, match="unknown field spec.lenght"):
         resolve_spec(patch=[{"op": "replace", "path": "/lenght", "value": 8}])
+
+
+def test_superstructure_corner_radius_rounds_footprint_and_scales():
+    box = {"name": "wheelhouse", "z": 0, "length": 4, "width": 4, "height": 2,
+           "corner_radius": 1, "taper": 0.25}
+    square = Box({**box, "corner_radius": 0}, 0)
+    rounded = Box(box, 0)
+    assert square._solid(7, 0, 0.5)
+    assert not rounded._solid(7, 0, 0.5)
+    assert rounded._solid(0, 0, 0.5)
+    assert rounded._solid(7, 0, 8)
+    assert rounded._solid(-7, 0, 8)
+    assert rounded._solid(0, 7, 8)
+    assert not rounded._solid(7, 7, 0.5)
+
+    spec = resolve_spec({"scale": "1:2", "superstructure": [box]})
+    assert game_units(spec)["superstructure"][0]["corner_radius"] == 0.5
+
+
+def test_superstructure_roof_radius_rounds_upper_edges():
+    box = {"name": "wheelhouse", "z": 0, "length": 4, "width": 4, "height": 2,
+           "roof_radius": 1}
+    square = Box({**box, "roof_radius": 0}, 0)
+    rounded = Box(box, 0)
+    assert square._solid(6, 7.5, 8)
+    assert not rounded._solid(6, 7.5, 8)
+    assert rounded._solid(6, 3, 8)
+    assert rounded._solid(0, 7.5, 8)
+    assert not rounded._solid(0, 7.5, 1)
+
+    spec = resolve_spec({"scale": "1:2", "superstructure": [box]})
+    assert game_units(spec)["superstructure"][0]["roof_radius"] == 0.5
+
+
+def test_superstructure_chamfer_has_a_straight_corner_face():
+    box = {"name": "deckhouse", "z": 0, "length": 4, "width": 4, "height": 2}
+    rounded = Box({**box, "corner_radius": 1}, 0)
+    chamfered = Box({**box, "corner_chamfer": 1}, 0)
+    assert rounded._solid(6, 0, 14.5)
+    assert not chamfered._solid(6, 0, 14.5)
+    assert chamfered._solid(7, 0, 8)
+    assert chamfered._solid(-7, 0, 8)
+    spec = resolve_spec({"scale": "1:2", "superstructure": [{**box, "corner_chamfer": 1}]})
+    assert game_units(spec)["superstructure"][0]["corner_chamfer"] == 0.5
+
+
+@pytest.mark.parametrize("key,radius", [("corner_radius", -0.25), ("corner_radius", 2.1),
+                                        ("corner_chamfer", -0.25), ("corner_chamfer", 2.1),
+                                        ("roof_radius", -0.25), ("roof_radius", 2.1)])
+def test_invalid_superstructure_radius(key, radius):
+    box = {"z": 0, "length": 4, "width": 4, "height": 2,
+           key: radius}
+    with pytest.raises(ValueError, match=key):
+        resolve_spec({"superstructure": [box]})
+
+
+def test_superstructure_cannot_request_round_and_chamfered_corners():
+    with pytest.raises(ValueError, match="choose corner_radius or corner_chamfer"):
+        resolve_spec({"superstructure": [{"z": 0, "length": 4, "width": 4, "height": 2,
+                                           "corner_radius": 0.5, "corner_chamfer": 0.5}]})
+
+
+def test_superstructure_waist_inset_returns_to_original_width_and_scales():
+    box = {"name": "deckhouse", "z": 0, "length": 5, "width": 4, "height": 1,
+           "corner_chamfer": 0.5,
+           "waist": {"from": 0, "peak": 0.5, "to": 1, "inset": 0.25}}
+    shape = Box(box, 0)
+    assert shape._solid(7, 0.5, 10)
+    assert not shape._solid(7, 2, 10)
+    assert shape._solid(7, 3.5, 10)
+    spec = resolve_spec({"scale": "1:2", "superstructure": [box]})
+    assert game_units(spec)["superstructure"][0]["waist"] == {
+        "from": 0, "peak": 0.25, "to": 0.5, "inset": 0.125}
+
+
+@pytest.mark.parametrize("waist", [
+    {"from": 0, "peak": 0.5, "to": 1},
+    {"from": 0.5, "peak": 0.5, "to": 1, "inset": 0.25},
+    {"from": 0, "peak": 0.5, "to": 1.5, "inset": 0.25},
+    {"from": 0, "peak": 0.5, "to": 1, "inset": -0.25},
+])
+def test_invalid_superstructure_waist(waist):
+    with pytest.raises(ValueError, match="waist"):
+        resolve_spec({"superstructure": [{"z": 0, "length": 5, "width": 4,
+                                           "height": 1, "waist": waist}]})
+
+
+def test_chamfer_warns_when_taper_pinches_the_corner():
+    shape = Box({"name": "narrow", "z": 0, "length": 5, "width": 3, "height": 2,
+                 "taper": 1, "corner_chamfer": 1}, 0)
+    assert any("corner_chamfer is wider" in warning for warning in shape.warnings())

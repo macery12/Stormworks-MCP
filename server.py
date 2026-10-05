@@ -54,6 +54,11 @@ For realistic hulls read hull_design_guide(topic="smoothing"). Use analyze_hull 
 keel, walking floor and rim separately; a part's footprint is not its solid material.
 Use suggest_hull_blocks for slope families, then check position, orientation and neighboring
 faces. Try smoothing="wedges_v2" for guarded continuous-surface fitting; compare the previews.
+For superstructure corners, choose corner_chamfer for a deliberate facet or corner_radius for
+a round footprint; roof_radius rounds the roof edge. Preview compound curves close up. Prefer
+block-friendly slope ratios (1:1, 1:2, 1:4) when dimensions allow, then inspect their joins.
+For a deliberate inward-and-outward wall indentation, use a waist with from/peak/to/inset;
+0.25 m inset over each 0.5 m rise gives 1x2 wedge and inverse-pyramid opportunities.
 Loop: pick a preset or write a
 spec -> `preview_hull` (and `preview_interior` for rooms) -> look at the image and critique it
 against the player's brief -> adjust -> `save_hull`. For big designs, keep the spec on the

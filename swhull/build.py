@@ -416,6 +416,9 @@ def summary(spec, placed, info):
             lines.append(f"Corner closeouts: {corners['replacements']} local replacements; final "
                          f"mismatched partial joints {corners['after']['mismatched_joints']}. "
                          "Neither sampled shape error nor joint count increased.")
+        final_fit = corners["after"] if corners else fit[fit["selected"]]
+        lines.append(f"Joints involving 1x4 wedges: {final_fit['long_wedge_mismatches']} mismatched "
+                     "partial faces; inspect exposed run edges in the preview.")
     if spec.get("deck") == "open":
         floors = (spec.get("interior") or {}).get("decks") or []
         if floors:

@@ -8,9 +8,10 @@ import numpy as np
 
 from swhull.build import build, resolve_spec
 from swhull.definitions import definitions_dir, load
-from swhull.pieces import BY_NAME, CONTAINS, DIRS, SLOPES, _inv, _tetra, add, apply
+from swhull.pieces import BY_NAME, CONTAINS, DIRS, SLOPES, Placed, _inv, _tetra, add, apply
 from swhull.smooth import (SAMPLES, _face_bits, _full_faces, _placements,
                           _refined_planes, _slope, fit_pieces, to_pieces, _prefer_refined,
+                          _catalogue, _corner_closeouts, _diagonal_corner_templates,
                           deck_plates, shell)
 
 ORIENT = {0: (1, 0, 0), 1: (-1, 0, 0), 2: (0, 1, 0), 3: (0, -1, 0), 4: (0, 0, 1), 5: (0, 0, -1)}
@@ -153,6 +154,177 @@ def test_pyramid_and_inverse_faces_agree_where_they_meet(dims):
             other = _face_bits(lambda p, s=shift: inv(tuple(p[i] - s[i] for i in range(3))),
                                add(cell, d), tuple(-x for x in d))
             assert mine == other, (dims, d, cell)
+
+
+@pytest.mark.parametrize("wedge,pyramid,inverse", [
+    ("02_wedge", "03_pyramid", "04_invpyramid"),
+    ("05_wedge_2", "06_pyramid_2", "07_invpyramid_2"),
+    ("08_wedge_4", "09_pyramid_4", "10_invpyramid_4"),
+])
+def test_green_test_diagonal_corner_faces_match(wedge, pyramid, inverse):
+    # Relative positions and orientation measured from the hand-built Green_Test.xml.
+    # The 1x2 example has a wedge, then pyramid/inverse/pyramid/inverse
+    # stepping diagonally; the same joints work for 1x1 and 1x4.
+    Q = ((0, -1, 0), (0, 0, -1), (1, 0, 0))
+    back = tuple(zip(*Q))
+    A, B, lead = (apply(Q, v) for v in ((0, -1, 0), (-1, 0, 0), (1, 0, 0)))
+    parts = [Placed(BY_NAME[d], o, Q) for d, o in (
+        (wedge, lead), (pyramid, (0, 0, 0)), (inverse, A),
+        (pyramid, add(A, B)), (inverse, add(add(A, A), B)))]
+    owner = {v: part for part in parts for v in part.voxels()}
+    assert len(owner) == sum(len(part.piece.footprint) for part in parts)
+    checked = 0
+    for v, part in owner.items():
+        for d in DIRS:
+            q = add(v, d)
+            other = owner.get(q)
+            if other is None or other is part:
+                continue
+            def face(piece, cell, direction):
+                def test(p):
+                    return CONTAINS[piece.piece.d](apply(back, p))
+                return _face_bits(test, tuple(cell[k] - piece.origin[k] for k in range(3)),
+                                  direction)
+            assert face(part, v, d) == face(other, q, tuple(-x for x in d))
+            checked += 1
+    assert checked >= 6
+
+
+@pytest.mark.parametrize("wedge,pyramid,inverse", [
+    ("05_wedge_2", "06_pyramid_2", "07_invpyramid_2"),
+    ("08_wedge_4", "09_pyramid_4", "10_invpyramid_4"),
+])
+def test_corner_closeout_can_replace_a_whole_diagonal_chain(wedge, pyramid, inverse):
+    Q = ((0, -1, 0), (0, 0, -1), (1, 0, 0))
+    back = tuple(zip(*Q))
+    A, B, lead = (apply(Q, v) for v in ((0, -1, 0), (-1, 0, 0), (1, 0, 0)))
+    target = [Placed(BY_NAME[d], o, Q, "00ff00") for d, o in (
+        (wedge, lead), (pyramid, (0, 0, 0)), (inverse, A),
+        (pyramid, add(A, B)), (inverse, add(add(A, A), B)))]
+    solid = {v for part in target for v in part.voxels()}
+
+    def inside(point):
+        return any(CONTAINS[part.piece.d](apply(back, tuple(
+            point[k] - part.origin[k] for k in range(3)))) for part in target)
+
+    cells = sorted(solid)
+    masks = {v: sum(1 << j for j, s in enumerate(SAMPLES) if inside(add(v, s)))
+             for v in cells}
+    initial = [target[0]] + [Placed(BY_NAME["01_block"], v, color="00ff00")
+                             for v in cells if v not in set(target[0].voxels())]
+    templates = _diagonal_corner_templates(_catalogue()["placements"])
+    assert any(len(template) == 5 for template in templates)
+    after, changes = _corner_closeouts(initial, solid, cells, masks, inside, set(),
+                                       lambda _: "00ff00")
+    assert changes
+    assert sum(part.piece.d == pyramid for part in after) == 2
+    assert sum(part.piece.d == inverse for part in after) == 2
+
+
+@pytest.mark.parametrize("run,inverse", [(1, "04_invpyramid"),
+                                          (2, "07_invpyramid_2"),
+                                          (4, "10_invpyramid_4")])
+def test_green_test_01_stacked_inverse_faces_match(run, inverse):
+    # The pink inverse sits above the green inverse in Green_Test_01.xml.
+    lower_q = ((0, 1, 0), (0, 0, -1), (-1, 0, 0))
+    upper_q = ((-1, 0, 0), (0, 0, 1), (0, 1, 0))
+    lower = Placed(BY_NAME[inverse], (0, 0, 0), lower_q)
+    upper = Placed(BY_NAME[inverse], (0, 2 * run - 1, 0), upper_q)
+    touching = [(v, add(v, (0, 1, 0))) for v in lower.voxels()
+                if add(v, (0, 1, 0)) in upper.voxels()]
+    assert touching
+    for v, q in touching:
+        def face(part, cell, direction):
+            back = tuple(zip(*part.Q))
+            def contains(p):
+                return CONTAINS[part.piece.d](apply(back, p))
+            return _face_bits(contains,
+                              tuple(cell[k] - part.origin[k] for k in range(3)), direction)
+        assert face(lower, v, (0, 1, 0)) == face(upper, q, (0, -1, 0))
+
+
+@pytest.mark.parametrize("wedge", ["02_wedge", "05_wedge_2", "08_wedge_4"])
+@pytest.mark.parametrize("steps", [2, 3])
+def test_complete_corner_run_joins_both_wedge_sides(wedge, steps):
+    cat = _catalogue()["placements"]
+    template = next(t for t in _diagonal_corner_templates(cat)
+                    if len(t) == 2 * steps + 1 and cat[t[0][0]]["piece"].d == wedge
+                    and cat[t[-1][0]]["piece"].d == wedge)
+    parts = [Placed(cat[t]["piece"], origin, cat[t]["Q"])
+             for t, origin in template]
+    owner = {v: p for p in parts for v in p.voxels()}
+    assert len(owner) == sum(len(p.piece.footprint) for p in parts)
+    contacts = 0
+    for v, part in owner.items():
+        for d in DIRS:
+            q = add(v, d)
+            other = owner.get(q)
+            if other is None or other is part:
+                continue
+            def face(p, cell, direction):
+                back = tuple(zip(*p.Q))
+                def contains(point):
+                    return CONTAINS[p.piece.d](apply(back, point))
+                return _face_bits(contains,
+                                  tuple(cell[k] - p.origin[k] for k in range(3)), direction)
+            assert face(part, v, d) == face(other, q, tuple(-x for x in d))
+            contacts += 1
+    assert contacts >= 2 * steps
+
+
+def test_vertical_deckhouse_chamfer_uses_sideways_wedges(monkeypatch):
+    monkeypatch.setenv("SW_BUILD_CACHE", "0")
+    box = {"x": 0, "z": 0, "length": 5, "width": 4, "height": 1,
+           "corner_chamfer": 0.25}
+    parts, info = build(resolve_spec({"length": 9, "beam": 5, "depth": 2,
+                                      "smoothing": "wedges_v2",
+                                      "superstructure": [box]}))
+    shift = info["shift"]
+    vertical = []
+    for part in parts:
+        if part.piece.d != "02_wedge":
+            continue
+        v = add(part.origin, shift)
+        if info["region"].get(v) != "box0":
+            continue
+        normal, _ = _slope(part.piece)
+        if abs(apply(part.Q, normal)[1]) < 1e-9:
+            vertical.append(part)
+    assert len(vertical) >= 4
+
+
+def test_deckhouse_waist_stacks_matching_inverse_pyramids(monkeypatch):
+    monkeypatch.setenv("SW_BUILD_CACHE", "0")
+    box = {"x": 0, "z": 0, "length": 5, "width": 4, "height": 1,
+           "corner_chamfer": 0.5,
+           "waist": {"from": 0, "peak": 0.5, "to": 1, "inset": 0.25}}
+    parts, _ = build(resolve_spec({"length": 9, "beam": 5, "depth": 2,
+                                   "smoothing": "wedges_v2",
+                                   "superstructure": [box]}))
+    inverses = [p for p in parts if p.piece.d == "07_invpyramid_2"]
+    owner = {v: part for part in inverses for v in part.voxels()}
+    pairs = []
+    for lower in inverses:
+        normal, _ = _slope(lower.piece)
+        if apply(lower.Q, normal)[1] <= 0:
+            continue
+        top = max(lower.voxels(), key=lambda v: v[1])
+        upper = owner.get(add(top, (0, 1, 0)))
+        if upper is None or upper is lower:
+            continue
+        other_normal, _ = _slope(upper.piece)
+        if apply(upper.Q, other_normal)[1] >= 0:
+            continue
+        def face(part, cell, direction):
+            back = tuple(zip(*part.Q))
+            def contains(p):
+                return CONTAINS[part.piece.d](apply(back, p))
+            offset = tuple(cell[k] - part.origin[k] for k in range(3))
+            return _face_bits(contains, offset, direction)
+        assert face(lower, top, (0, 1, 0)) == face(
+            upper, add(top, (0, 1, 0)), (0, -1, 0))
+        pairs.append((lower, upper))
+    assert len(pairs) >= 4
 
 
 def test_mirror_images_fit_alike():

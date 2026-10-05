@@ -132,7 +132,7 @@ def structural_report(parts, stations=None, x=0):
                 face_cache[key] = _face_bits(lambda pt: test(apply(back, pt)), key[2], direction)
         return face_cache[key]
 
-    mismatches, checked, examples = 0, 0, []
+    mismatches, checked, long_wedge_mismatches, examples = 0, 0, 0, []
     for v, p in owner.items():
         for direction in DIRS[::2]:
             n = add(v, direction)
@@ -146,6 +146,8 @@ def structural_report(parts, stations=None, x=0):
             checked += 1
             if a != b:
                 mismatches += 1
+                if p.piece.d == "08_wedge_4" or other.piece.d == "08_wedge_4":
+                    long_wedge_mismatches += 1
                 if len(examples) < 12:
                     examples.append({"cell": v, "direction": direction,
                                      "definitions": [p.piece.d, other.piece.d],
@@ -153,7 +155,9 @@ def structural_report(parts, stations=None, x=0):
     return {"structural_part_count": len(structural), "bounds_blocks": [lo, hi],
             "part_counts": dict(Counter(p.piece.d for p in structural)),
             "footprint_overlap_count": overlap_count, "sections": profiles,
-            "partial_joints": {"checked": checked, "mismatched": mismatches, "examples": examples},
+            "partial_joints": {"checked": checked, "mismatched": mismatches,
+                               "long_wedge_mismatched": long_wedge_mismatches,
+                               "examples": examples},
             "limitations": ["Material intervals are exact for supported convex structural pieces; other parts are excluded.",
                             "Floor surfaces use voxel coordinates; voxel layer y has its top at y+0.5.",
                             "Joint samples flag steps, including intentional edges; they are not a quality percentage or a seal test.",
