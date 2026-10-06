@@ -4,6 +4,7 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .meshes import world_triangles
 from .pieces import add, apply
 
 BG = (38, 45, 56)
@@ -109,17 +110,19 @@ def _square(c, d):
     return out
 
 
-def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None):
+def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, door_state="closed"):
     """(polygon, outward normal, rgb, voxel cell) per visible voxel-sized face fragment.
 
     Plain blocks, nearly every piece of a hull, take a fast path: their six faces are unit
     squares, emitted only where no neighbour covers them. Other pieces go through the general
     polygon path. `facing` (a camera direction) drops faces that point away from that camera.
     """
+    if door_state not in ("closed", "open"):
+        raise ValueError("door_state must be closed or open")
     dirs = _RDIRS if facing is None else tuple(d for d in _RDIRS if _dot(d, facing) < -1e-6)
     light = _norm(light)
     shades = {d: ambient + (1 - ambient) * max(0.0, _dot(d, light)) for d in _RDIRS}
-    blocks, polys = [], []
+    blocks, polys, detailed = [], [], []
     full = set()  # (voxel, direction) pairs covered by a full square face, in render coordinates
     for p in placed:
         if p.piece.d == "01_block":
@@ -127,6 +130,20 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None):
             blocks.append((v, p.color))
             for d in _RDIRS:
                 full.add((v, d))
+            continue
+        mesh = world_triangles(p, door_state) if native else None
+        if mesh is not None:
+            for points, rgb in mesh:
+                pts = [_mirror(q) for q in points]
+                # Display's x reflection reverses triangle winding.
+                n = tuple(-c for c in _newell(pts))
+                if facing is not None and _dot(n, facing) >= -1e-6:
+                    continue
+                mesh_ambient = max(ambient, .62)
+                shade = mesh_ambient + (1 - mesh_ambient) * max(0.0, _dot(n, light))
+                col = tuple(min(255, int(c * shade)) for c in rgb)
+                fc = tuple(sum(q[i] for q in pts) / len(pts) for i in range(3))
+                detailed.append((pts, n, col, tuple(round(c) for c in fc)))
             continue
         for pts, n in _piece_polys(p):
             frags = _fragments(pts)
@@ -139,7 +156,7 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None):
                     fc = tuple(sum(q[i] for q in fr) / 4 for i in range(3))
                     inner = tuple(int(round(fc[i] - d[i] * 0.5)) for i in range(3))
                     full.add((inner, d))
-    faces = []
+    faces = detailed
     cols = {}
     for v, color in blocks:
         for d in dirs:
@@ -285,7 +302,7 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
     outline_px = scale >= 5
     for pts, _, col in sorted(proj, key=lambda f: (-f[1][0], -f[1][1])):
         poly = [to_px(q) for q in pts]
-        edge = tuple(int(c * 0.82) for c in col) if outline_px else None
+        edge = tuple(int(c * 0.82) for c in col) if outline_px and len(pts) > 3 else None
         dr.polygon(poly, fill=col, outline=edge)
     font = ImageFont.load_default()
     for point, text in labels:
@@ -321,7 +338,7 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
 
 
 def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
-                width=1200, height=800, ruler=None, labels=()):
+                width=1200, height=800, ruler=None, labels=(), door_state="closed"):
     """One large view from any angle.
 
     yaw: 0 = side view with the bow to the right, 90 = from the bow, 180 = the other side,
@@ -329,7 +346,7 @@ def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
     zoom: 1 fits the whole vehicle; 2-6 for close-ups. focus: (fx, fy, fz) fractions of the
     bounding box to centre on, e.g. (0.5, 0.2, 0.9) = low on the bow; default is the middle.
     """
-    faces = _world_faces(placed)
+    faces = _world_faces(placed, door_state=door_state)
     yr, pr = math.radians(yaw), math.radians(max(-89.9, min(89.9, pitch)))
     cam_pos = (-math.cos(pr) * math.cos(yr), math.sin(pr), math.cos(pr) * math.sin(yr))
     cam = _camera(tuple(-c for c in cam_pos))
@@ -349,22 +366,26 @@ def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
     return buf.getvalue()
 
 
-def render_png(placed, title="", width=1350, height=900, ruler=None):
-    faces = _world_faces(placed)
+def render_png(placed, title="", width=1350, height=900, ruler=None, nautical=True, door_state="closed"):
+    faces = _world_faces(placed, door_state=door_state)
     top_h = int(height * 0.5)
     low_h = height - top_h
     third, half = width // 3, width // 2
     canvas = Image.new("RGB", (width, height), BG)
+    underside = "3/4 from below (hull bottom)" if nautical else "3/4 from below"
+    front = "front (from bow)" if nautical else "view from +z"
+    side = "side (bow right)" if nautical else "side (+z right)"
+    top = "top (bow right)" if nautical else "top (+z right)"
     panels = [
         ((0, 0), _draw_view(faces, VIEWS["3/4 view"], third, top_h, "3/4 from above")[0]),
         ((third, 0), _draw_view(faces, _camera((-1.0, 0.8, -1.1)), third, top_h,
-                                "3/4 from below (hull bottom)")[0]),
+                                underside)[0]),
         ((2 * third, 0), _draw_view(faces, VIEWS["front (from bow)"], width - 2 * third, top_h,
-                                    "front (from bow)  grid = 1 m", grid=True, ruler=ruler)[0]),
+                                    f"{front}  grid = 1 m", grid=True, ruler=ruler)[0]),
         ((0, top_h), _draw_view(faces, VIEWS["side (bow right)"], half, low_h,
-                                "side (bow right)  grid = 1 m", grid=True, ruler=ruler)[0]),
+                                f"{side}  grid = 1 m", grid=True, ruler=ruler)[0]),
         ((half, top_h), _draw_view(faces, VIEWS["top (bow right)"], width - half, low_h,
-                                   "top (bow right)  grid = 1 m", grid=True, ruler=ruler)[0]),
+                                   f"{top}  grid = 1 m", grid=True, ruler=ruler)[0]),
     ]
     for pos, img in panels:
         canvas.paste(img, pos)

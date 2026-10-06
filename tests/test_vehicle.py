@@ -1,8 +1,10 @@
 """Vehicle XML writing and reading."""
 import re
 
+import pytest
+
 from swhull.pieces import BLOCK, IDENTITY, PYRAMID2X4, WEDGE2, Placed, wedge_rotation
-from swhull.vehicle import MISSING_R, read_components, to_xml
+from swhull.vehicle import MISSING_R, load_placed, read_components, to_xml
 
 
 def test_every_component_has_explicit_rotation_and_full_paint():
@@ -22,6 +24,24 @@ def test_round_trip(tmp_path):
     path.write_text(to_xml(placed), encoding="utf-8")
     [(d, origin, Q, colour)] = list(read_components(path))
     assert (d, origin, Q, colour) == ("05_wedge_2", (3, -2, 5), placed[0].Q, "123456")
+
+
+def test_preview_selects_one_body_and_ignores_controller_internals(tmp_path):
+    nested = '<c d="microcontroller"><o><vp x="3"/><group><components><c><o><vp x="99"/></o></c></components></group></o></c>'
+    text = ('<vehicle data_version="3"><bodies><body unique_id="1"><components>'
+            '<c><o r="2,0,0,0,1,0,0,0,1" wheel_size="1.5"><vp/></o></c>' + nested +
+            '</components></body><body unique_id="2"><components><c><o><vp x="10"/></o></c></components></body></bodies></vehicle>')
+    path = tmp_path / "v.xml"
+    path.write_text(text)
+    parts, _ = load_placed(path)
+    assert len(parts) == 2 and parts[0].Q[0][0] == 2
+    assert parts[0].settings["wheel_size"] == "1.5" and parts[1].origin == (3, 0, 0)
+    selected, _ = load_placed(path, body_id="2")
+    assert len(selected) == 1 and selected[0].origin == (10, 0, 0)
+    with pytest.raises(ValueError, match="no body"):
+        load_placed(path, body_id="3")
+    with pytest.raises(ValueError, match="axis-aligned"):
+        list(read_components(path))  # Editing/geometry parser stays strict.
 
 
 def test_reads_game_quirks(tmp_path):

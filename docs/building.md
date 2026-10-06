@@ -61,6 +61,14 @@ vehicle. Repaint configured originals in place and edit supported structural/new
 Save under a new vehicle name. Use explicit interior seed coordinates for imported seal
 checks; automatic generated-room seeds do not apply to imports.
 
+Use `query_connections` to discover wire nodes and transmission faces. `edit_connections`
+adds/removes typed signal/electric links; `route_connections` adds/removes actual pipe routes.
+Use enclosed pipes in bodywork and `through_blocks` for explicitly selected wall crossings.
+Both use the draft revision and support preview, commit and undo. `preflight_vehicle` checks
+required subsystem paths. See [the land vehicle guide](land-vehicles.md#connections-and-subsystem-preflight)
+for endpoint formats, examples and topology limits. Engine choices are prebuilt diesels and
+cooling choices are radiators.
+
 ## Diagnose a result
 
 | Symptom | Next useful action |

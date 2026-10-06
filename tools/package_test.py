@@ -82,10 +82,14 @@ async def exercise(command, args):
                         assert init.instructions and init.server_info.version
                         tools = {tool.name for tool in (await session.list_tools()).tools}
                         assert {"preview_hull", "save_hull", "get_runtime_status", "hull_design_guide",
-                                "analyze_hull", "suggest_hull_blocks"} <= tools
-                        for topic in ("workflow", "staged", "building", "testing", "smoothing"):
+                                "analyze_hull", "suggest_hull_blocks", "land_vehicle_guide", "create_land_vehicle", "query_connections",
+                                "edit_connections", "route_connections", "preflight_vehicle"} <= tools
+                        for topic in ("workflow", "staged", "building", "testing", "smoothing", "edits", "topics"):
                             response = await session.call_tool("hull_design_guide", {"topic": topic})
                             assert not response.is_error and response.content[0].text
+                        response = await session.call_tool("land_vehicle_guide", {})
+                        assert not response.is_error and "humvee_4x4" in response.content[0].text
+                        assert "through_blocks" in response.content[0].text
                         response, status = await asyncio.gather(
                             session.call_tool("preview_hull", {"preset": "rowboat"}),
                             second.call_tool("get_runtime_status", {}))

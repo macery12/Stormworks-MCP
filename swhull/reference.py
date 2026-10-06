@@ -69,7 +69,7 @@ def _controller(component):
                                  "child_groups": len(g.findall("groups/group"))} for i, g in enumerate(groups)]}
 
 
-def read_bodies(text):
+def read_bodies(text, tolerate_transforms=False):
     root = xml_root(text)
     bodies, unknown = [], Counter()
     seen = set()
@@ -78,7 +78,7 @@ def read_bodies(text):
         if not body_id or body_id in seen:
             raise ValueError("reference bodies need distinct unique_id values")
         seen.add(body_id)
-        parts, details = [], {}
+        parts, details, omitted = [], {}, []
         for i, component in enumerate(body.findall("components/c")):
             o = component.find("o")
             if o is None:
@@ -89,7 +89,14 @@ def read_bodies(text):
             if piece is None:
                 unknown[d] += 1
                 piece = BLOCK
-            q = parse_r(o.get("r")) if "r" in o.attrib else MISSING_R
+            try:
+                q = parse_r(o.get("r")) if "r" in o.attrib else MISSING_R
+            except ValueError:
+                if not tolerate_transforms:
+                    raise
+                omitted.append({"component_index": i, "definition": d, "r": o.get("r"),
+                                "reason": "nonstandard transform; excluded from footprint/mount analysis"})
+                continue
             flip = int(component.get("t", "0"))
             if not 0 <= flip <= 7:
                 raise ValueError("mirror flags must be 0..7")
@@ -104,17 +111,18 @@ def read_bodies(text):
                             "ports": _ports(component, data), "controller": _controller(component),
                             "component_attributes": dict(component.attrib)}
         bodies.append({"id": body_id, "parts": parts, "details": details,
+                       "omitted_components": omitted,
                        "attributes": dict(body.attrib),
                        "extras": [_configuration(n) for n in body if n.tag != "components"]})
-    if not bodies or not any(b["parts"] for b in bodies):
+    if not bodies or not any(b["parts"] or b["omitted_components"] for b in bodies):
         raise ValueError("vehicle has no readable body components")
     return root, bodies, unknown
 
 
-def audit_text(text, source="reference", sample_limit=3):
+def audit_text(text, source="reference", sample_limit=3, tolerate_transforms=False):
     if not isinstance(sample_limit, int) or not 1 <= sample_limit <= 100:
         raise ValueError("sample_limit must be 1-100")
-    root, bodies, unknown = read_bodies(text)
+    root, bodies, unknown = read_bodies(text, tolerate_transforms=tolerate_transforms)
     rows = {}
     port_index, origin_index = defaultdict(list), defaultdict(list)
     placement_issues, body_rows, controllers, connections, open_ports = [], [], [], [], []
@@ -129,6 +137,7 @@ def audit_text(text, source="reference", sample_limit=3):
                 else:
                     owner[v] = p
         body_rows.append({"body_id": body["id"], "part_count": len(parts),
+                          "omitted_components": body["omitted_components"],
                           "overlap_count": len(overlaps), "overlap_samples": overlaps[:5],
                           "attributes": body["attributes"], "extras": body["extras"]})
         paired, unpaired = adjacency(parts, body["id"])
@@ -225,6 +234,7 @@ def audit_text(text, source="reference", sample_limit=3):
                                     "fraction": len(covered) / len(installed) if installed else 0,
                                     "missing": sorted(set(installed) - covered)},
             "unknown_definitions": dict(unknown), "parts": [rows[d] for d in sorted(rows)],
+            "omitted_component_count": sum(len(b["omitted_components"]) for b in bodies),
             "link_count": len(links), "link_types": dict(link_types), "links": links,
             "endpoint_statuses": dict(Counter(e["status"] for link in links for e in link["endpoints"])),
             "controllers": controllers, "placement_issues": placement_issues,
@@ -241,7 +251,7 @@ def audit_text(text, source="reference", sample_limit=3):
 def audit_file(path, search="", offset=0, limit=50, section="parts"):
     if not isinstance(search, str) or not isinstance(offset, int) or offset < 0 or not isinstance(limit, int) or not 1 <= limit <= 200:
         raise ValueError("search must be text, offset nonnegative, and limit 1-200")
-    report = audit_text(Path(path).read_text(encoding="utf-8"), Path(path).stem)
+    report = audit_text(Path(path).read_text(encoding="utf-8"), Path(path).stem, tolerate_transforms=True)
     sections = ("parts", "links", "controllers", "bodies", "placement_issues",
                 "connection_candidates", "open_transmission_ports")
     if section not in sections:

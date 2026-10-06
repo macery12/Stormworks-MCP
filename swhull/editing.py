@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from itertools import product
 
 from . import definitions
-from .pieces import (BLOCK, BY_NAME, IDENTITY, ROTATIONS, Placed, add, apply, parse_r, r_attr,
-                     split_mirror, sub)
-from .vehicle import component_xml, components_from_text
+from .configuration import new_settings, settings_of
+from .pieces import (BLOCK, BY_NAME, IDENTITY, MIRRORED, ROTATIONS, Placed, add, apply, parse_r, r_attr,
+                     sub, with_mirror)
+from .vehicle import component_transform, component_xml, components_from_text
 
 MAX_BATCH_PARTS = 250000
 
@@ -29,15 +30,16 @@ def vector(value, label="position", integer=True):
     return tuple(int(x) if integer else float(x) for x in value)
 
 
-def rotation(value=None):
+def rotation(value=None, allow_mirror=False):
     if value is None:
         return IDENTITY
     try:
         q = parse_r(value) if isinstance(value, str) else tuple(tuple(row) for row in value)
     except (TypeError, ValueError, IndexError) as exc:
         raise ValueError("rotation must be an r string or 3x3 local-to-world matrix") from exc
-    if q not in ROTATIONS:
-        raise ValueError("rotation must be one of the 24 axis-aligned proper rotations")
+    if q not in ROTATIONS and not (allow_mirror and q in MIRRORED):
+        raise ValueError("rotation must be an axis-aligned proper rotation"
+                         + (" or mirrored placement matrix" if allow_mirror else ""))
     return tuple(tuple(int(n) for n in row) for row in q)
 
 
@@ -53,14 +55,24 @@ def part(data, uid="", default_origin=None):
     d = data.get("definition", "01_block")
     if not isinstance(d, str):
         raise ValueError("definition must be a string")
+    from .part_policy import ensure_allowed  # noqa: PLC0415
+    ensure_allowed(d)
     piece = BY_NAME.get(d) or definitions.load(d)
     if piece is None:
-        raise ValueError(f"definition {d!r} unavailable; install Stormworks or set SW_DEFINITIONS_DIR")
+        raise ValueError(definitions.unavailable(d))
     settings, name = data.get("settings", {}), data.get("name", "")
     if not isinstance(settings, dict) or not isinstance(name, str):
         raise ValueError("settings must be an object and name must be a string")
-    out = Placed(piece, vector(data.get("position", default_origin)), rotation(data.get("rotation")),
-                 color(data.get("color", "C2C3C7")), uid, name, copy.deepcopy(settings))
+    q = rotation(data.get("rotation"), allow_mirror=True)
+    mirror = data.get("mirror", 0)
+    if isinstance(mirror, bool) or not isinstance(mirror, int) or not 0 <= mirror <= 7:
+        raise ValueError("mirror must be a local-axis bitmask from 0 to 7 (1=x, 2=y, 4=z)")
+    if mirror:
+        if q in MIRRORED:
+            raise ValueError("use a mirrored placement matrix or rotation plus mirror, not both")
+        q = with_mirror(q, mirror)
+    out = Placed(piece, vector(data.get("position", default_origin)), q,
+                 color(data.get("color", "C2C3C7")), uid, name, new_settings(d, settings))
     component_xml(out)
     return out
 
@@ -95,6 +107,23 @@ def _component_spans(text):
         raise ValueError("unbalanced component XML")
 
 
+def _components_content(text):
+    """Content bounds of the outer components container, including controller containers."""
+    depth, start = 0, None
+    for token in re.finditer(r"<(/?)components\b[^>]*>", text):
+        if token[1]:
+            depth -= 1
+            if depth == 0 and start is not None:
+                return start, token.start()
+        elif not token[0].endswith("/>"):
+            if depth == 0:
+                start = token.end()
+            depth += 1
+        if depth < 0:
+            break
+    raise ValueError("vehicle has no balanced components container")
+
+
 @dataclass
 class VehicleDocument:
     prefix: str
@@ -110,17 +139,15 @@ class VehicleDocument:
             raise ValueError("editing requires data_version 3")
         if len(re.findall(r"<body\b", text)) != 1:
             raise ValueError("editing requires a single-body vehicle; multi-body editing is unsupported")
-        container = re.search(r"<components\b[^>]*>(.*?)</components>", text, re.S)
-        if container is None:
-            raise ValueError("vehicle has no components container")
-        body = container[1]
+        content_start, content_end = _components_content(text)
+        body = text[content_start:content_end]
         gaps, parts, end = {}, [], 0
         for i, (start, stop) in enumerate(_component_spans(body)):
             raw = body[start:stop]
-            geom = list(components_from_text(raw))
-            if not geom:
+            geom = next(components_from_text(raw), None)
+            if geom is None:
                 raise ValueError("unsupported component without readable geometry")
-            d, origin, q, paint = geom[0]
+            d, origin, q, paint = geom
             piece = BY_NAME.get(d) or definitions.load(d)
             if piece is None:
                 piece = type(BLOCK)(d, 6, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
@@ -138,12 +165,12 @@ class VehicleDocument:
         if not parts:
             raise ValueError("vehicle has no readable components")
         endpoints = set()
-        for m in re.finditer(r"<voxel_pos_[01]\b([^>]*)/?>", text[container.end():]):
+        for m in re.finditer(r"<voxel_pos_[01]\b([^>]*)/?>", text[content_end:]):
             attrs = dict(re.findall(r'\b([xyz])="(-?\d+)"', m[1]))
             endpoints.add(tuple(int(attrs.get(axis, 0)) for axis in "xyz"))
         for p in parts:
             p.protected |= p.origin in endpoints
-        return cls(text[:container.start(1)], text[container.end(1):], gaps, parts, body[end:])
+        return cls(text[:content_start], text[content_end:], gaps, parts, body[end:])
 
     def to_xml(self, parts):
         remaining = {p.uid: p for p in parts}
@@ -205,8 +232,12 @@ def query(parts, selector=None, offset=0, limit=100):
     rows = []
     for p in chosen[offset:offset + limit]:
         cells = p.voxels()
+        rot, mirror = component_transform(p)
         rows.append({"id": p.uid, "body": 1, "name": p.name, "definition": p.piece.d,
-                     "position": p.origin, "rotation": r_attr(p.Q), "color": p.color,
+                     "position": p.origin, "rotation": r_attr(rot), "mirror": mirror,
+                     "transform": p.Q, "color": p.color,
+                     "settings": {k: v for k, v in settings_of(p).items()
+                                  if k not in ("r", "sc", "bc", "bc2", "bc3", "ac", "gc", "custom_name")},
                      "bounds": [[min(v[i] for v in cells) for i in range(3)],
                                 [max(v[i] for v in cells) for i in range(3)]],
                      "footprint": list(cells), "protected": p.protected})
@@ -238,7 +269,7 @@ def _move_raw(p):
         else:
             p.raw_xml = re.sub(r"<o\b([^>]*?)/>", lambda m: "<o" + m[1] + ">" + vp + "</o>",
                               p.raw_xml, count=1)
-    q, mirror = split_mirror(p.Q)
+    q, mirror = component_transform(p)
     if ' r="' in p.raw_xml:
         p.raw_xml = re.sub(r' r="[^"]*"', f' r="{r_attr(q)}"', p.raw_xml, count=1)
     else:
@@ -258,7 +289,7 @@ def _collisions(parts):
     return pairs
 
 
-def apply_edits(parts, operations, prefix="edit", reserved=frozenset()):
+def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placement_context=None):
     """Return a new list; failures never change the input or stored draft."""
     if not isinstance(operations, list) or any(not isinstance(op, dict) for op in operations):
         raise ValueError("operations must be a list of objects")
@@ -351,7 +382,7 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset()):
     owner = owners(out) if changed else {}
     for p in changed:
         without_self = {v: other for v, other in owner.items() if other is not p}
-        validate_placement(p, {}, without_self, reserved)
+        validate_placement(p, placement_context or {}, without_self, reserved)
     if reserved:
         for p in out:
             if original.get(p.uid) != (p.piece.d, p.origin, p.Q) and any(v in reserved for v in p.voxels()):

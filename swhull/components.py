@@ -5,7 +5,9 @@ from functools import lru_cache
 from itertools import product
 
 from . import definitions
+from .configuration import new_settings
 from .editing import color, rotation, vector
+from .land import control_seat
 from .orientation import RUDDERS, profile, rudder_clearance, solve
 from .pieces import (BY_NAME, DIRS, IDENTITY, Placed, add, apply, find_rotation, neg, sub)
 from .smooth import _full_faces
@@ -62,14 +64,78 @@ def _supported(cells, owner):
                in full_faces(owner[v].piece.d, owner[v].Q) for v in cells)
 
 
+def _obstructions(cells, owner, reserved=frozenset()):
+    return [{"position": v, "part_id": owner[v].uid if v in owner else None,
+             "definition": owner[v].piece.d if v in owner else "reserved access"}
+            for v in sorted(cells) if v in owner or v in reserved][:12]
+
+
+def _access_owner(owner):
+    # Access is checked with manual doors open; their frames remain obstacles.
+    from .seal import MANUAL_DOORS  # noqa: PLC0415
+    return {v: p for v, p in owner.items() if p.piece.d not in MANUAL_DOORS or
+            not any(n["flags"] & 4 and add(p.origin, apply(p.Q, n["position"])) == v
+                    for n in (definitions.metadata(p.piece.d) or {}).get("voxels", []))}
+
+
+def _land_access(p, owner, reserved=frozenset()):
+    """Open vehicle seats use a supported side approach; small batteries are serviced above."""
+    cells = p.voxels()
+    lo = [min(v[i] for v in cells) for i in range(3)]
+    hi = [max(v[i] for v in cells) for i in range(3)]
+    if p.piece.d.startswith("seat"):
+        owner = _access_owner(owner)
+        front = apply(p.Q, profile(p.piece.d)["axes"].get("seat_front", (0, 0, 1)))
+        if front not in DIRS or front[1]:
+            raise ValueError("control position must face horizontally")
+        longitudinal, lateral = (2, 0) if front[2] else (0, 2)
+        mid = (lo[longitudinal] + hi[longitudinal]) // 2
+        failures = []
+        for side in (-1, 1):
+            approach = lo[lateral] - 2 if side < 0 else hi[lateral] + 2
+            space = set()
+            # Entry into a vehicle seat is a seated/ducked approach, rather
+            # than a standing ship aisle. Keep the installed seat's height,
+            # with at least 1.25 m clearance at the threshold.
+            height = max(5, hi[1] - lo[1] + 1)
+            for a, b, y in product(range(-1, 2), range(-1, 2), range(lo[1], lo[1] + height)):
+                v = [0, y, 0]
+                v[lateral], v[longitudinal] = approach + a, mid + b
+                space.add(tuple(v))
+            threshold = lo[lateral] - 1 if side < 0 else hi[lateral] + 1
+            floor = {add(v, (0, -1, 0)) for v in space if v[1] == lo[1] and v[lateral] == threshold}
+            blocked = _obstructions(space, owner, reserved)
+            missing = sorted(v for v in floor if not _supported({v}, owner))
+            if not blocked and not missing:
+                return space
+            failures.append({"side": side, "obstructions": blocked, "missing_support_cells": missing[:12]})
+        rear = _clearance(p, {})
+        floor = {add(v, (0, -1, 0)) for v in rear if v[1] == lo[1]}
+        blocked = _obstructions(rear, owner, reserved)
+        missing = sorted(v for v in floor if not _supported({v}, owner))
+        if rear and not blocked and not missing:
+            return rear
+        failures.append({"side": "rear", "obstructions": blocked, "missing_support_cells": missing[:12]})
+        raise ValueError(f"component '{p.name}' needs unobstructed clearance and a supported 0.75 m side access passage or rear approach; "
+                         f"access diagnostics={failures}")
+    if p.piece.d == "battery_small":
+        space = {(v[0], y, v[2]) for v in cells for y in range(hi[1] + 1, hi[1] + 3)}
+        blocked = _obstructions(space, owner, reserved)
+        if blocked:
+            raise ValueError(f"component '{p.name}' needs open service access above the small battery; obstructions={blocked}")
+        return space
+    return _clearance(p, {})
+
+
 def _clearance(p, cfg):
     cells = p.voxels()
-    if cfg.get("kind") in ("helm", "seat") or p.piece.d in ("seat_helm", "seat_compact", "seat"):
+    if (cfg.get("kind") in ("helm", "seat") or p.piece.d in ("seat_helm", "seat_compact", "seat")
+            or p.piece.d.startswith("seat")
+            or control_seat(p.piece.d, definitions.metadata(p.piece.d) or {})):
         # Three-block approach, eight-block standing height behind the control position.
         lo = [min(v[i] for v in cells) for i in range(3)]
         hi = [max(v[i] for v in cells) for i in range(3)]
-        front = apply(p.Q, tuple((definitions.metadata(p.piece.d) or {}).get("directions", {})
-                                .get("seat_front", (0, 0, 1))))
+        front = apply(p.Q, profile(p.piece.d)["axes"].get("seat_front", (0, 0, 1)))
         if front[1] or sum(abs(v) for v in front) != 1:
             raise ValueError("control position must face horizontally")
         axis = 2 if front[2] else 0
@@ -101,17 +167,21 @@ def _clearance(p, cfg):
 def validate_placement(p, cfg, owner, reserved=frozenset()):
     cells = set(p.voxels())
     if any(v in owner or v in reserved for v in cells):
-        raise ValueError(f"component '{p.name}' footprint collides with structure or reserved access")
+        raise ValueError(f"component '{p.name}' footprint collides with structure or reserved access; "
+                         f"obstructions={_obstructions(cells, owner, reserved)}")
     if not mounted(p, owner):
         raise ValueError(f"component '{p.name}' has no verified mounting contact")
-    clearance = _clearance(p, cfg)
-    if any(v in owner or v in reserved for v in clearance):
-        raise ValueError(f"component '{p.name}' has insufficient occupant/operating clearance")
-    if p.piece.d.startswith("seat_"):
+    land = cfg.get("vehicle_kind") == "land"
+    clearance = _land_access(p, owner, reserved) if land else _clearance(p, cfg)
+    access_owner = _access_owner(owner) if land and p.piece.d.startswith("seat") else owner
+    if any(v in access_owner or v in reserved for v in clearance):
+        raise ValueError(f"component '{p.name}' has insufficient occupant/operating clearance; "
+                         f"obstructions={_obstructions(clearance, access_owner, reserved)}")
+    if p.piece.d.startswith("seat_") and not land:
         floor = {add(v, (0, -1, 0)) for v in clearance if v[1] == min(c[1] for c in clearance)}
         if not floor or not _supported(floor, owner):
             raise ValueError(f"component '{p.name}' needs a supported 0.75 m access passage")
-    if p.piece.d in BATTERIES.values():
+    if p.piece.d in BATTERIES.values() and not (land and p.piece.d == "battery_small"):
         lo, hi = ([min(v[i] for v in cells) for i in range(3)],
                   [max(v[i] for v in cells) for i in range(3)])
         z = (lo[2] + hi[2]) // 2
@@ -145,7 +215,7 @@ def _orientation(cfg, d):
     if "orientation" in cfg:
         return solve(d, cfg["orientation"])
     if "rotation" in cfg:
-        return rotation(cfg["rotation"])
+        return rotation(cfg["rotation"], allow_mirror=True)
     if d in RUDDERS:
         return solve(d, profile(d)["default_targets"])
     if d in PROPELLERS.values():
@@ -233,7 +303,7 @@ def validate_config(spec):
             raise ValueError(f"invalid {kind} size {size!r}")
         if "position" in cfg:
             vector(cfg["position"], integer=False)
-        rotation(cfg.get("rotation"))
+        rotation(cfg.get("rotation"), allow_mirror=True)
         if "orientation" in cfg:
             if "rotation" in cfg:
                 raise ValueError("use orientation or rotation, not both")
@@ -291,15 +361,17 @@ def place(parts, info, spec):
         installed = False
         failure = "definitions missing or no fitting mounted location with access clearance"
         for d in _definitions(cfg, bridge):
+            from .part_policy import ensure_allowed  # noqa: PLC0415
+            ensure_allowed(d)
             piece = BY_NAME.get(d) or definitions.load(d)
             if piece is None:
                 if not automatic:
-                    raise ValueError(f"definition {d!r} unavailable")
+                    raise ValueError(definitions.unavailable(d))
                 continue
             q = _orientation(cfg, d)
             for origin in _candidates(piece, q, cfg, info, owner):
                 p = Placed(piece, origin, q, cfg.get("color", "C2C3C7"),
-                           f"component:{cfg['name']}", cfg["name"], copy.deepcopy(cfg.get("settings", {})))
+                           f"component:{cfg['name']}", cfg["name"], new_settings(d, cfg.get("settings", {})))
                 count = cfg.get("repeat", {}).get("count", cfg.get("count", 1))
                 step = tuple(round(v * 4) for v in cfg.get("repeat", {}).get("step", [0, 0, 0]))
                 group = []

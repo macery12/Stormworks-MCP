@@ -8,15 +8,24 @@ from .vehicle import SPAWN_LIMIT, to_xml
 
 
 def materialize(record, centred=False):
+    from .routing import apply_routes  # noqa: PLC0415
     if record.get("kind") == "imported":
         document = VehicleDocument.parse(record["source_xml"])
-        return apply_edits(document.parts, record.get("edits", [])), None
+        return apply_routes(record, apply_edits(document.parts, record.get("edits", []))), None
+    if record.get("kind") == "land":
+        from .land_presets import build_land  # noqa: PLC0415
+        from .vehicle import centre  # noqa: PLC0415
+        # Pre-preset land records are bare chassis; preserve their geometry and IDs.
+        parts = build_land({"preset": "chassis", **record["spec"]})
+        identify(parts)
+        parts = apply_routes(record, parts)
+        return (centre(parts) if centred else parts), None
     parts, info = build(record["spec"])
     if not centred:
         for p in parts:
             p.origin = add(p.origin, info["shift"])
         info["shift"] = (0, 0, 0)
-    return identify(parts), info
+    return apply_routes(record, identify(parts), info), info
 
 
 def edited(record, operations):
@@ -30,6 +39,9 @@ def edited(record, operations):
 
 
 def describe(record, parts, info):
+    if record.get("kind") == "land":
+        from .land_build import summary as land_summary  # noqa: PLC0415
+        return land_summary(record["spec"], parts)
     if info is not None:
         return summary(record["spec"], parts, info)
     cells = [v for p in parts for v in p.voxels()]
@@ -48,4 +60,6 @@ def export(record):
         xml = VehicleDocument.parse(record["source_xml"]).to_xml(parts)
     else:
         xml = to_xml(parts)
+    from .networks import write_xml  # noqa: PLC0415
+    xml = write_xml(xml, record, parts)
     return xml, len(parts), describe(record, parts, info)

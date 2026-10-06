@@ -9,6 +9,7 @@ import math
 from xml.sax.saxutils import quoteattr
 
 from . import definitions
+from .configuration import new_settings
 from .pieces import BLOCK, BY_NAME, Piece, Placed, parse_r, r_attr, split_mirror, sub, with_mirror
 
 DEFAULT_COLOR = "C2C3C7"
@@ -44,11 +45,18 @@ def _vp(v):
     return f"<vp{attrs}/>"
 
 
+def component_transform(p):
+    from .land import road_wheel  # noqa: PLC0415
+    # Match saved workshop road wheels: mirror the local axle (y), retaining
+    # their drive/steering arrow frame. Imports keep their original raw XML.
+    return split_mirror(p.Q, 2 if road_wheel(p.piece.d) else 1)
+
+
 def _simple_xml(placed):
     parts = []
     for p in placed:
         d = "" if p.piece.d == "01_block" else f' d="{p.piece.d}"'
-        rot, flip = split_mirror(p.Q)
+        rot, flip = component_transform(p)
         if flip:
             d += f' t="{flip}"'
         r = f' r="{r_attr(rot)}"'
@@ -102,7 +110,7 @@ def component_xml(p):
     if p.raw_xml:
         return p.raw_xml
     xml = _simple_xml([p]).split("<components>", 1)[1].split("</components>", 1)[0]
-    settings = dict(p.settings)
+    settings = new_settings(p.piece.d, p.settings)
     if p.name:
         settings.setdefault("custom_name", p.name)
     attrs = ""
@@ -123,14 +131,58 @@ def to_xml(placed):
                                   + "</components>")
 
 
-def load_placed(path):
-    """Existing vehicle as Placed pieces. Parts without slope geometry use their definition
-    footprint when the game is installed, else a single cube (counted in `other`)."""
+def load_placed(path, body_id=None):
+    """Read one selected body (largest by default), with settings for native previews.
+    Placement footprints remain definition cubes; missing definitions are counted in `other`.
+    This display reader accepts finite scaled transforms, unlike the editing parser."""
+    with open(path, encoding="utf-8-sig") as f:
+        return placed_from_text(f.read(), body_id)
+
+
+def placed_from_text(text, body_id=None):
+    """One body's read-only display geometry; controller internals are never vehicle parts."""
+    from .reference import xml_root  # noqa: PLC0415
+    from .pieces import _det  # noqa: PLC0415
+    bodies = xml_root(text).findall("bodies/body")
+    if not bodies:
+        raise ValueError("vehicle has no bodies")
+    selected = ([b for b in bodies if b.get("unique_id") == body_id] if body_id is not None else
+                [max(bodies, key=lambda b: len(b.findall("components/c")))])
+    if not selected:
+        raise ValueError(f"no body {body_id!r} in vehicle")
     out, other = [], {}
-    for d, origin, Q, colour in read_components(path):
+    for component in selected[0].findall("components/c"):
+        o = component.find("o")
+        if o is None:
+            continue
+        d = component.get("d", "01_block")
+        vp = o.find("vp")
+        origin = tuple(int(vp.get(a, "0")) for a in "xyz") if vp is not None else (0, 0, 0)
+        if "r" not in o.attrib:
+            Q = MISSING_R
+        else:
+            # Read-only display of modded meshes. Editing and placement keep the strict parser.
+            try:
+                v = [float(n) for n in o.get("r").split(",")]
+                if len(v) != 9 or any(not math.isfinite(n) or abs(n) > 1000 for n in v):
+                    raise ValueError
+                Q = tuple(tuple(v[j * 3 + i] for j in range(3)) for i in range(3))
+                if abs(_det(Q)) < 1e-9:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError("invalid transform in read-only vehicle preview") from exc
+        flip = int(component.get("t", "0"))
+        if not 0 <= flip <= 7:
+            raise ValueError("mirror flags must be 0..7")
+        Q = with_mirror(Q, flip)
+        colours = o.get("sc", "").split(",")[1:]
+        colour = next((c for c in colours if re.fullmatch(r"[0-9a-fA-F]{6}", c)), o.get("bc", DEFAULT_COLOR))
+        if not re.fullmatch(r"[0-9a-fA-F]{6}", colour):
+            colour = DEFAULT_COLOR
         piece = BY_NAME.get(d) or definitions.load(d)
         if piece is None:
             other[d] = other.get(d, 0) + 1
             piece = Piece(d, BLOCK.surfaces, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
-        out.append(Placed(piece, origin, Q, colour))
+        out.append(Placed(piece, origin, Q, colour, name=o.get("custom_name", ""),
+                          settings={k: v for k, v in o.attrib.items() if k not in ("r", "sc")}))
     return out, other

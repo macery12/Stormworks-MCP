@@ -119,9 +119,11 @@ def with_mirror(Q, t):
     return tuple(tuple(Q[i][j] * s[j] for j in range(3)) for i in range(3))
 
 
-def split_mirror(Q):
-    """(rotation, t) to write for Q: t = 0 for a rotation, else the local x flip."""
-    return (Q, 0) if _det(Q) > 0 else (with_mirror(Q, 1), 1)
+def split_mirror(Q, mirror=1):
+    """(rotation, t) for Q; choose a local reflection axis for mirrored placements."""
+    if mirror not in (1, 2, 4, 7):
+        raise ValueError("mirror must flip an odd number of local axes")
+    return (Q, 0) if _det(Q) > 0 else (with_mirror(Q, mirror), mirror)
 
 
 MIRRORED = [with_mirror(Q, 1) for Q in ROTATIONS]    # the 24 improper ones

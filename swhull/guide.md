@@ -2,7 +2,9 @@
 
 Build Stormworks boats in stages: hull, structure, core parts, access, propulsion parts,
 and custom block-built tanks. Preview and save at whichever stage the player wants.
-Wiring, full power systems, engine plumbing and external pipe connections remain player work.
+Use query_connections, edit_connections and route_connections to assemble control/electric
+links and physical pipe networks. preflight_vehicle checks required paths; operation is tested
+in game. New engine choices are prebuilt diesel engines; cooling choices are radiators.
 
 ## Workflow
 
@@ -73,6 +75,15 @@ thrust and connection axes. Components accept **orientation** instead of rotatio
 `{"definition":"rudder_surface", "orientation":{"mount_normal":[0,0,1], "span_axis":[0,1,0]}}`:
 the Fin Rudder base faces the bow, its blade extends aft and its span is vertical. Standard
 rudders default to a base facing upward against the hull and a blade extending downward.
+New prebuilt engines explicitly write `max_force_scale=1` (100% power); missing power made
+the player's fully connected Humvee crank without starting. Read scalar settings with
+`query_parts`. For road wheels also constrain `wheel_forward` and `wheel_reference_up`;
+axle/mount direction alone does not determine drive or steering sign. The land guide covers
+mirrored wheel frames, seat A/D and W/S signs, and preflight direction checks.
+Choose standalone cube `modular_engine_gearbox_1x1` rather than deprecated torque gearboxes.
+New gearboxes explicitly default to off `gear_ratio_1=1` (1:1 forward) and on
+`gear_ratio_2=0` (1:-1 reverse). Inspect `preflight_vehicle` gearbox configuration checks;
+index 0 reverses the shaft. This transmission part is allowed while modular engines remain disabled.
 Both require base contact and conservatively clear motion space. Check these placements in game.
 **analyze_vehicle(name, search, section, offset, limit)** reads multi-body references without
 editing them; sections expose parts, links, controllers, bodies, placement_issues,
@@ -404,9 +415,9 @@ plumbing and in-game confirmation of actual capacity and contents remain player 
 
 ## Limits
 
-- Hull shells, decks, block superstructure (boxes, cylinders, domes, lattices) and block
-  interiors only. Engines are optional placeholders; props and rudders can only be block
-  placeholders; no pipes or wiring.
+- Hull shells, decks, block superstructure (boxes, cylinders, domes, lattices) and interiors
+  are procedural. Installed components stay game-sized. Use the connection tools for physical
+  pipes and typed wiring, and the land guide for the connected utility 4x4 template.
 - The hull is a hollow one-block-thick shell. Closed decks are sealed compartments.
 - **The game spawns at most 131,072 parts** (seen in game). A bigger vehicle loads whole in the
   editor, but on spawn everything past that part is missing: the hull is cut straight across

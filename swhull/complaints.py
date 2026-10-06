@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 CATEGORIES = ("placement", "rotation", "smoothing", "connections", "definitions", "performance",
-              "tool_error", "usability", "missing_feature", "other")
+              "tool_error", "usability", "missing_feature", "analysis", "other")
 SEVERITIES = ("low", "medium", "high", "blocker")
 ID_RE = re.compile(r"complaint-[0-9a-f]{32}")
 MAX_REPORT_BYTES = 65536

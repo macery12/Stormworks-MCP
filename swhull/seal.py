@@ -19,6 +19,29 @@ MAX_CELLS = 8000000
 EPS = 1e-9
 
 
+def _diagonal_normal(surface):
+    # Shape 6 is a 45-degree square through the voxel centre. These local frames
+    # are calibrated against the installed 1:1 wedge and angled window mesh planes.
+    return {(1, 1): (-1, 1, 0), (5, 0): (0, 1, -1)}.get(
+        (surface["orientation"], surface.get("rotation", 0)))
+
+
+def coverage(d):
+    data = definitions.metadata(d)
+    if d in BY_NAME:
+        return {"supported": True, "model": "exact convex building geometry", "unsupported_shapes": []}
+    if data is None:
+        return {"supported": False, "model": "missing definition", "unsupported_shapes": []}
+    shapes = sorted({s["shape"] for s in data["sealing_surfaces"] if s["shape"] != 1 and
+                     not (d.startswith("window") and s["shape"] == 6 and _diagonal_normal(s))})
+    moving = any(v["flags"] & 4 for v in data.get("voxels", [])) and d not in MANUAL_DOORS
+    return {"supported": not shapes and not moving, "unsupported_shapes": shapes,
+            "unsupported_moving_geometry": moving, "surface_count": len(data["sealing_surfaces"]),
+            "model": "split-cell 45-degree glass panels" if any(s["shape"] == 6 for s in data["sealing_surfaces"])
+            and not shapes else "declared face barriers; manual doors use selected pose",
+            "verification": "geometric coverage; game compartment behavior requires an in-game check"}
+
+
 @lru_cache(maxsize=512)
 def _planes(d, q):
     piece = BY_NAME[d]
@@ -97,6 +120,7 @@ class Geometry:
             raise ValueError("door_state must be closed or open")
         self.solid, self.partial, self.barriers, self.unknown = set(), {}, set(), {}
         self.global_unknown = set()
+        self.diagonal = {}
         self.footprint = {v for p in parts for v in p.voxels()}
         self.portal_cache = {}
         for p in parts:
@@ -115,12 +139,21 @@ class Geometry:
                 continue
             voxels = {tuple(v["position"]): v for v in data["voxels"]}
             dynamic = {v for v, cfg in voxels.items() if cfg["flags"] & 4}
-            unsupported = any(s["shape"] != 1 for s in data["sealing_surfaces"])
+            unsupported = not coverage(p.piece.d)["supported"]
             if dynamic and p.piece.d not in MANUAL_DOORS:
                 unsupported = True
             if unsupported:
                 self.unknown.update({v: p.piece.d for v in p.voxels()})
             for surface in data["sealing_surfaces"]:
+                if p.piece.d.startswith("window") and surface["shape"] == 6 and _diagonal_normal(surface):
+                    cell = add(p.origin, apply(p.Q, surface["position"]))
+                    normal = apply(p.Q, _diagonal_normal(surface))
+                    plane = (normal, dot(normal, cell))
+                    if cell in self.diagonal and self.diagonal[cell] != plane:
+                        self.unknown[cell] = "intersecting diagonal glass"
+                    else:
+                        self.diagonal[cell] = plane
+                    continue
                 if surface["shape"] != 1 or not 0 <= surface["orientation"] < 6:
                     continue
                 if door_state == "open" and p.piece.d in MANUAL_DOORS and tuple(surface["position"]) in dynamic:
@@ -151,6 +184,85 @@ class Geometry:
         result = area_a + area_b - overlap < 1 - EPS
         self.portal_cache[key] = result
         return result
+
+    def regions(self, cell):
+        return (-1, 1) if cell in self.diagonal else (0,)
+
+    def portal(self, cell, side, direction, other_side):
+        if not self.passable(cell, direction):
+            return False
+        neighbour = add(cell, direction)
+        square, axis = _face(cell, direction)
+        for v, sign in ((cell, side), (neighbour, other_side)):
+            if v in self.diagonal:
+                normal, offset = self.diagonal[v]
+                square = _clip(square, tuple(sign * n for n in normal), sign * offset)
+        if _area(square, axis) < EPS:
+            return False
+        a, b = self.partial.get(cell), self.partial.get(neighbour)
+        area_a = _area(_section(square, [a]), axis) if a else 0
+        area_b = _area(_section(square, [b]), axis) if b else 0
+        overlap = _area(_section(square, [a, b]), axis) if a and b else 0
+        return _area(square, axis) - area_a - area_b + overlap > EPS
+
+
+def _split_check(geometry, parsed, lo, hi, allowed, max_cells, door_state):
+    """A glass plane splits a voxel into two air regions; neither is a solid cube."""
+    visited, parents, groups, rows = {}, {}, [], []
+    for seed in parsed:
+        cell = seed["position"]
+        if cell in geometry.diagonal:
+            raise ValueError(f"seed '{seed['name']}' lies on a diagonal glass panel; move the seed into cabin air")
+        if cell in geometry.solid:
+            raise ValueError(f"seed '{seed['name']}' is inside solid material")
+        if allowed and not all(allowed[0][i] <= cell[i] <= allowed[1][i] for i in range(3)):
+            raise ValueError("seed must be inside the containment bounds")
+        start = (cell, 0)
+        group_id = visited.get(start)
+        if group_id is None:
+            group_id = len(groups)
+            visited[start], parents[start] = group_id, None
+            queue, unknown, exit_node, air = deque([start]), set(geometry.global_unknown), None, 0
+            while queue:
+                node = queue.popleft()
+                v, side = node
+                air += 1
+                if v in geometry.unknown:
+                    unknown.add(geometry.unknown[v])
+                if exit_node is None and any(v[i] in (lo[i], hi[i]) for i in range(3)):
+                    exit_node = node
+                    if allowed:
+                        break
+                for direction in DIRS:
+                    neighbour = add(v, direction)
+                    if neighbour in geometry.unknown:
+                        unknown.add(geometry.unknown[neighbour])
+                    if any(neighbour[i] < lo[i] or neighbour[i] > hi[i] for i in range(3)):
+                        continue
+                    for other_side in geometry.regions(neighbour):
+                        target = (neighbour, other_side)
+                        if target not in visited and geometry.portal(v, side, direction, other_side):
+                            visited[target], parents[target] = group_id, node
+                            queue.append(target)
+                if len(visited) > max_cells:
+                    return {"status": "indeterminate", "compartments": [], "reason": "split-cell air region budget exceeded"}
+            path = []
+            while exit_node is not None:
+                path.append(exit_node[0])
+                exit_node = parents[exit_node]
+            path.reverse()
+            groups.append({"status": "indeterminate" if unknown else "leaking" if path else "sealed",
+                           "unknown_geometry": sorted(unknown), "escape_path": path,
+                           "escape_path_start": seed["name"], "reachable_air_regions": air, "connected": []})
+        group = groups[group_id]
+        group["connected"].append(seed["name"])
+        rows.append({"name": seed["name"], "seed": cell, "group": group})
+    result = [{**{k: v for k, v in r.items() if k != "group"}, **r["group"]} for r in rows]
+    status = ("leaking" if any(r["status"] == "leaking" for r in result) else
+              "indeterminate" if any(r["status"] == "indeterminate" for r in result) else "sealed")
+    return {"status": status, "door_state": door_state, "compartments": result,
+            "method": "exact face apertures with split-cell diagonal glass regions",
+            "verification": "geometric validation; confirm game compartment behavior in Stormworks"}
 
 
 def auto_seeds(parts, info):
@@ -192,6 +304,8 @@ def check(parts, seeds, door_state="closed", max_cells=MAX_CELLS, containment=No
     if count > max_cells:
         return {"status": "indeterminate", "compartments": [], "reason":
                 f"check needs {count} cells, above the {max_cells} cell budget; check a smaller draft"}
+    if geometry.diagonal:
+        return _split_check(geometry, parsed, lo, hi, allowed, max_cells, door_state)
     strides = (size[1] * size[2], size[2], 1)
 
     def index(v):

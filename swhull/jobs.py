@@ -48,22 +48,36 @@ def inspect_design(full, title, yaw, pitch, zoom, focus, highlight):
     return png, note
 
 
-def inspect_vehicle(path, title, yaw, pitch, zoom, focus):
-    placed, _ = load_placed(path)
+def inspect_vehicle(path, title, yaw, pitch, zoom, focus, body_id=None):
+    placed, _ = load_placed(path, body_id=body_id)
     return render_view(placed, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus, title=title,
-                       ruler=VEHICLE_RULER), ""
+                       ruler=VEHICLE_RULER), "\n" + _mesh_note(placed)
 
 
-def game_vehicle(path, name):
-    placed, other = load_placed(path)
+def _mesh_note(parts):
+    from .meshes import coverage  # noqa: PLC0415
+    report = coverage(parts)
+    return (f"Native component meshes: {sum(report['native_components'].values())}; "
+            f"footprint fallbacks: {report['footprint_fallbacks'] or 'none'}; "
+            f"omitted moving geometry: {report['omitted_moving_geometry'] or 'none'}.\n{report['note']}")
+
+
+def game_vehicle(path, name, body_id=None):
+    from pathlib import Path  # noqa: PLC0415
+    from .reference import xml_root  # noqa: PLC0415
+    bodies = xml_root(Path(path).read_text(encoding="utf-8-sig")).findall("bodies/body")
+    if body_id is None:
+        body_id = max(bodies, key=lambda b: len(b.findall("components/c"))).get("unique_id")
+    placed, other = load_placed(path, body_id=body_id)
     if not placed:
         raise ValueError(f"no components found in {name}")
     vox = [v for p in placed for v in p.voxels()]
     size = [(max(v[i] for v in vox) - min(v[i] for v in vox) + 1) / 4 for i in range(3)]
     top = ", ".join(f"{k} {v}" for k, v in sorted(other.items(), key=lambda kv: -kv[1])[:12])
     text = (f"{name}: {len(placed)} parts, about {size[2]:.2f} m long x {size[0]:.2f} m wide x "
-            f"{size[1]:.2f} m tall.\nParts drawn as single cubes (no definition found): {top or 'none'}")
-    return render_png(placed, title=name), text
+            f"{size[1]:.2f} m tall. Body {body_id} of {len(bodies)} (body-local view).\n"
+            f"Missing definitions: {top or 'none'}.\n" + _mesh_note(placed))
+    return render_png(placed, title=name, nautical=False), text
 
 
 def vehicle_xml(full):
@@ -79,12 +93,21 @@ def query_draft(record, selector, offset, limit):
     return {**query(parts, selector, offset, limit), "revision": revision(record)}
 
 
-def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None):
+def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="all", door_state="closed"):
     parts, info = materialize(record, centred=True)
+    from .networks import wires  # noqa: PLC0415
+    wires(record, parts)  # Fail before persisting edits that leave dangling generated connections.
+    if layer not in ("all", "components", "structure"):
+        raise ValueError("layer must be all, components or structure")
+    from .pieces import BY_NAME  # noqa: PLC0415
+    shown = [p for p in parts if layer == "all" or (p.piece.d in BY_NAME) == (layer == "structure")]
+    if not shown:
+        raise ValueError(f"no parts in {layer} layer")
     ruler = design_ruler(info, info["scale"]) if info else VEHICLE_RULER
-    png = (render_png(parts, title=title, ruler=ruler) if yaw is None else
-           render_view(parts, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus))
-    return png, describe(record, parts, info)
+    title = f"{title} [{layer}]" if layer != "all" else title
+    png = (render_png(shown, title=title, ruler=ruler, nautical=record.get("kind") != "land", door_state=door_state) if yaw is None else
+           render_view(shown, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus, door_state=door_state))
+    return png, describe(record, parts, info) + "\n" + _mesh_note(shown)
 
 
 def edit_draft(record, operations, title):
@@ -104,6 +127,116 @@ def import_draft(xml, source):
 def analyze_reference(path, search, offset, limit, section="parts"):
     from .reference import audit_file  # noqa: PLC0415
     return audit_file(path, search, offset, limit, section)
+
+
+def land_parts(category, search, offset, limit):
+    from .land import catalogue  # noqa: PLC0415
+    return catalogue(category, search, offset, limit)
+
+
+def land_library(directories, search, kind, offset, limit, source):
+    from .land import _page, scan_library  # noqa: PLC0415
+    _page(offset, limit)
+    if kind not in ("wheeled", "tracked", "all"):
+        raise ValueError("kind must be wheeled, tracked or all")
+    reports = [scan_library(d, search, kind, 0, 200, workshop=source == "workshop") for d in directories]
+    # Scan each library fully before applying the shared page, including libraries with >200 entries.
+    rows, skipped = [], []
+    for d, report in zip(directories, reports):
+        rows.extend(report["vehicles"])
+        cursor = report["next_offset"]
+        while cursor is not None:
+            page = scan_library(d, search, kind, cursor, 200, workshop=source == "workshop")
+            rows.extend(page["vehicles"])
+            cursor = page["next_offset"]
+        skipped.extend(report["skipped_samples"])
+    rows.sort(key=lambda r: r["name"])
+    return {"vehicles": rows[offset:offset + limit], "total": len(rows), "source": source,
+            "next_offset": offset + limit if offset + limit < len(rows) else None,
+            "files_considered": sum(r["files_considered"] for r in reports),
+            "skipped_count": sum(r["skipped_count"] for r in reports), "skipped_samples": skipped[:10],
+            "evidence_level": "observed_saved_vehicle",
+            "limitations": ["Wheel parts can occur on boats, aircraft, trailers or experiments.",
+                            "Saved arrangements are observations; roadworthiness is not inferred."]}
+
+
+def land_layout(path, record, body_id, forward, section, offset, limit, wheel_roles=None, exclude_wheel_ids=None):
+    from .land import layout_file, layout_text  # noqa: PLC0415
+    if path:
+        return layout_file(path, body_id, forward, section, offset, limit, wheel_roles, exclude_wheel_ids)
+    parts, _ = materialize(record)
+    from .editing import VehicleDocument  # noqa: PLC0415
+    xml = (VehicleDocument.parse(record["source_xml"]).to_xml(parts)
+           if record.get("kind") == "imported" else to_xml(parts))
+    from .networks import write_xml  # noqa: PLC0415
+    xml = write_xml(xml, record, parts)
+    from .reference import xml_root  # noqa: PLC0415
+    body = xml_root(xml).find("bodies/body").get("unique_id")
+    forward_ids = {p.uid: f"body:{body}:part:{i}" for i, p in enumerate(parts)}
+    roles = {forward_ids.get(key, key): value for key, value in (wheel_roles or {}).items()}
+    excluded = [forward_ids.get(key, key) for key in (exclude_wheel_ids or [])]
+    report = layout_text(xml, "draft", body_id, forward, section, offset, limit, roles, excluded)
+    original_ids = {value: key for key, value in forward_ids.items()}
+
+    def restore(value):
+        if isinstance(value, dict):
+            return {key: restore(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [restore(item) for item in value]
+        return original_ids.get(value, value) if isinstance(value, str) else value
+
+    report = restore(report)
+    report["evidence_level"] = "draft_geometry"
+    return report
+
+
+def land_draft(spec, title):
+    if spec is not None and not isinstance(spec, dict):
+        raise ValueError("land vehicle spec must be an object")
+    record = {"kind": "land", "spec": {"preset": "utility_buggy", **(spec or {})},
+              "vehicle": False, "generation": 0}
+    if record["spec"]["preset"] in ("utility_4x4", "humvee_4x4"):
+        from .networks import template_wires  # noqa: PLC0415
+        parts, _ = materialize(record)
+        record["base_connections"] = template_wires(record, parts)
+    png, note = preview_draft(record, title)
+    return record, png, note
+
+
+def viewer_geometry(xml, body_id=None):
+    from .viewer import geometry  # noqa: PLC0415
+    return geometry(xml, body_id)
+
+
+def query_connections(record, offset, limit):
+    from .networks import query  # noqa: PLC0415
+    parts, _ = materialize(record)
+    return {**query(record, parts, offset, limit), "revision": revision(record)}
+
+
+def edit_connections(record, operations, title):
+    from .networks import edited as connection_edit  # noqa: PLC0415
+    parts, _ = materialize(record)
+    proposed = connection_edit(record, operations, parts)
+    png, note = preview_draft(proposed, title)
+    return proposed, png, note
+
+
+def route_connections(record, operations, title):
+    import copy  # noqa: PLC0415
+    if not isinstance(operations, list) or not operations or len(operations) > 100:
+        raise ValueError("routes must be a nonempty list of at most 100 objects")
+    proposed = copy.deepcopy(record)
+    proposed.pop("history", None)
+    proposed.setdefault("route_edits", []).extend(copy.deepcopy(operations))
+    png, note = preview_draft(proposed, title)
+    return proposed, png, note
+
+
+def preflight_vehicle(record):
+    from .networks import preflight  # noqa: PLC0415
+    parts, _ = materialize(record)
+    return {**preflight(record, parts), "revision": revision(record)}
 
 
 def hull_analysis(full, path, body_id, stations, x):
@@ -152,7 +285,7 @@ def seal_draft(record, seeds, door_state, title):
     shown.extend(Placed(BLOCK, v, color=HIGHLIGHT) for v in path[:256])
     labels = [((-path[-1][0], path[-1][1], path[-1][2]), "escape")] if path else ()
     png = render_view(shown, title=f"{title}: {report['status']}", labels=labels, yaw=35, pitch=-20,
-                      ruler=design_ruler(info, info["scale"]) if info else VEHICLE_RULER)
+                      ruler=design_ruler(info, info["scale"]) if info else VEHICLE_RULER, door_state=door_state)
     return png, report
 
 
@@ -185,7 +318,9 @@ def _highlight(placed, info, box_name, scale):
 
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
-                                export_draft, seal_draft, analyze_reference, hull_analysis)}
+                                export_draft, seal_draft, analyze_reference, hull_analysis,
+                                land_parts, land_library, land_layout, land_draft, viewer_geometry,
+                                query_connections, edit_connections, route_connections, preflight_vehicle)}
 
 
 def _watch_parent():

@@ -84,6 +84,19 @@ def test_nested_component_settings_remain_intact():
     assert doc.to_xml(doc.parts) == source
 
 
+def test_import_preserves_nested_controller_components_containers():
+    raw = ('<c d="microcontroller"><o sc="1"><vp x="5"/><microprocessor_definition><group>'
+           '<components><c type="42"><object id="7"/></c></components>'
+           '<groups><group><components><c type="1"/></components></group></groups>'
+           '</group></microprocessor_definition></o></c>')
+    source = to_xml(blocks()).replace("</components>", raw + "</components>")
+    doc = VehicleDocument.parse(source)
+    assert len(doc.parts) == 3 and doc.to_xml(doc.parts) == source
+    assert doc.parts[-1].protected
+    repainted = apply_edits(doc.parts, [{"op": "paint", "select": {"ids": [doc.parts[0].uid]}, "color": "123456"}])
+    assert raw in doc.to_xml(repainted)
+
+
 def test_revision_tracks_source_spec_and_overlays():
     assert revision({"spec": {"length": 1}}) != revision({"spec": {"length": 2}})
     assert revision({"spec": {"edits": []}}) != revision({"spec": {"edits": [{"op": "paint"}]}})

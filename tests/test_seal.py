@@ -1,8 +1,8 @@
 import pytest
 
 from swhull import definitions
-from swhull.pieces import BLOCK, WEDGE, Piece, Placed, find_rotation
-from swhull.seal import Geometry, check
+from swhull.pieces import BLOCK, WEDGE, MIRRORED, ROTATIONS, Piece, Placed, apply, find_rotation
+from swhull.seal import Geometry, check, coverage
 
 
 def box(size=5):
@@ -81,3 +81,30 @@ def test_unknown_geometry_on_boundary_prevents_confident_pass(monkeypatch):
         {"position": (0, 0, 0), "orientation": 4, "shape": 2}]})
     parts = [item for item in box() if item.origin != (2, 2, 0)] + [Placed(p, (2, 2, 0))]
     assert check(parts, [[2, 2, 2]])["status"] == "indeterminate"
+
+
+@pytest.mark.parametrize("q", [*ROTATIONS, *MIRRORED])
+def test_diagonal_glass_closes_a_sloped_roof_without_filling_its_air_cells(monkeypatch, q):
+    glass = Piece("window_synthetic", 6, 0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
+    data = {"voxels": [], "sealing_surfaces": [{"position": (0, 0, 0), "orientation": 1, "shape": 6, "rotation": 1}]}
+    original = definitions.metadata
+    monkeypatch.setattr(definitions, "metadata", lambda d: data if d == glass.d else original(d))
+    parts = [Placed(BLOCK, apply(q, (x, y, z)), q) for x in range(5) for y in range(6) for z in range(5)
+             if x in (0, 4) or z in (0, 4) or y == 0]
+    panels = [Placed(glass, apply(q, (x, x + 1, z)), q) for x in range(1, 4) for z in range(1, 4)]
+    seed = apply(q, (2, 1, 2))
+    result = check([*parts, *panels], [seed])
+    assert result["status"] == "sealed"
+    assert not Geometry(panels, "closed").solid
+    # A missing pane must open the compartment, including rotated/reflected examples.
+    result = check([*parts, *(p for p in panels if p.origin != apply(q, (2, 3, 2)))], [seed])
+    assert result["status"] == "leaking"
+    assert coverage(glass.d)["supported"]
+
+
+def test_uncalibrated_diagonal_frames_remain_indeterminate(monkeypatch):
+    monkeypatch.setattr(definitions, "metadata", lambda _d: {"voxels": [], "sealing_surfaces": [
+        {"position": (0, 0, 0), "orientation": 3, "shape": 6, "rotation": 2}]})
+    glass = Piece("window_uncalibrated", 6, 0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
+    assert not coverage(glass.d)["supported"]
+    assert check([*box(), Placed(glass, (2, 2, 2))], [[1, 1, 1]])["status"] == "indeterminate"

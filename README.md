@@ -26,13 +26,21 @@ to understand stages, units, edits and in-game checks.
   manual doors, complete hatch/ladder assemblies, propellers and rudders.
 - **Edit individual blocks or whole regions.** Batch edits, preview before committing, undo,
   and work on a separate draft of an existing single-body vehicle.
+- **Build road and land layouts.** Inspect saves and installed workshop references, then start
+  a utility buggy with real wheels, saddle, lights, premade tanks, engine, battery and radiator,
+  or a custom chassis. Previews show installed component meshes and can expose equipment
+  inside the body. The Humvee example leaves custom-door bays open and uses compact windows,
+  a sloped hood, connected prebuilt diesel/radiator, four seats and enclosed chassis pipes.
+  Typed wiring, compact routing, enclosed wall crossings and subsystem preflight tools support
+  custom layouts; see the [land vehicle guide](docs/land-vehicles.md).
 - **Check seals independently.** Trace compartment leaks through finished blocks, slopes and
   supported component surfaces, with a highlighted escape path.
 - **Review before loading.** Every change comes back as a picture that Claude critiques and
   refines. Claude can also point a camera at any detail, or open the boat in a 3D viewer in your
   browser.
 - **Load it in game.** The server writes the vehicle XML into your Stormworks vehicles folder.
-  Hulls are plain blocks by default. Optional fit-out places parts; you add wiring and plumbing.
+  Hulls are plain blocks by default. Optional fit-out places parts; connection tools add wiring
+  and plumbing. New engines are prebuilt diesels, and cooling choices are radiators.
 
 ## Quick start
 
@@ -241,6 +249,8 @@ safe imports, undo, the installed-part catalogue, and geometry caching. New tool
 - **search_parts / get_part_definition**: installed footprints and surfaces.
 - **import_vehicle / preview_vehicle / save_vehicle**: safe drafts of existing vehicles.
 - **query_parts / edit_parts / undo_edits**: individual parts, regions, batches and undo.
+- **query_connections / edit_connections / route_connections / preflight_vehicle**: typed
+  wiring, actual pipes, subsystem checks and a connected land template; preview/commit/undo.
 - **check_seal**: independent compartment connectivity and highlighted escape paths.
 - **get_part_orientation / analyze_vehicle / get_calibration_observations**: solve mounting and
   functional axes, inspect multi-body reference evidence, and read recorded in-game checks.
@@ -302,9 +312,9 @@ component sealing geometry produces an indeterminate seal check.
   diagnostics, interiors, placeholder engines, and everything in
   [the feature list from the Iowa build](docs/feature-requests.md) (round and angled shapes,
   lattice masts, bulbous bows, skegs, paint).
-- **Out of scope:** wiring, complete power systems, engine plumbing, external tank pipe
-  connections and automatic control logic. Placement and geometric validation are automated;
-  operating the finished vehicle must be checked in game.
+- **Systems:** typed signal/electric editing, physical pipe routing and subsystem preflight
+  are available, with a connected utility 4x4 template. Automatic control logic is limited to
+  that template. Physics, fluid flow and operating the finished vehicle must be checked in game.
 - **Imports:** single-body version-3 editing only. Untouched XML/settings/connections are
   preserved; configured originals can be repainted, and structural blocks/new parts can be
   edited. Save under a different vehicle name.

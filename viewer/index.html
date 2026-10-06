@@ -99,22 +99,29 @@ const PIECES = {
 // A component with no `r` is not unrotated in Stormworks; it behaves like this rotation.
 const MISSING_R = '0,0,1,-1,0,0,0,-1,0';
 
-// ---- parsing (the game writes attribute names like 00="1", so no DOMParser) -----------
+// The game writes digit-leading attribute names; sanitize them before parsing the XML.
+// Read direct body components only, keeping controller internals and other bodies separate.
 function parseVehicle(text) {
-  const re = /<c\b([^>]*)>\s*<o\b([^>]*?)(\/?)>(?:\s*<vp\b([^>]*?)\/>)?/g;
+  const doc = new DOMParser().parseFromString(text.replace(/(\s)(\d\w*)=/g, '$1sw_$2='), 'application/xml');
+  if (doc.querySelector('parsererror')) return [];
+  const bodies = [...doc.querySelectorAll('bodies > body')];
+  const direct = b => [...(b.querySelector('components')?.children || [])].filter(n => n.tagName === 'c');
+  const body = bodies.sort((a, b) => direct(b).length - direct(a).length)[0];
+  if (!body) return [];
   const out = [];
-  for (const m of text.matchAll(re)) {
-    const d = (m[1].match(/\bd="([^"]*)"/) || [, '01_block'])[1];
-    const vp = m[3] ? '' : (m[4] || '');
-    const get = k => +((vp.match(new RegExp('\\b' + k + '="(-?\\d+)"')) || [, 0])[1]);
-    const r = (m[2].match(/\br="([^"]*)"/) || [, MISSING_R])[1].split(',').map(Number);
+  for (const component of direct(body)) {
+    const o = [...component.children].find(n => n.tagName === 'o');
+    if (!o) continue;
+    const d = component.getAttribute('d') || '01_block';
+    const vp = [...o.children].find(n => n.tagName === 'vp');
+    const get = k => +(vp?.getAttribute(k) || 0);
+    const r = (o.getAttribute('r') || MISSING_R).split(',').map(Number);
+    if (r.length !== 9 || r.some(n => !Number.isFinite(n))) continue;
     // mirror mode: `t` flips the part's own axes (bit 0 x, 1 y, 2 z) before `r` rotates it
-    const t = +((m[1].match(/\bt="(\d+)"/) || [, 0])[1]);
+    const t = +(component.getAttribute('t') || 0);
     for (let a = 0; a < 3; a++) if (t >> a & 1) for (let i = 0; i < 3; i++) r[3 * a + i] *= -1;
-    const sc = m[2].match(/\bsc="\d+,([^"]*)"/);
-    let colour = null;
-    if (sc) colour = sc[1].split(',').find(c => /^[0-9A-Fa-f]{6}$/.test(c)) || null;
-    if (!colour) colour = (m[2].match(/\bbc="([0-9A-Fa-f]{6})/) || [, 'C2C3C7'])[1];
+    const colour = (o.getAttribute('sc') || '').split(',').slice(1).find(c => /^[0-9A-Fa-f]{6}$/.test(c))
+      || o.getAttribute('bc') || 'C2C3C7';
     out.push({ d, origin: [get('x'), get('y'), get('z')], M: r, colour });
   }
   return out;
@@ -125,14 +132,31 @@ function parseVehicle(text) {
 const xf = (M, v, o) => [0,1,2].map(i => (i === 0 ? -1 : 1) *
                                   (M[i]*v[0] + M[3+i]*v[1] + M[6+i]*v[2] + o[i]));
 
-function buildMesh(parts) {
-  const pos = [], col = [], counts = {}, unknown = {};
+const componentAssets = window.EMBEDDED_VEHICLE?.geometry?.assets || {};
+function buildMesh(parts, assets = componentAssets) {
+  const pos = [], col = [], counts = {}, unknown = {}, native = {};
   const c = new THREE.Color();
   for (const p of parts) {
-    let piece = PIECES[p.d];
+    const asset = assets[p.d];
+    let piece = asset?.faces ? { faces: asset.faces } : PIECES[p.d];
     counts[p.d] = (counts[p.d] || 0) + 1;
+    if (asset?.triangles) {
+      native[p.d] = (native[p.d] || 0) + 1;
+      const m = p.M;
+      const det = m[0]*(m[4]*m[8]-m[5]*m[7])-m[1]*(m[3]*m[8]-m[5]*m[6])+m[2]*(m[3]*m[7]-m[4]*m[6]);
+      for (const [triangle, rgb] of asset.triangles) {
+        let w = triangle.map(v => xf(m, v, p.origin));
+        if (det > 0) w.reverse(); // Display's x reflection reverses native winding.
+        const hex = rgb[0] === 255 && rgb[1] === 125 && rgb[2] === 0
+          ? p.colour : rgb.map(n => n.toString(16).padStart(2, '0')).join('');
+        c.set('#' + hex);
+        for (const v of w) { pos.push(...v); col.push(c.r, c.g, c.b); }
+      }
+      continue;
+    }
+    if (asset && !PIECES[p.d]) unknown[p.d] = (unknown[p.d] || 0) + 1;
     if (!piece) { unknown[p.d] = (unknown[p.d] || 0) + 1; piece = PIECES['01_block']; }
-    c.set('#' + p.colour).convertSRGBToLinear();
+    c.set('#' + p.colour);
     const all = piece.faces.flat().map(v => xf(p.M, v, p.origin));
     const centre = [0,1,2].map(i => all.reduce((s, v) => s + v[i], 0) / all.length);
     for (const f of piece.faces) {
@@ -151,7 +175,7 @@ function buildMesh(parts) {
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.computeVertexNormals();
   g.scale(0.25, 0.25, 0.25);   // 1 voxel = 0.25 m
-  return { geometry: g, counts, unknown };
+  return { geometry: g, counts, unknown, native };
 }
 
 // ---- scene ------------------------------------------------------------------------------
@@ -210,12 +234,12 @@ function refreshExtras() {
   }
 }
 
-function load(text, name) {
-  const parts = parseVehicle(text);
+function load(text, name, prepared = null) {
+  const parts = prepared?.parts || parseVehicle(text);
   const stats = document.getElementById('stats');
   if (!parts.length) { stats.textContent = `${name}: no components found`; return; }
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
-  const { geometry, counts, unknown } = buildMesh(parts);
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
+  const { geometry, counts, unknown, native } = buildMesh(parts, prepared?.assets || componentAssets);
   mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
   scene.add(mesh);
   box.setFromObject(mesh);
@@ -223,8 +247,9 @@ function load(text, name) {
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8)
                     .map(([k, v]) => `  ${k} ${v}`).join('\n');
   const unk = Object.keys(unknown).length
-    ? `\nDrawn as cubes (no geometry yet): ${Object.entries(unknown).map(([k, v]) => `${k} ${v}`).join(', ')}` : '';
-  stats.textContent = `${name}\n${parts.length} parts, ${s.z.toFixed(2)} m long x ${s.x.toFixed(2)} m wide x ${s.y.toFixed(2)} m tall\n${top}${unk}`;
+    ? `\nFootprint fallbacks: ${Object.entries(unknown).map(([k, v]) => `${k} ${v}`).join(', ')}` : '\nFootprint fallbacks: none';
+  const nativeCount = Object.values(native).reduce((sum, n) => sum + n, 0);
+  stats.textContent = `${name}\n${parts.length} parts, ${s.z.toFixed(2)} m long x ${s.x.toFixed(2)} m wide x ${s.y.toFixed(2)} m tall\n${top}\nComponent meshes: ${nativeCount}${unk}\nOne body-local frame. Static/default tyre pose; approximate paint.`;
   document.title = `${name} - Stormworks Vehicle Viewer`;
   refreshExtras();
   setView('iso');
@@ -253,7 +278,7 @@ document.getElementById('shot').addEventListener('click', () => {
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
 
 // The MCP's open_in_viewer tool writes a copy of this page with the vehicle embedded.
-if (window.EMBEDDED_VEHICLE) load(window.EMBEDDED_VEHICLE.xml, window.EMBEDDED_VEHICLE.name);
+if (window.EMBEDDED_VEHICLE) load(window.EMBEDDED_VEHICLE.xml, window.EMBEDDED_VEHICLE.name, window.EMBEDDED_VEHICLE.geometry);
 if (new URLSearchParams(location.search).get('view')) setTimeout(() => setView(new URLSearchParams(location.search).get('view')), 50);
 </script>
 </body>

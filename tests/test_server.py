@@ -33,7 +33,27 @@ def test_tools_registered():
             "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
             "undo_edits", "preview_vehicle", "save_vehicle", "check_seal",
             "get_part_orientation", "analyze_vehicle", "get_calibration_observations",
-            "complaint", "list_complaints", "get_complaint", "analyze_hull", "suggest_hull_blocks"} <= names
+            "complaint", "list_complaints", "get_complaint", "analyze_hull", "suggest_hull_blocks",
+            "land_vehicle_guide", "search_land_parts", "find_land_vehicles", "analyze_land_vehicle",
+            "create_land_vehicle", "query_connections", "edit_connections", "route_connections",
+            "preflight_vehicle"} <= names
+
+
+def test_choices_are_exposed_in_tool_schemas():
+    tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
+    assert "analysis" in tools["complaint"].parameters["properties"]["category"]["enum"]
+    assert tools["complaint"].parameters["properties"]["severity"]["enum"] == ["low", "medium", "high", "blocker"]
+    assert {"edits", "topics"} <= set(tools["hull_design_guide"].parameters["properties"]["topic"]["enum"])
+    assert tools["preview_vehicle"].parameters["properties"]["door_state"]["enum"] == ["closed", "open"]
+
+
+def test_land_instructions_offer_open_door_examples_and_enclosed_wall_crossings():
+    assert "humvee_4x4" in server.INSTRUCTIONS
+    assert "do not enlarge the cabin" in server.INSTRUCTIONS
+    guide = server.land_vehicle_guide()
+    assert "through_blocks" in guide and "humvee_4x4" in guide and "1.25 m" in guide
+    route_tool = next(t for t in server.mcp._tool_manager.list_tools() if t.name == "route_connections")
+    assert "through_blocks" in route_tool.description and "enclosed" in route_tool.description
 
 
 @pytest.mark.parametrize("topic", ["workflow", "units", "spec", "interior", "archetypes", "style",

@@ -30,6 +30,9 @@ Other operations: **remove**, **replace** with part, **move/copy** with delta, *
 with delta and an additional-copy count, **mirror** with axis/plane, and **rotate**
 with rotation/pivot. Rotations are axis-aligned local-to-world matrices or Stormworks
 r strings. Selection supports ids, bounds, name, and definition.
+For new parts, `rotation` also accepts an effective mirrored matrix, or use a proper
+rotation with `mirror` (local bitmask: 1=x, 2=y, 4=z). `query_parts` returns both forms and
+scalar settings. New prebuilt engines explicitly default to `max_force_scale=1` (100%).
 
 Inspect the preview, then repeat with **commit=true** and the original revision.
 **undo_edits(design, revision)** restores the previous batch (ten retained steps).
@@ -160,4 +163,6 @@ benchmark for your machine and more detailed room layouts.
 
 Further work, roughly easiest first: windows/lights, navigation equipment, reusable stairs/rooms,
 anchors/winches, wheels/vehicle-specific seats, circulation planning, then buoyancy/trim estimates.
-Wiring, complete power systems, engine plumbing and control logic are outside these stages.
+These placement stages do not wire systems automatically. Use `query_connections`,
+`edit_connections`, `route_connections` and `preflight_vehicle` to complete their links and
+pipe networks. The `humvee_4x4` and `utility_4x4` land presets include connected prebuilt-engine templates.

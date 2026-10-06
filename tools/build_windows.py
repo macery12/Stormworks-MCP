@@ -11,13 +11,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument("--distpath", type=Path, default=ROOT / "dist",
+                        help="Output directory; use a separate directory while the current EXE is running")
+    args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("Windows executables must be built on Windows")
     subprocess.run([
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--console",
         "--hide-console", "hide-early",
-        "--name", "stormworks-mcp", "--distpath", str(ROOT / "dist"),
+        "--name", "stormworks-mcp", "--distpath", str(args.distpath.resolve()),
         "--workpath", str(ROOT / "build"), "--specpath", str(ROOT / "build"),
         "--collect-submodules", "mcp.server", "--exclude-module", "mcp.cli",
         "--collect-all", "mcp_types", "--collect-all", "swhull",

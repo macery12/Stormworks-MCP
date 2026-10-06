@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -49,7 +49,38 @@ Design Stormworks vehicles. Read hull_design_guide(topic="workflow") first. Ask 
 preview and inspect before saving. Hull dimensions use metres; exact edits use integer blocks
 (0.25 m each). Components stay game-sized when scaling. Query revisions before committing edits.
 Import into a draft and save a separate copy. Report skipped placements and uncertain seals;
-wiring/plumbing and in-game verification are player work.
+use connection tools to complete wiring/plumbing; operation is verified in game.
+For road/land vehicles, read land_vehicle_guide first. Use find_land_vehicles to locate wheel or
+track references, search_land_parts for chassis/control/lighting/powertrain families, and
+analyze_land_vehicle for body-local axle layouts, mounting, lights and saved settings.
+create_land_vehicle defaults to a utility buggy with bodywork, real suspension wheels, saddle,
+spotlights, premade tanks, engine, battery and radiator. preset=chassis selects a bare chassis.
+Choose preset=humvee_4x4 for a four-seat Humvee-shaped example with open custom-door bays,
+compact windows, a sloped hood, prebuilt diesel and enclosed chassis pipework. Fit the body
+proportions first; do not enlarge the cabin merely to fit a stock door/window. utility_4x4
+retains the older layout with large sliding doors. Connected examples include prebuilt diesel,
+premade fuel tank, radiator and drivetrain. Only prebuilt diesel engines and radiator cooling
+are offered for new placement. Modular engines and heat exchangers are disabled.
+Use modular_engine_gearbox_1x1 (the standalone Gearbox 1x1); its name does not make
+it a modular engine. Deprecated torque_gearbox/torque_gearbox_2 are excluded from new
+placement. Gear Switch off uses gear_ratio_1=1 (1:1 forward); on uses gear_ratio_2=0
+(1:-1 reverse). New gearboxes explicitly use these defaults. Inspect
+preflight gearbox_configuration_checks rather than assuming ratio index 0 is forward.
+New prebuilt engines explicitly use max_force_scale=1 (100% power); if an engine only
+cranks, inspect its configuration as well as external connections. Seat Axis 1 is A=-1,
+D=+1 and Axis 2 is W=+1, S=-1. Wheel mount/axle direction alone does not determine drive
+direction: constrain wheel_forward and wheel_reference_up too. Mirrored right road wheels
+keep drive arrows forward; this reference pairing inverts left steering and uses direct
+right steering. Inspect preflight wheel_direction_checks after rotation/wiring changes.
+Read workshop references with source=workshop and a numeric item ID. Previews use installed
+component meshes; layer=components exposes equipment inside the body. Extend with
+query_parts/edit_parts, preview_vehicle and save_vehicle. Land specs use actual metres.
+Use query_connections for wire nodes and physical transmission faces. edit_connections adds
+or removes typed control/electric links; route_connections adds physical pipes while preserving
+structure/access. Both support preview, revision checks, commit and undo. Run preflight_vehicle
+to check required subsystem paths, engine power, gearbox states and supported wheel/control directions.
+Wheel roles road/spare/excluded keep spares out of axle
+measurements. Manual-door previews include the leaf, with door_state=closed/open.
 For realistic hulls read hull_design_guide(topic="smoothing"). Use analyze_hull to measure
 keel, walking floor and rim separately; a part's footprint is not its solid material.
 Use suggest_hull_blocks for slope families, then check position, orientation and neighboring
@@ -77,8 +108,8 @@ these tools use integer blocks in the fixed build frame, not centred export coor
 Import single-body v3 vehicles into a draft and save a separate copy; configured originals
 remain in place. Use check_seal after edits, including explicit seed points for imports.
 Unknown sealing geometry is indeterminate. Invalid custom tanks cannot be exported.
-Use search_parts/get_part_definition for installed footprints/surfaces. Wiring, complete power
-systems and external plumbing remain player work. Heavy tools use cancellable workers and a
+Use search_parts/get_part_definition for installed footprints/surfaces and seal coverage.
+Heavy tools use cancellable workers and a
 shared geometry cache. Read docs/staged-builder.md through the design guide for examples.
 Use complaint to record encountered bugs, confusing behavior or missing capabilities with
 expected/actual behavior, reproduction steps and relevant tool arguments/errors. The report is
@@ -156,8 +187,9 @@ def _spec(spec=None, preset=None, design=None, patch=None, spec_path=None):
     """Resolve the spec a tool works on: preset or stored design, then spec_path, then spec,
     then patch."""
     record = _read_design(design) if design else None
-    if record and record.get("kind") == "imported":
-        raise ValueError("this is an imported draft; use preview_vehicle, query_parts, edit_parts and save_vehicle")
+    if record and record.get("kind") in ("imported", "land"):
+        label = "an imported" if record["kind"] == "imported" else "a land"
+        raise ValueError(f"this is {label} draft; use preview_vehicle, query_parts, edit_parts and save_vehicle")
     base = record["spec"] if record else None
     if spec_path:
         base = merge(base or {}, _read_spec_file(spec_path))
@@ -241,15 +273,33 @@ def _vehicle_path(name):
     return path
 
 
+def _reference_path(name, source="vehicles"):
+    if source == "vehicles":
+        return _vehicle_path(name)
+    if source != "workshop":
+        raise ValueError("source must be vehicles or workshop")
+    if not isinstance(name, str) or not re.fullmatch(r"[0-9]{1,20}", name):
+        raise ValueError("workshop name must be its numeric item ID")
+    for directory in definitions.workshop_dirs():
+        root = Path(directory).resolve()
+        path = (root / name / "vehicle.xml").resolve()
+        if path.is_relative_to(root) and path.is_file():
+            return path
+    raise ValueError(f"workshop vehicle {name} not installed (set SW_WORKSHOP_DIR if needed)")
+
+
 @mcp.tool()
 @_user_errors
-def hull_design_guide(topic: str = "full") -> str:
+def hull_design_guide(topic: Literal["full", "workflow", "units", "spec", "interior", "archetypes", "style",
+                                    "limits", "staged", "building", "testing", "smoothing", "edits", "topics"] = "full") -> str:
     """Read first. Topics: full, workflow, units, spec, interior, archetypes, style, limits,
     staged, building, testing, smoothing. Focused topics avoid resending the entire spec reference."""
     if topic == "full":
         return GUIDE
+    if topic == "topics":
+        return "Topics: full, workflow, units, spec, interior, archetypes, style, limits, staged, building, testing, smoothing, edits. Land vehicles: land_vehicle_guide."
     files = {"staged": "staged-builder.md", "building": "building.md", "testing": "in-game-testing.md",
-             "smoothing": "hull-smoothing.md"}
+             "smoothing": "hull-smoothing.md", "edits": "building.md"}
     if topic in files:
         return (HERE / "docs" / files[topic]).read_text(encoding="utf-8")
     headings = {"workflow": "Workflow", "units": "Units and axes", "spec": "Spec reference",
@@ -257,7 +307,7 @@ def hull_design_guide(topic: str = "full") -> str:
                 "style": "Making it look good", "limits": "Limits"}
     if topic not in headings:
         raise ValueError("unknown guide topic; choose full, workflow, units, spec, interior, "
-                         "archetypes, style, limits, staged, building, testing or smoothing")
+                         "archetypes, style, limits, staged, building, testing, smoothing, edits or topics")
     section = GUIDE.split(f"\n## {headings[topic]}\n", 1)[1].split("\n## ", 1)[0]
     return f"## {headings[topic]}\n{section}"
 
@@ -396,7 +446,7 @@ def store_design(name: str, spec: dict[str, Any] | None = None, preset: str | No
 @mcp.tool()
 @_user_errors
 def list_designs() -> list[str]:
-    """Names of designs stored by this tool (save_hull or store_design)."""
+    """Names of stored hull, land and imported drafts."""
     d = designs_dir()
     return sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
 
@@ -404,8 +454,11 @@ def list_designs() -> list[str]:
 @mcp.tool()
 @_user_errors
 def load_design(name: str) -> dict[str, Any]:
-    """Full spec of a stored design. To edit, prefer design=name plus a patch over resending it."""
+    """Hull spec, or land/import draft metadata and revision. Use part tools to edit land/imports."""
     record = _read_design(name)
+    if record.get("kind") == "land":
+        return {"kind": "land", "spec": record["spec"], "revision": _revision(record),
+                "coordinates": "build-frame integer blocks; +y up, +z forward, chassis top y=0"}
     if record.get("kind") == "imported":
         return {"kind": "imported", "source": record["source"], "revision": _revision(record),
                 "edits": record.get("edits", []), "coordinates": "original body-local integer blocks"}
@@ -425,15 +478,20 @@ def get_part_definition(definition: str) -> dict[str, Any]:
     """Installed footprint, attachment/sealing surfaces and relevant part settings."""
     result = definitions.metadata(definition)
     if result is None:
-        raise ValueError(f"definition {definition!r} unavailable; set SW_DEFINITIONS_DIR")
-    return result
+        raise ValueError(definitions.unavailable(definition))
+    from swhull.seal import coverage  # noqa: PLC0415
+    from swhull.part_policy import allowed, restriction  # noqa: PLC0415
+    return {**result, "seal_coverage": coverage(definition), "placement_allowed": allowed(definition),
+            "placement_restriction": restriction(definition)}
 
 
 @mcp.tool()
 @_user_errors
 def get_part_orientation(definition: str, targets: dict[str, list[int]] | None = None) -> dict[str, Any]:
     """Explain local mounting/motion/function axes and solve their requested world directions.
-    Example Fin Rudder targets: mount_normal=[0,0,1], span_axis=[0,1,0]."""
+    Example Fin Rudder targets: mount_normal=[0,0,1], span_axis=[0,1,0]. Road wheel targets should
+    include axle_axis, wheel_reference_up and wheel_forward; right placements can require mirror.
+    Returns effective rotation plus proper r/mirror for XML. Arrow signs still need game checks."""
     from swhull.orientation import describe  # noqa: PLC0415
     return describe(definition, targets)
 
@@ -449,7 +507,10 @@ def get_calibration_observations(definition: str) -> dict[str, Any]:
 
 @mcp.tool()
 @_user_errors
-def complaint(title: str, description: str, category: str = "other", severity: str = "medium",
+def complaint(title: str, description: str,
+              category: Literal["placement", "rotation", "smoothing", "connections", "definitions", "performance",
+                                "tool_error", "usability", "missing_feature", "analysis", "other"] = "other",
+              severity: Literal["low", "medium", "high", "blocker"] = "medium",
               tool: str = "", expected: str = "", actual: str = "", steps: list[str] | None = None,
               context: dict[str, Any] | None = None, design: str = "", vehicle: str = "",
               definition: str = "", suggestion: str = "") -> dict[str, Any]:
@@ -483,13 +544,90 @@ def get_complaint(complaint_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 @_user_errors
+def land_vehicle_guide() -> str:
+    """Road vehicle workflow, installed parts, chassis spec, units, layout limits and game checks."""
+    return (HERE / "docs" / "land-vehicles.md").read_text(encoding="utf-8")
+
+
+@mcp.tool()
+@_user_errors
+async def search_land_parts(category: Literal["", "wheels", "tracks", "lights", "controls", "propulsion", "transmission",
+                                            "power", "fuel", "cooling", "body", "logic", "utility"] = "",
+                            search: str = "", offset: int = 0,
+                            limit: int = 50) -> dict[str, Any]:
+    """Installed components useful for land builds, with footprints and actual connection ports.
+    Categories: wheels, tracks, lights, controls, propulsion, transmission, power, fuel,
+    cooling, body, logic, utility. Use get_part_definition/get_part_orientation for details.
+    Family filters are a convenience; search_parts exposes the full installed catalogue."""
+    return await run_job("land_parts", category, search, offset, limit)
+
+
+@mcp.tool()
+@_user_errors
+async def find_land_vehicles(search: str = "", kind: str = "wheeled", offset: int = 0,
+                             limit: int = 50, source: str = "vehicles") -> dict[str, Any]:
+    """Read the player's saves for wheel/track examples, including unnamed experiments.
+    kind=wheeled/tracked/all. Counts only vehicle body components, not controller internals.
+    Wheel-based boats/aircraft can match; this does not establish vehicle purpose or quality."""
+    if source not in ("vehicles", "workshop"):
+        raise ValueError("source must be vehicles or workshop")
+    directories = definitions.workshop_dirs() if source == "workshop" else [vehicles_dir()]
+    return await run_job("land_library", directories, search, kind, offset, limit, source)
+
+
+@mcp.tool()
+@_user_errors
+async def analyze_land_vehicle(name: str | None = None, design: str | None = None,
+                               body_id: str | None = None, forward: list[int] | None = None,
+                               section: str = "wheels", offset: int = 0, limit: int = 50,
+                               source: str = "vehicles", wheel_roles: dict[str, Literal["road", "spare", "excluded"]] | None = None,
+                               exclude_wheel_ids: list[str] | None = None) -> dict[str, Any]:
+    """Analyze a saved v3 vehicle or draft: body-local axles, wheelbase, mounts and light axes.
+    Sections: wheels, lights, controls, equipment, issues. All component rows are paginated.
+    forward is a horizontal unit vector; otherwise infer each body's driver-seat facing,
+    falling back to +z explicitly. Axle span measures mounting origins, not tyre-centre track.
+    Multi-body references stay separate. Suspension/steering sweep and mesh edits need game checks."""
+    if (name is None) == (design is None):
+        raise ValueError("choose exactly one saved vehicle name or draft design")
+    if design is not None and source != "vehicles":
+        raise ValueError("source applies only to a reference name")
+    path = str(_reference_path(name, source)) if name is not None else None
+    record = _read_design(design) if design is not None else None
+    return await run_job("land_layout", path, record, body_id, forward, section, offset, limit, wheel_roles, exclude_wheel_ids)
+
+
+@mcp.tool()
+@_user_errors
+async def create_land_vehicle(design: str, spec: dict[str, Any] | None = None) -> list:
+    """Create a land draft: default utility_buggy, or preset=chassis for a custom bare layout.
+    Read land_vehicle_guide for the spec. Dimensions/positions are game metres on the 0.25 m
+    grid. Buggy includes bodywork, four suspension wheels, saddle, premade fuel tanks, engine,
+    battery, radiator and actual lights. Parts must fit, mount and leave driver/service access.
+    preset=humvee_4x4 has open custom-door bays, compact glass and enclosed chassis pipes.
+    humvee_4x4 and utility_4x4 include radiator/fuel/air/exhaust/driveline pipes and typed links.
+    Use query_connections/edit_connections/route_connections/preflight_vehicle to complete custom
+    layouts. Extend through query_parts/edit_parts/preview_vehicle, then save_vehicle."""
+    _check_name(design)
+    if _design_path(design).exists():
+        raise ValueError("draft already exists; choose a new design name")
+    record, png, note = await run_job("land_draft", spec, design)
+    with DESIGN_LOCK:
+        if _design_path(design).exists():
+            raise ValueError("draft already exists; choose a new design name")
+        _atomic_design(design, record)
+    return [Image(data=png, format="png"), note,
+            {"design": design, "kind": "land", "revision": _revision(record)}]
+
+
+@mcp.tool()
+@_user_errors
 async def analyze_vehicle(name: str, search: str = "", offset: int = 0, limit: int = 50,
-                          section: str = "parts") -> dict[str, Any]:
+                          section: str = "parts", source: str = "vehicles") -> dict[str, Any]:
     """Read saved-vehicle examples, body groups, link coverage and rudder mounting/motion issues.
     Supports multi-body references without editing them. Observations are not game verification.
     Search rudder/propeller/engine/trans to focus evidence. Sections: parts, links, controllers,
     bodies, placement_issues, connection_candidates, open_transmission_ports. All are paginated."""
-    return await run_job("analyze_reference", str(_vehicle_path(name)), search, offset, limit, section)
+    return await run_job("analyze_reference", str(_reference_path(name, source)), search, offset, limit, section)
 
 
 @mcp.tool()
@@ -533,13 +671,13 @@ async def analyze_hull(name: str | None = None, spec: dict[str, Any] | None = No
 
 @mcp.tool()
 @_user_errors
-async def import_vehicle(name: str, design: str) -> str:
+async def import_vehicle(name: str, design: str, source: str = "vehicles") -> str:
     """Import an existing single-body version-3 vehicle into a new draft; never changes the source.
     Existing configured/wired parts are protected. Use query_parts/edit_parts and save_vehicle."""
     _check_name(design)
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
-    path = _vehicle_path(name)
+    path = _reference_path(name, source)
     record, count = await run_job("import_draft", path.read_bytes().decode("utf-8"), name)
     with DESIGN_LOCK:
         if _design_path(design).exists():
@@ -554,8 +692,9 @@ async def query_parts(design: str, select: dict[str, Any] | None = None,
                       offset: int = 0, limit: int = 100) -> dict[str, Any]:
     """Parts and revision for precise editing. select: ids, name, definition or inclusive bounds
     [[min_x,min_y,min_z],[max_x,max_y,max_z]]. Coordinates are integer blocks (0.25 m), in the
-    uncentred build frame for generated hulls and original body-local frame for imports.
-    Partial multi-voxel selections are rejected; select an id to target the whole component."""
+    uncentred build frame for generated hulls/land drafts and original body-local frame for imports.
+    Rows include scalar settings, proper rotation plus a local mirror bitmask, and the effective
+    transform matrix. Partial multi-voxel selections are rejected; select an id to target the whole component."""
     return await run_job("query_draft", _read_design(design), select, offset, limit)
 
 
@@ -568,7 +707,9 @@ async def edit_parts(design: str, operations: list[dict[str, Any]], revision: st
     Selection ops need select={ids/bounds/name/definition}. move/copy/repeat use delta in blocks;
     repeat count is additional copies; rotate uses a local-to-world matrix or r string and pivot;
     mirror uses axis and plane. replace needs part; paint needs color. Added parts use definition,
-    position in blocks, rotation, color, name and scalar settings. commit=true keeps one undo step."""
+    position in blocks, rotation, optional mirror (1=x, 2=y, 4=z), color, name and scalar settings.
+    Placement rotation accepts an effective mirrored matrix; use that or proper rotation plus
+    mirror. Prebuilt engines default to max_force_scale=1 (100%). commit=true keeps one undo step."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_parts again before editing")
@@ -591,7 +732,7 @@ def undo_edits(design: str, revision: str) -> dict[str, Any]:
         history = record.get("history", [])
         if not history:
             raise ValueError("no committed edits to undo")
-        restored = {**{k: v for k, v in record.items() if k not in ("history", "edits")},
+        restored = {**{k: v for k, v in record.items() if k not in ("history", "edits", "connection_edits", "route_edits")},
                     **history[-1], "history": history[:-1],
                     "generation": record.get("generation", 0) + 1, "vehicle": record.get("vehicle", False)}
         _atomic_design(design, restored)
@@ -600,12 +741,78 @@ def undo_edits(design: str, revision: str) -> dict[str, Any]:
 
 @mcp.tool()
 @_user_errors
+async def query_connections(design: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
+    """Installed/configured node indices, transmission surface indices, wires and draft revision.
+    Wire endpoints: {part_id,port}; pipe endpoints: {part_id,surface_index}. Coordinates are
+    uncentred integer blocks. Paginate components; links retain stable IDs for disconnect."""
+    return await run_job("query_connections", _read_design(design), offset, limit)
+
+
+@mcp.tool()
+@_user_errors
+async def edit_connections(design: str, operations: list[dict[str, Any]], revision: str,
+                           commit: bool = False) -> list:
+    """Preview/commit typed control and electrical wires. Uses the query_connections revision.
+    Ops: {op:'connect',from:{part_id,port},to:{part_id,port}} or {op:'disconnect',link_id}.
+    Signal outputs connect to inputs; electricity is bidirectional. One driver per signal input.
+    Power/fluid use route_connections. Original XML/settings remain lossless; commit has undo."""
+    record = _read_design(design)
+    if _revision(record) != revision:
+        raise ValueError("stale revision; query_connections again")
+    proposed, png, note = await run_job("edit_connections", record, operations, design)
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    return [Image(data=png, format="png"), note,
+            {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
+
+
+@mcp.tool()
+@_user_errors
+async def route_connections(design: str, routes: list[dict[str, Any]], revision: str,
+                            commit: bool = False) -> list:
+    """Preview/commit actual pipes between transmission faces, preserving access and structure.
+    Each route: {from:{part_id,surface_index},to:{part_id,surface_index},bounds?:[[lo],[hi]],
+    waypoints?:[[x,y,z],...],name?:str,pipe_style?:auto|exposed|enclosed,through_blocks?:[part_id,...]}.
+    Bounds/waypoints use integer blocks. Routes minimize length, then bends. Default auto uses
+    enclosed pipes for explicitly selected through_blocks; other cells use exposed pipes.
+    through_blocks replaces only selected unconfigured/unlinked 01_block parts, retaining paint.
+    All selected blocks must lie on the route (use waypoints if needed); removal restores them.
+    Other structure and access are preserved; routes never join unrelated pipe networks.
+    Clutch/gearbox ports may use several routes; create an explicit T-piece for a branch.
+    Remove an added route with {op:'remove',route_id} from query_connections, then reroute."""
+    record = _read_design(design)
+    if _revision(record) != revision:
+        raise ValueError("stale revision; query_connections again")
+    proposed, png, note = await run_job("route_connections", record, routes, design)
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    return [Image(data=png, format="png"), note,
+            {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
+
+
+@mcp.tool()
+@_user_errors
+async def preflight_vehicle(design: str) -> dict[str, Any]:
+    """Check engine fuel/air/exhaust/radiator paths, driveline, electrical power and controls.
+    Reports configuration_checks (explicit engine power), gearbox_configuration_checks (saved
+    off/on ratio indices, including reverse-off warnings) and wheel_direction_checks (drive
+    arrows and steering signs for supported direct/inverting paths). Unknown logic stays unknown.
+    Includes blocked transmission exits. Separates physical pipes from typed wires and keeps
+    functional component circuits distinct. Connected geometry still needs in-game testing."""
+    return await run_job("preflight_vehicle", _read_design(design))
+
+
+@mcp.tool()
+@_user_errors
 async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 25,
-                          zoom: float = 1, focus: list[float] | None = None) -> list:
-    """Preview a generated or imported draft; optional yaw/pitch/zoom/focus gives a close-up."""
+                          zoom: float = 1, focus: list[float] | None = None, layer: str = "all",
+                          door_state: Literal["closed", "open"] = "closed") -> list:
+    """Preview a draft using installed meshes. yaw/pitch/zoom/focus gives a close-up.
+    layer=all/components/structure; components hides bodywork to inspect seats/tanks/powertrain.
+    Paint and wheel neutral poses are approximate; the image is not an in-game screenshot."""
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must contain three fractions")
-    png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus)
+    png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus, layer, door_state)
     return [Image(data=png, format="png"), note]
 
 
@@ -650,13 +857,14 @@ def list_game_vehicles(search: str = "") -> list[str]:
 
 @mcp.tool()
 @_user_errors
-async def preview_game_vehicle(name: str) -> list:
+async def preview_game_vehicle(name: str, source: str = "vehicles", body_id: str | None = None) -> list:
     """Render any vehicle from the player's vehicles folder, e.g. to study their existing boats.
 
-    Parts are drawn at their true footprint when the game's part definitions are found, and
-    as a single cube otherwise.
+    Uses installed component meshes, with reported footprint fallbacks. source=workshop
+    reads an installed numeric item ID. For articulated vehicles choose body_id; by default
+    show the largest body alone, without pretending unrelated local frames line up.
     """
-    png, text = await run_job("game_vehicle", str(_vehicle_path(name)), name)
+    png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id)
     return [Image(data=png, format="png"), text]
 
 
@@ -666,7 +874,7 @@ async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = No
                        preset: str | None = None, yaw: float = 35.0, pitch: float = 25.0,
                        zoom: float = 1.0, focus: list[float] | None = None, design: str | None = None,
                        patch: list[dict[str, Any]] | None = None, highlight: str | None = None,
-                       spec_path: str | None = None) -> list:
+                       spec_path: str | None = None, source: str = "vehicles", body_id: str | None = None) -> list:
     """Render one large view of a hull design or saved vehicle from any angle, like a
     camera you can point. Use it to check details the fixed previews hide.
 
@@ -685,20 +893,22 @@ async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = No
     if name:
         if highlight:
             raise ValueError("highlight works on designs, not saved vehicles")
-        png, note = await run_job("inspect_vehicle", str(_vehicle_path(name)), name, yaw, pitch,
-                                  zoom, focus)
+        png, note = await run_job("inspect_vehicle", str(_reference_path(name, source)), name, yaw, pitch,
+                                  zoom, focus, body_id)
         title = name
     else:
+        if source != "vehicles" or body_id is not None:
+            raise ValueError("source/body_id apply only to a reference name")
         full = _spec(spec, preset, design, patch, spec_path)
         title = _title(preset, design)
         png, note = await run_job("inspect_design", full, title, yaw, pitch, zoom, focus, highlight)
     return [Image(data=png, format="png"), f"{title}: yaw {yaw}, pitch {pitch}, zoom {zoom}{note}"]
 
 
-def _viewer_page(xml, name):
+def _viewer_page(xml, name, geometry=None):
     """Copy of viewer/index.html with a vehicle embedded, written to the temp folder."""
     page = (HERE / "viewer" / "index.html").read_text(encoding="utf-8")
-    data = json.dumps({"xml": xml, "name": name}).replace("</", "<\\/")
+    data = json.dumps({"xml": xml, "name": name, "geometry": geometry}).replace("</", "<\\/")
     inject = f"<script>window.EMBEDDED_VEHICLE = {data};</script>\n"
     page = page.replace('<script type="importmap">', inject + '<script type="importmap">', 1)
     path = Path(tempfile.gettempdir()) / "stormworks-hull-mcp-view.html"
@@ -710,19 +920,29 @@ def _viewer_page(xml, name):
 @_user_errors
 async def open_in_viewer(name: str | None = None, spec: dict[str, Any] | None = None,
                          preset: str | None = None, design: str | None = None,
-                         patch: list[dict[str, Any]] | None = None, spec_path: str | None = None) -> str:
+                         patch: list[dict[str, Any]] | None = None, spec_path: str | None = None,
+                         source: str = "vehicles", body_id: str | None = None) -> str:
     """Open a vehicle in the interactive 3D viewer in the player's web browser.
 
-    name: a vehicle from the player's vehicles folder. Or pass spec/preset to view a hull
-    design without saving it.
+    name: saved vehicle or installed numeric workshop item (source=workshop). design supports
+    hull/land/imported drafts. Uses installed component meshes, with explicit fallbacks.
+    For articulated references choose body_id; otherwise shows the largest body alone.
     """
     if name:
-        xml = _vehicle_path(name).read_text(encoding="utf-8", errors="replace")
+        xml = _reference_path(name, source).read_text(encoding="utf-8-sig", errors="replace")
         title = name
     else:
-        xml, _, _ = await run_job("vehicle_xml", _spec(spec, preset, design, patch, spec_path))
+        if source != "vehicles" or body_id is not None:
+            raise ValueError("source/body_id apply only to a reference name")
+        if design is not None and _read_design(design).get("kind") in ("land", "imported"):
+            if any(value is not None for value in (spec, preset, patch, spec_path)):
+                raise ValueError("choose a land/imported design without hull spec/preset/patch")
+            xml, _, _ = await run_job("export_draft", _read_design(design))
+        else:
+            xml, _, _ = await run_job("vehicle_xml", _spec(spec, preset, design, patch, spec_path))
         title = design or preset or "design preview"
-    page = _viewer_page(xml, title)
+    geometry = await run_job("viewer_geometry", xml, body_id)
+    page = _viewer_page(xml, title, geometry)
     webbrowser.open(page.as_uri())
     return f"Opened '{title}' in the 3D viewer ({page})."
 

@@ -1,7 +1,7 @@
 """Read Stormworks part definitions (rom/data/definitions/*.xml) for footprints and paint slots.
 
 Footprints, surfaces, directional axes and connection nodes stay local to the installed game.
-Parts are drawn as a union of cubes over their editor footprint.
+Pieces retain editor-footprint cubes for placement; renderers separately read native meshes.
 """
 import os
 import re
@@ -66,6 +66,14 @@ def definitions_dir():
     return None
 
 
+def workshop_dirs():
+    """Installed Stormworks workshop content roots, including secondary Steam libraries."""
+    if os.environ.get("SW_WORKSHOP_DIR"):
+        return [os.environ["SW_WORKSHOP_DIR"]]
+    return [path for lib in _steam_libraries()
+            if os.path.isdir(path := os.path.join(lib, "steamapps", "workshop", "content", "573090"))]
+
+
 def _cube_union(voxels):
     verts, faces = [], []
     for (x, y, z) in voxels:
@@ -107,6 +115,13 @@ def display_name(d):
         return m.group(1) if m else d
     except OSError:
         return d
+
+
+def unavailable(d):
+    """Keep a wrong ID distinct from an absent installation."""
+    if definitions_dir() is None:
+        return f"definition {d!r} unavailable: game definitions not found; install Stormworks or set SW_DEFINITIONS_DIR"
+    return f"unknown definition {d!r} in the installed catalogue; use search_parts(search=...) to find a valid ID"
 
 
 @cache
@@ -154,6 +169,7 @@ def metadata(d):
                "physics_shape": int(v.get("physics_shape", "0")),
                "buoy_pipes": int(v.get("buoy_pipes", "0"))} for v in root.findall("voxels/voxel")]
     tooltip = root.find("tooltip_properties")
+    from .part_policy import GEARBOXES, PREBUILT_ENGINES  # noqa: PLC0415
     return {"definition": d, "name": root.get("name", d), "mass": float(root.get("mass", "0")),
             "description": tooltip.get("short_description", "") if tooltip is not None else "",
             "footprint": [v["position"] for v in voxels] or [(0, 0, 0)], "voxels": voxels,
@@ -162,7 +178,7 @@ def metadata(d):
             "directions": {tag: position(root.find(tag)) for tag in (
                 "force_dir", "seat_front", "seat_up", "door_normal", "door_side", "door_up",
                 "dynamic_body_position", "dynamic_rotation_axes", "dynamic_side_axis",
-                "connector_axis", "connector_up", "voxel_location_child")},
+                "connector_axis", "connector_up", "voxel_location_child", "light_forward")},
             "logic_nodes": [{"index": i, "label": n.get("label", ""),
                              "type": int(n.get("type", "0")), "mode": int(n.get("mode", "0")),
                              "description": n.get("description", ""), "position": position(n.find("position"))}
@@ -171,6 +187,14 @@ def metadata(d):
                            "children": [{"tag": c.tag, "attributes": dict(c.attrib)} for c in n]}
                           for n in root.findall("couplings/*")],
             "settings": {"custom_name": {"type": "string"}, **({
+                "max_force_scale": {"type": "number", "min": 0, "max": 1, "default": 1,
+                                    "description": "Prebuilt engine power fraction; 1 = 100%. Written explicitly on placement."}
+            } if d in PREBUILT_ENGINES else {}), **({
+                "gear_ratio_1": {"type": "integer", "min": 0, "default": 1,
+                                 "description": "Gear Switch off ratio index: 1 = 1:1 forward; 0 = 1:-1 reverse. Other indices select editor ratios."},
+                "gear_ratio_2": {"type": "integer", "min": 0, "default": 0,
+                                 "description": "Gear Switch on ratio index: 0 = 1:-1 reverse; 1 = 1:1 forward. Other indices select editor ratios."}
+            } if d in GEARBOXES else {}), **({
                 "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2}},
                 "fluid_fill": {"type": "number", "min": 0, "max": 1, "default": 1},
                 "fluid_filter": {"type": "integer", "default": 4294967295}
@@ -179,12 +203,15 @@ def metadata(d):
 
 def catalogue(search="", offset=0, limit=50):
     from .pieces import BY_NAME  # noqa: PLC0415
+    from .part_policy import allowed  # noqa: PLC0415
     if not isinstance(offset, int) or offset < 0 or not isinstance(limit, int) or not 1 <= limit <= 200:
         raise ValueError("offset must be nonnegative and limit must be 1-200")
     base = definitions_dir()
     names = sorted(p[:-4] for p in os.listdir(base) if p.endswith(".xml")) if base else sorted(BY_NAME)
     rows = []
     for d in names:
+        if not allowed(d):
+            continue
         name = display_name(d)
         if search.lower() not in f"{d} {name}".lower():
             continue
@@ -196,4 +223,5 @@ def catalogue(search="", offset=0, limit=50):
                          "size_metres": [n / 4 for n in size], "mass": piece.mass})
     return {"parts": rows[offset:offset + limit], "total": len(rows),
             "next_offset": offset + limit if offset + limit < len(rows) else None,
-            "definitions_available": base is not None}
+            "definitions_available": base is not None,
+            "equipment_policy": "Prebuilt diesel engines only; radiator cooling only. Restricted parts in imports remain readable."}
