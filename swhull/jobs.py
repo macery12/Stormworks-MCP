@@ -239,6 +239,49 @@ def preflight_vehicle(record):
     return {**preflight(record, parts), "revision": revision(record)}
 
 
+def plan_vehicle_repairs(record):
+    from .repairs import plan  # noqa: PLC0415
+    return plan(record)
+
+
+def repair_vehicle(record, plan_id, finding_ids, title):
+    from .repairs import repair  # noqa: PLC0415
+    from .diagnostic_view import preview  # noqa: PLC0415
+    proposed, report = repair(record, plan_id, finding_ids)
+    png, _ = preview(record, title, proposed)
+    return proposed, png, report
+
+
+def assemble_vehicle(record, assembly, bindings, options, title):
+    from .assemblies import assemble  # noqa: PLC0415
+    from .diagnostic_view import preview  # noqa: PLC0415
+    proposed, report = assemble(record, assembly, bindings, options)
+    png, _ = preview(record, title, proposed)
+    return proposed, png, report
+
+
+def diagnostic_preview(record, title, yaw=35, pitch=25, layer="components"):
+    from .diagnostic_view import preview  # noqa: PLC0415
+    png, data = preview(record, title, yaw=yaw, pitch=pitch, layer=layer)
+    data["preflight"]["revision"] = revision(record)
+    return png, {**data, "revision": revision(record)}
+
+
+def prepare_validation(record, design, name, path):
+    from .validation import prepare  # noqa: PLC0415
+    return prepare(record, design, name, path)
+
+
+def diagnostic_geometry(record):
+    from .diagnostic_view import overlay  # noqa: PLC0415
+    from .editing import VehicleDocument  # noqa: PLC0415
+    from .viewer import geometry  # noqa: PLC0415
+    parts, _ = materialize(record)
+    xml = (VehicleDocument.parse(record["source_xml"]).to_xml(parts) if record.get("kind") == "imported"
+           else to_xml(parts))
+    return xml, {**geometry(xml), "diagnostics": overlay(record, parts)}
+
+
 def hull_analysis(full, path, body_id, stations, x):
     from pathlib import Path  # noqa: PLC0415
     from .hull_analysis import design_depths, reference_structure, structural_report  # noqa: PLC0415
@@ -320,7 +363,9 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
                                 export_draft, seal_draft, analyze_reference, hull_analysis,
                                 land_parts, land_library, land_layout, land_draft, viewer_geometry,
-                                query_connections, edit_connections, route_connections, preflight_vehicle)}
+                                query_connections, edit_connections, route_connections, preflight_vehicle,
+                                plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
+                                prepare_validation, diagnostic_geometry)}
 
 
 def _watch_parent():

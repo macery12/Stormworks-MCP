@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from itertools import product
 
 from . import definitions
-from .configuration import new_settings, settings_of
+from .configuration import configure, new_settings, settings_of
 from .pieces import (BLOCK, BY_NAME, IDENTITY, MIRRORED, ROTATIONS, Placed, add, apply, parse_r, r_attr,
                      sub, with_mirror)
 from .vehicle import component_transform, component_xml, components_from_text
@@ -300,7 +300,7 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
         out.append(clone)
     identify(out)
     original = {p.uid: (p.piece.d, p.origin, p.Q) for p in out}
-    geometric = any(op.get("op") != "paint" for op in operations)
+    geometric = any(op.get("op") not in ("paint", "configure") for op in operations)
     previous = _collisions(out) if geometric else set()
     for index, op in enumerate(operations):
         kind, key = op.get("op"), f"{prefix}:{index}"
@@ -315,9 +315,9 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
                 raise ValueError(f"fill exceeds {MAX_BATCH_PARTS} parts")
             for i, v in enumerate(product(*(range(lo[a], hi[a] + 1) for a in range(3)))):
                 out.append(part({"position": v, "color": op.get("color", "C2C3C7")}, f"{key}:{i}"))
-        elif kind in ("remove", "replace", "move", "rotate", "paint", "copy", "mirror", "repeat"):
+        elif kind in ("remove", "replace", "move", "rotate", "paint", "copy", "mirror", "repeat", "configure"):
             chosen = select(out, op.get("select"))
-            if kind != "paint" and any(p.protected for p in chosen):
+            if kind not in ("paint", "configure") and any(p.protected for p in chosen):
                 raise ValueError("configured or linked original components are protected; repaint them or add new parts")
             if kind == "remove":
                 ids = {p.uid for p in chosen}
@@ -328,6 +328,9 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
             elif kind == "paint":
                 for p in chosen:
                     _paint(p, op.get("color"))
+            elif kind == "configure":
+                for p in chosen:
+                    configure(p, op.get("settings"))
             elif kind in ("move", "copy", "repeat"):
                 delta = vector(op.get("delta"), "delta")
                 count = op.get("count", 1) if kind == "repeat" else 1
@@ -369,7 +372,7 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
             raise ValueError(f"unsupported edit operation {kind!r}")
         if not out:
             raise ValueError("an edit cannot remove every part")
-        if kind != "paint":
+        if kind not in ("paint", "configure"):
             collisions = _collisions(out)
             if collisions - previous:
                 raise ValueError(f"edit {index}: part footprint collision {next(iter(collisions - previous))}")

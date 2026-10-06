@@ -101,11 +101,23 @@ Report observed problems accurately; recording one does not fix it or publish an
 
 For a single block or region: **query_parts(design, select)** returns stable ids, footprints
 and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
-mirror and repeat batches. Preview with commit=false, inspect, then repeat with commit=true
+mirror, repeat and configure batches. Configure edits supported non-geometric engine,
+gearbox, tank and small-function settings while preserving imported XML and connections.
+Preview with commit=false, inspect, then repeat with commit=true
 and the original revision. Failed batches do not change the draft; **undo_edits** retains ten
 steps. Query/edit coordinates are **integer blocks**, in the uncentred build frame (or the
 original imported body frame). A partial multi-voxel region selection fails; select the whole
 part by id. Geometry patches can invalidate earlier overlay targets; query again.
+
+For incomplete systems, **plan_vehicle_repairs** reports severity, part IDs, explanations
+and tested suggestions. **repair_vehicle** previews selected finding IDs with the plan ID
+and revision, then commits once with undo and fresh preflight. Unknown/unsafe repairs stay
+manual. **list_vehicle_assemblies/apply_vehicle_assembly** bind reusable starter/idle,
+clutch, brake/reverse and lamp controls to queried parts. Use separate throttle/clutch gates.
+**preview_vehicle_diagnostics** shows faults, blocked exits, drive/steering arrows and
+proposed repairs. **prepare_vehicle_validation** exports a test copy with an exact XML hash
+and seven pending game checks; **record_vehicle_validation** records only actual player
+observations. A topology pass is never operating evidence. See docs/vehicle-repair.md.
 
 **import_vehicle(name, design)** copies a single-body v3 vehicle into a new draft.
 Untouched XML, settings, paint, connections and body data stay intact. Configured/linked

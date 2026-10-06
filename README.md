@@ -251,6 +251,15 @@ safe imports, undo, the installed-part catalogue, and geometry caching. New tool
 - **query_parts / edit_parts / undo_edits**: individual parts, regions, batches and undo.
 - **query_connections / edit_connections / route_connections / preflight_vehicle**: typed
   wiring, actual pipes, subsystem checks and a connected land template; preview/commit/undo.
+- **plan_vehicle_repairs / repair_vehicle**: diagnose faults, preview tested repair suggestions,
+  apply selected repairs with revision checks and undo, then inspect the new preflight.
+- **list_vehicle_assemblies / apply_vehicle_assembly**: reusable starter/idle, clutch,
+  brake/reverse and lighting controls bound to queried part IDs.
+- **preview_vehicle_diagnostics**: fault parts, blocked exits, steering arrows and proposed
+  repair connections. The interactive viewer also supports `diagnostics=true` for drafts.
+- **prepare_vehicle_validation / record_vehicle_validation / get_vehicle_validation**:
+  export a test copy and track human in-game evidence against its exact XML hash.
+  See [diagnosis and repair](docs/vehicle-repair.md) for the complete workflow.
 - **check_seal**: independent compartment connectivity and highlighted escape paths.
 - **get_part_orientation / analyze_vehicle / get_calibration_observations**: solve mounting and
   functional axes, inspect multi-body reference evidence, and read recorded in-game checks.

@@ -18,6 +18,7 @@ from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from swhull.benches import describe as describe_benches
 from swhull._version import __version__
@@ -28,6 +29,10 @@ from swhull import definitions
 from swhull.jobs import run_job
 from swhull.presets import PRESETS
 from swhull.vehicle import vehicles_dir
+from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyReport, ChangeReport,
+                                 ConnectionBatch, DiagnosticReport, EditBatch, PreflightReport,
+                                 RepairPlan, RouteBatch, Selection, plain)
+from swhull.validation import Observation, ValidationRun
 
 HERE = Path(__file__).resolve().parent
 GUIDE = (HERE / "swhull" / "guide.md").read_text(encoding="utf-8")
@@ -79,6 +84,15 @@ Use query_connections for wire nodes and physical transmission faces. edit_conne
 or removes typed control/electric links; route_connections adds physical pipes while preserving
 structure/access. Both support preview, revision checks, commit and undo. Run preflight_vehicle
 to check required subsystem paths, engine power, gearbox states and supported wheel/control directions.
+Use plan_vehicle_repairs to get tested suggestions, then repair_vehicle with revision, plan_id
+and selected available finding IDs: preview first, then commit and rerun preflight. Manual
+findings need a design choice; never remove blocked structure automatically. Use
+list_vehicle_assemblies/apply_vehicle_assembly for reusable starter/idle, clutch, brake/reverse
+and lamp controls. Bind current queried IDs; idle throttle and clutch require separate gates.
+preview_vehicle_diagnostics and open_in_viewer(design=...,diagnostics=true) show faults and
+steering arrows; repair previews show proposed wires/routes in green. prepare_vehicle_validation
+exports a test copy with an exact XML hash and seven pending game checks. Record actual human
+observations using record_vehicle_validation; a connected preflight is never game-test evidence.
 Wheel roles road/spare/excluded keep spares out of axle
 measurements. Manual-door previews include the leaf, with door_state=closed/open.
 For realistic hulls read hull_design_guide(topic="smoothing"). Use analyze_hull to measure
@@ -688,19 +702,19 @@ async def import_vehicle(name: str, design: str, source: str = "vehicles") -> st
 
 @mcp.tool()
 @_user_errors
-async def query_parts(design: str, select: dict[str, Any] | None = None,
+async def query_parts(design: str, select: Selection | None = None,
                       offset: int = 0, limit: int = 100) -> dict[str, Any]:
     """Parts and revision for precise editing. select: ids, name, definition or inclusive bounds
     [[min_x,min_y,min_z],[max_x,max_y,max_z]]. Coordinates are integer blocks (0.25 m), in the
     uncentred build frame for generated hulls/land drafts and original body-local frame for imports.
     Rows include scalar settings, proper rotation plus a local mirror bitmask, and the effective
     transform matrix. Partial multi-voxel selections are rejected; select an id to target the whole component."""
-    return await run_job("query_draft", _read_design(design), select, offset, limit)
+    return await run_job("query_draft", _read_design(design), plain(select, Selection) if select is not None else None, offset, limit)
 
 
 @mcp.tool()
 @_user_errors
-async def edit_parts(design: str, operations: list[dict[str, Any]], revision: str,
+async def edit_parts(design: str, operations: EditBatch, revision: str,
                      commit: bool = False) -> list:
     """Atomic part edits; defaults to preview only. Pass the revision from query_parts.
     Ops: add(part/parts), fill(bounds,color), remove/replace/move/rotate/paint/copy/mirror/repeat.
@@ -713,7 +727,7 @@ async def edit_parts(design: str, operations: list[dict[str, Any]], revision: st
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_parts again before editing")
-    proposed, png, note = await run_job("edit_draft", record, operations, design)
+    proposed, png, note = await run_job("edit_draft", record, plain(operations, EditBatch), design)
     if commit:
         proposed = _commit_record(design, proposed, revision)
     return [Image(data=png, format="png"), note,
@@ -750,7 +764,7 @@ async def query_connections(design: str, offset: int = 0, limit: int = 100) -> d
 
 @mcp.tool()
 @_user_errors
-async def edit_connections(design: str, operations: list[dict[str, Any]], revision: str,
+async def edit_connections(design: str, operations: ConnectionBatch, revision: str,
                            commit: bool = False) -> list:
     """Preview/commit typed control and electrical wires. Uses the query_connections revision.
     Ops: {op:'connect',from:{part_id,port},to:{part_id,port}} or {op:'disconnect',link_id}.
@@ -759,7 +773,7 @@ async def edit_connections(design: str, operations: list[dict[str, Any]], revisi
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
-    proposed, png, note = await run_job("edit_connections", record, operations, design)
+    proposed, png, note = await run_job("edit_connections", record, plain(operations, ConnectionBatch), design)
     if commit:
         proposed = _commit_record(design, proposed, revision)
     return [Image(data=png, format="png"), note,
@@ -768,7 +782,7 @@ async def edit_connections(design: str, operations: list[dict[str, Any]], revisi
 
 @mcp.tool()
 @_user_errors
-async def route_connections(design: str, routes: list[dict[str, Any]], revision: str,
+async def route_connections(design: str, routes: RouteBatch, revision: str,
                             commit: bool = False) -> list:
     """Preview/commit actual pipes between transmission faces, preserving access and structure.
     Each route: {from:{part_id,surface_index},to:{part_id,surface_index},bounds?:[[lo],[hi]],
@@ -783,7 +797,7 @@ async def route_connections(design: str, routes: list[dict[str, Any]], revision:
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
-    proposed, png, note = await run_job("route_connections", record, routes, design)
+    proposed, png, note = await run_job("route_connections", record, plain(routes, RouteBatch), design)
     if commit:
         proposed = _commit_record(design, proposed, revision)
     return [Image(data=png, format="png"), note,
@@ -792,7 +806,7 @@ async def route_connections(design: str, routes: list[dict[str, Any]], revision:
 
 @mcp.tool()
 @_user_errors
-async def preflight_vehicle(design: str) -> dict[str, Any]:
+async def preflight_vehicle(design: str) -> PreflightReport:
     """Check engine fuel/air/exhaust/radiator paths, driveline, electrical power and controls.
     Reports configuration_checks (explicit engine power), gearbox_configuration_checks (saved
     off/on ratio indices, including reverse-off warnings) and wheel_direction_checks (drive
@@ -800,6 +814,149 @@ async def preflight_vehicle(design: str) -> dict[str, Any]:
     Includes blocked transmission exits. Separates physical pipes from typed wires and keeps
     functional component circuits distinct. Connected geometry still needs in-game testing."""
     return await run_job("preflight_vehicle", _read_design(design))
+
+
+def _image_report(png, report):
+    return CallToolResult(content=[Image(data=png, format="png").to_image_content(),
+                                   TextContent(type="text", text=json.dumps(report))], structured_content=report)
+
+
+@mcp.tool()
+@_user_errors
+async def plan_vehicle_repairs(design: str) -> RepairPlan:
+    """Diagnose faults and test suggested edits/wires/pipes without changing the draft.
+    Returns severity, affected IDs, explanations, concrete operations and manual-review reasons.
+    Use the returned revision, plan_id and available finding IDs with repair_vehicle."""
+    return await run_job("plan_vehicle_repairs", _read_design(design))
+
+
+@mcp.tool()
+@_user_errors
+async def repair_vehicle(design: str, revision: str, plan_id: str, finding_ids: list[str],
+                         commit: bool = False) -> ChangeReport:
+    """Preview selected repairs with overlays and before/after preflight. commit=true applies
+    the whole batch as one undo step. Revision/plan guards reject stale suggestions and conflicting repairs."""
+    record = _read_design(design)
+    if _revision(record) != revision:
+        raise ValueError("stale revision; plan_vehicle_repairs again")
+    proposed, png, report = await run_job("repair_vehicle", record, plan_id, finding_ids, design)
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    report.update(committed=commit, revision=_revision(proposed))
+    report["after"]["revision"] = report["revision"]
+    return _image_report(png, report)
+
+
+@mcp.tool()
+@_user_errors
+def list_vehicle_assemblies() -> dict[str, Any]:
+    """Reusable controls, required ID bindings and gate definitions. Place any required gates
+    using edit_parts, then bind queried IDs with apply_vehicle_assembly; geometry is not preset-specific."""
+    from swhull.assemblies import CATALOGUE  # noqa: PLC0415
+    return {"assemblies": CATALOGUE, "workflow": "query -> place gates if needed -> bind -> preview -> commit -> preflight -> game test"}
+
+
+@mcp.tool()
+@_user_errors
+async def apply_vehicle_assembly(design: str, assembly: Literal["engine_start_idle", "clutch_engagement", "brake_reverse", "lighting"],
+                                 bindings: AssemblyBindings, revision: str, options: AssemblyOptions | None = None,
+                                 commit: bool = False) -> AssemblyReport:
+    """Configure/wire reusable controls using explicit current part IDs. Existing target drivers
+    are replaced atomically. Clutch needs its own gate, separate from the idle throttle gate.
+    Starter is manual/hold; idle is open-loop, and reverse must be selected while stopped.
+    Preview includes diagnostics. commit=true creates one undo step; tune behavior in game."""
+    record = _read_design(design)
+    if _revision(record) != revision:
+        raise ValueError("stale revision; query_connections again")
+    proposed, png, report = await run_job("assemble_vehicle", record, assembly, plain(bindings, AssemblyBindings),
+                                        plain(options, AssemblyOptions) if options is not None else None, design)
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    report.update(committed=commit, revision=_revision(proposed), base_revision=revision)
+    report["preflight"]["revision"] = report["revision"]
+    return _image_report(png, report)
+
+
+@mcp.tool()
+@_user_errors
+async def preview_vehicle_diagnostics(design: str, yaw: float = 35, pitch: float = 25,
+                                      layer: Literal["all", "components", "structure"] = "components") -> DiagnosticReport:
+    """Show red fault parts, amber blocked exits and blue wheel/steering arrows over geometry.
+    Repair and assembly previews additionally show proposed green wires/pipes. Uses draft block coordinates."""
+    png, report = await run_job("diagnostic_preview", _read_design(design), design, yaw, pitch, layer)
+    return _image_report(png, report)
+
+
+def _validation_path(run_id):
+    if not re.fullmatch(r"[0-9a-f]{24}", run_id):
+        raise ValueError("invalid validation run ID")
+    return designs_dir() / "validation" / f"{run_id}.json"
+
+
+def _write_validation(report):
+    path = _validation_path(report["run_id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as f:
+        temporary = Path(f.name)
+        json.dump(report, f, indent=2)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@mcp.tool()
+@_user_errors
+async def prepare_vehicle_validation(name: str, design: str, overwrite: bool = False) -> ValidationRun:
+    """Export a separate test vehicle and create a seven-check in-game checklist tied to its
+    exact XML SHA-256 and draft revision. Starts pending; topology never counts as game evidence."""
+    record = _read_design(design)
+    target, stamp = _save_target(name, record, overwrite)
+    xml, report = await run_job("prepare_validation", record, design, name, str(target))
+    with DESIGN_LOCK:
+        if _revision(_read_design(design)) != _revision(record):
+            raise ValueError("draft changed while exporting; prepare validation again")
+        path = _validation_path(report["run_id"])
+        if path.exists():
+            raise ValueError("validation run already exists; get_vehicle_validation to review it")
+        _write_vehicle(target, xml, stamp)
+        _atomic_design(name, {**record, "vehicle": True})
+        _write_validation(report)
+    return report
+
+
+@mcp.tool()
+@_user_errors
+def get_vehicle_validation(run_id: str) -> dict[str, Any]:
+    """Read game-test evidence and report whether the export bytes and draft revision still match."""
+    from swhull.validation import sha  # noqa: PLC0415
+    path = _validation_path(run_id)
+    if not path.is_file():
+        raise ValueError("validation run not found")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    exported = Path(report["vehicle_path"])
+    return {**report, "export_matches": exported.is_file() and sha(exported.read_bytes()) == report["export_sha256"],
+            "draft_matches": _design_path(report["design"]).exists() and
+            _revision(_read_design(report["design"])) == report["revision"]}
+
+
+@mcp.tool()
+@_user_errors
+def record_vehicle_validation(run_id: str, export_sha256: str, observations: list[Observation],
+                              game_version: str, tester: str) -> ValidationRun:
+    """Record human-observed pass/fail/skipped results with evidence and measurements.
+    Refuses a changed export or mismatched hash. All seven checks need pass evidence for a passed run."""
+    from swhull.validation import record_results, sha  # noqa: PLC0415
+    with DESIGN_LOCK:
+        current = get_vehicle_validation(run_id)
+        if export_sha256 != current["export_sha256"] or not current["export_matches"]:
+            raise ValueError("export changed or hash mismatch; prepare a new validation run")
+        result = record_results({k: v for k, v in current.items() if k not in ("export_matches", "draft_matches")},
+                                [plain(o, Observation) for o in observations], game_version, tester)
+        if sha(Path(current["vehicle_path"]).read_bytes()) != export_sha256:
+            raise ValueError("export changed while recording results")
+        _write_validation(result)
+    return result
 
 
 @mcp.tool()
@@ -921,13 +1078,21 @@ def _viewer_page(xml, name, geometry=None):
 async def open_in_viewer(name: str | None = None, spec: dict[str, Any] | None = None,
                          preset: str | None = None, design: str | None = None,
                          patch: list[dict[str, Any]] | None = None, spec_path: str | None = None,
-                         source: str = "vehicles", body_id: str | None = None) -> str:
+                         source: str = "vehicles", body_id: str | None = None,
+                         diagnostics: bool = False) -> str:
     """Open a vehicle in the interactive 3D viewer in the player's web browser.
 
     name: saved vehicle or installed numeric workshop item (source=workshop). design supports
     hull/land/imported drafts. Uses installed component meshes, with explicit fallbacks.
     For articulated references choose body_id; otherwise shows the largest body alone.
     """
+    if diagnostics:
+        if design is None or any(v is not None for v in (name, spec, preset, patch, spec_path, body_id)) or source != "vehicles":
+            raise ValueError("diagnostics requires only a stored design")
+        xml, geometry = await run_job("diagnostic_geometry", _read_design(design))
+        page = _viewer_page(xml, design, geometry)
+        webbrowser.open(page.as_uri())
+        return f"Opened '{design}' with diagnostic overlays in the 3D viewer ({page})."
     if name:
         xml = _reference_path(name, source).read_text(encoding="utf-8-sig", errors="replace")
         title = name

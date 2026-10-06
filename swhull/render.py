@@ -259,7 +259,7 @@ def _ruler_axes(ruler, right, up, cx, cy, scale, w, h, ox, oy):
 
 
 def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=None, labels=(),
-               ruler=None):
+               ruler=None, segments=()):
     d, right, up = cam
     img = Image.new("RGB", (w, h), BG)
     dr = ImageDraw.Draw(img)
@@ -305,9 +305,25 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
         edge = tuple(int(c * 0.82) for c in col) if outline_px and len(pts) > 3 else None
         dr.polygon(poly, fill=col, outline=edge)
     font = ImageFont.load_default()
+    for segment in segments:
+        a, b = [to_px((_dot(segment[key], right), _dot(segment[key], up))) for key in ("start", "end")]
+        col = "#" + segment["color"]
+        dr.line((a, b), fill=col, width=3)
+        if segment.get("arrow"):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            length = math.hypot(dx, dy)
+            if length > 1:
+                ux, uy = dx / length, dy / length
+                dr.polygon([b, (b[0] - 10 * ux + 4 * uy, b[1] - 10 * uy - 4 * ux),
+                            (b[0] - 10 * ux - 4 * uy, b[1] - 10 * uy + 4 * ux)], fill=col)
+        if segment.get("label"):
+            tw = dr.textlength(segment["label"], font=font)
+            dr.text((max(4, min(w - tw - 4, b[0])), max(20, min(h - 15, b[1]))), segment["label"], fill=col, font=font)
     for point, text in labels:
         px, py = to_px((_dot(point, right), _dot(point, up)))
         tw = dr.textlength(text, font=font)
+        px = max(tw / 2 + 4, min(w - tw / 2 - 4, px))
+        py = max(27, min(h - 12, py))
         dr.rectangle([px - tw / 2 - 3, py - 7, px + tw / 2 + 3, py + 7], fill=(20, 24, 30))
         dr.text((px - tw / 2, py - 6), text, fill=(240, 244, 248), font=font)
     names = "xyz"
@@ -338,7 +354,7 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
 
 
 def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
-                width=1200, height=800, ruler=None, labels=(), door_state="closed"):
+                width=1200, height=800, ruler=None, labels=(), door_state="closed", segments=()):
     """One large view from any angle.
 
     yaw: 0 = side view with the bow to the right, 90 = from the bow, 180 = the other side,
@@ -360,7 +376,7 @@ def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
         target = tuple(lo[i] + (hi[i] - lo[i]) * f[i] for i in range(3))
     label = f"{title}  yaw {yaw:.0f}, pitch {pitch:.0f}, zoom {zoom:g}".strip()
     img, _ = _draw_view(faces, cam, width, height, label, grid=abs(pitch) < 1 or abs(pitch) > 89,
-                        zoom=zoom, focus=target, ruler=ruler, labels=labels)
+                        zoom=zoom, focus=target, ruler=ruler, labels=labels, segments=segments)
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()

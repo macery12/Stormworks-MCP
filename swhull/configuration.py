@@ -1,7 +1,9 @@
 """Placement defaults and read-only configuration evidence from saved components."""
 import copy
+import math
 import re
 from html import unescape
+from xml.sax.saxutils import escape
 
 from .part_policy import GEARBOXES, PREBUILT_ENGINES
 
@@ -36,6 +38,42 @@ def settings_of(p):
         return new_settings(p.piece.d, p.settings)
     match = re.search(r"<o\b([^>]*)", p.raw_xml)
     return {k: unescape(v) for k, v in re.findall(r'\b([A-Za-z_]\w*)="([^"]*)"', match[1])} if match else {}
+
+
+def configure(p, settings):
+    """Edit known non-geometric settings without rewriting imported component XML."""
+    allowed = set(defaults(p.piece.d))
+    if p.piece.d.startswith("fluid_tank_"):
+        allowed.update(("fluid_type", "fluid_fill"))
+    if p.piece.d == "gate_function_small":
+        allowed.add("property_text")
+    if not isinstance(settings, dict) or not settings or set(settings) - allowed:
+        raise ValueError(f"configure supports only {sorted(allowed)} for {p.piece.d}")
+    if any(not isinstance(v, (str, int, float, bool)) or isinstance(v, float) and not math.isfinite(v)
+           for v in settings.values()):
+        raise ValueError("settings must be finite scalar values")
+    # Validate changed numeric fields without applying defaults to untouched imports.
+    new_settings(p.piece.d, {**defaults(p.piece.d), **settings})
+    if "fluid_type" in settings and (type(settings["fluid_type"]) is not int or not 0 <= settings["fluid_type"] <= 6):
+        raise ValueError("fluid_type must be an integer from 0 to 6 (diesel = 1)")
+    if "fluid_fill" in settings and (isinstance(settings["fluid_fill"], bool)
+                                    or not isinstance(settings["fluid_fill"], (int, float))
+                                    or not 0 <= settings["fluid_fill"] <= 1):
+        raise ValueError("fluid_fill must be between 0 and 1")
+    if "property_text" in settings and (not isinstance(settings["property_text"], str)
+                                        or not 1 <= len(settings["property_text"]) <= 512):
+        raise ValueError("property_text must contain 1-512 characters")
+    p.settings.update(settings)
+    if p.raw_xml:
+        match = re.search(r"<o\b[^>]*", p.raw_xml)
+        if match is None:
+            raise ValueError("component has no configuration object")
+        tag = match[0]
+        for key, value in settings.items():
+            attr = f'{key}="{escape(str(value), {chr(34): "&quot;"})}"'
+            pattern = rf'(?<!\w){key}="[^"]*"'
+            tag = re.sub(pattern, lambda _m, replacement=attr: replacement, tag) if re.search(pattern, tag) else tag + " " + attr
+        p.raw_xml = p.raw_xml[:match.start()] + tag + p.raw_xml[match.end():]
 
 
 def engine_power(p):

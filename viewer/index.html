@@ -40,6 +40,7 @@
   </div>
   <div class="row">
     <button id="edges">Outlines</button><button id="grid">1 m grid</button>
+    <button id="diagnostics" hidden>Diagnostics</button>
   </div>
   <div id="stats">Drop a vehicle .xml anywhere, or use Open.
 Vehicles live in %APPDATA%\Stormworks\data\vehicles</div>
@@ -252,8 +253,61 @@ function load(text, name, prepared = null) {
   stats.textContent = `${name}\n${parts.length} parts, ${s.z.toFixed(2)} m long x ${s.x.toFixed(2)} m wide x ${s.y.toFixed(2)} m tall\n${top}\nComponent meshes: ${nativeCount}${unk}\nOne body-local frame. Static/default tyre pose; approximate paint.`;
   document.title = `${name} - Stormworks Vehicle Viewer`;
   refreshExtras();
+  loadDiagnostics(prepared?.diagnostics || null);
   setView('iso');
 }
+
+let diagnosticGroup = null;
+function loadDiagnostics(data) {
+  if (diagnosticGroup) {
+    scene.remove(diagnosticGroup);
+    diagnosticGroup.traverse(o => {
+      o.geometry?.dispose();
+      if (o.material) { o.material.map?.dispose(); o.material.dispose(); }
+    });
+  }
+  diagnosticGroup = new THREE.Group();
+  const button = document.getElementById('diagnostics');
+  button.hidden = !data;
+  if (!data) return;
+  const point = v => new THREE.Vector3(-v[0] / 4, v[1] / 4, v[2] / 4);
+  const label = (v, text, colour) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768; canvas.height = 48;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#14181eee'; ctx.fillRect(0, 0, 768, 48);
+    ctx.fillStyle = '#' + colour; ctx.font = '22px sans-serif'; ctx.fillText(text.slice(0, 65), 8, 31);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false }));
+    sprite.position.copy(point(v)); sprite.position.y += 0.18;
+    sprite.scale.set(2.8, 0.175, 1); sprite.renderOrder = 10;
+    diagnosticGroup.add(sprite);
+  };
+  for (const m of data.markers) {
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8),
+      new THREE.MeshBasicMaterial({ color: '#' + m.color, depthTest: false }));
+    sphere.position.copy(point(m.position)); sphere.renderOrder = 9;
+    diagnosticGroup.add(sphere);
+    if (m.kind !== 'proposed') label(m.position, m.label, m.color);
+  }
+  for (const s of data.segments) {
+    const a = point(s.start), b = point(s.end), delta = b.clone().sub(a);
+    if (s.arrow && delta.length() > 0.001) {
+      const arrow = new THREE.ArrowHelper(delta.clone().normalize(), a, delta.length(), '#' + s.color, 0.12, 0.06);
+      arrow.traverse(o => { if (o.material) { o.material.depthTest = false; o.renderOrder = 9; } });
+      diagnosticGroup.add(arrow);
+    } else {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]),
+        new THREE.LineBasicMaterial({ color: '#' + s.color, depthTest: false }));
+      line.renderOrder = 9; diagnosticGroup.add(line);
+    }
+    if (s.label) label(s.end, s.label, s.color);
+  }
+  document.getElementById('stats').textContent += '\nDiagnostics: red faults, amber blocked ports, blue steering, green proposed repairs.';
+  scene.add(diagnosticGroup);
+}
+document.getElementById('diagnostics').addEventListener('click', () => {
+  if (diagnosticGroup) diagnosticGroup.visible = !diagnosticGroup.visible;
+});
 
 async function openFile(f) { load(await f.text(), f.name.replace(/\.xml$/i, '')); }
 document.getElementById('file').addEventListener('change', e => e.target.files[0] && openFile(e.target.files[0]));

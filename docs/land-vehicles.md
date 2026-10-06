@@ -1,5 +1,8 @@
 # Road and land vehicles
 
+For diagnosis, repair suggestions, reusable controls, diagnostic overlays and versioned
+in-game checks, see [Diagnose, repair and verify a vehicle](vehicle-repair.md).
+
 ## Workflow
 
 Start with `find_land_vehicles` to locate the player's saved wheel-based examples. Names are

@@ -419,7 +419,7 @@ def preflight(record, parts):
                 graph[_key(port)] for port in transmission_ports(p) if _key(port) != _key(f)) else issues
             destination.append(row)
     missing = sum(c["status"] == "missing" for c in checks)
-    return {"status": "incomplete" if missing or issues else "connected geometry", "missing_count": missing,
+    report = {"status": "incomplete" if missing or issues else "connected geometry", "missing_count": missing,
             "checks": checks, "issues": issues, "wire_count": len(links),
             "physical_face_pairs": len(pairs), "open_transmission_faces": open_faces,
             "capped_unused_tank_faces": capped_unused,
@@ -428,3 +428,6 @@ def preflight(record, parts):
             "gearbox_configuration_checks": gearbox_checks,
             "wheel_direction_checks": wheel_checks,
             "verification": "Topology, engine-power and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
+    from .repairs import findings  # noqa: PLC0415
+    report["findings"] = findings(report, parts, links)
+    return report

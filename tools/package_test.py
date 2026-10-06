@@ -80,10 +80,15 @@ async def exercise(command, args):
                     async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
                         init = await session.initialize()
                         assert init.instructions and init.server_info.version
-                        tools = {tool.name for tool in (await session.list_tools()).tools}
+                        descriptors = {tool.name: tool for tool in (await session.list_tools()).tools}
+                        tools = set(descriptors)
                         assert {"preview_hull", "save_hull", "get_runtime_status", "hull_design_guide",
                                 "analyze_hull", "suggest_hull_blocks", "land_vehicle_guide", "create_land_vehicle", "query_connections",
-                                "edit_connections", "route_connections", "preflight_vehicle"} <= tools
+                                "edit_connections", "route_connections", "preflight_vehicle", "plan_vehicle_repairs",
+                                "repair_vehicle", "apply_vehicle_assembly", "preview_vehicle_diagnostics",
+                                "prepare_vehicle_validation", "record_vehicle_validation"} <= tools
+                        assert descriptors["repair_vehicle"].output_schema["type"] == "object"
+                        assert "delta" in descriptors["edit_parts"].input_schema["$defs"]["Translate"]["required"]
                         for topic in ("workflow", "staged", "building", "testing", "smoothing", "edits", "topics"):
                             response = await session.call_tool("hull_design_guide", {"topic": topic})
                             assert not response.is_error and response.content[0].text
@@ -100,6 +105,19 @@ async def exercise(command, args):
                         assert not response.is_error, response.content
                         assert "cache reused" in response.content[0].text
                         assert (temporary / "vehicles" / "packaged smoke test.xml").is_file()
+                        diagnosis = await session.call_tool("plan_vehicle_repairs", {"design": "packaged smoke test"})
+                        assert not diagnosis.is_error and diagnosis.structured_content["plan_id"]
+                        preflight = await session.call_tool("preflight_vehicle", {"design": "packaged smoke test"})
+                        assert not preflight.is_error and preflight.structured_content["findings"]
+                        diagnostics = await session.call_tool("preview_vehicle_diagnostics", {"design": "packaged smoke test", "layer": "all"})
+                        assert not diagnostics.is_error and diagnostics.structured_content["overlay"]["legend"]
+                        assert any(part.type == "image" for part in diagnostics.content)
+                        validation = await session.call_tool("prepare_vehicle_validation", {"design": "packaged smoke test", "name": "validation copy"})
+                        assert not validation.is_error and validation.structured_content["status"] == "pending"
+                        invalid = await session.call_tool("edit_parts", {"design": "packaged smoke test",
+                            "revision": diagnosis.structured_content["revision"],
+                            "operations": [{"op": "move", "select": {"ids": ["bad"]}}]})
+                        assert invalid.is_error
                         choices = await session.call_tool("suggest_hull_blocks", {"normal": [0, 1, 0.25]})
                         assert not choices.is_error and "08_wedge_4" in choices.content[0].text
                         analysis = await session.call_tool("analyze_hull", {"preset": "rowboat", "stations": [8],

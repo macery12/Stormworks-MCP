@@ -3,6 +3,13 @@
 This project writes Stormworks files without running the game, so the game is the only real test.
 This page explains how to check generated vehicles in game, and what has been checked so far.
 
+The [vehicle repair workflow](vehicle-repair.md) adds exact-version road-test records.
+`prepare_vehicle_validation` exports a copy and records its SHA-256 and draft revision;
+starting, forward, steering, reverse, braking, sustained cooling and suspension clearance
+begin pending. `record_vehicle_validation` stores observed evidence and measurements.
+`get_vehicle_validation` reports export/draft changes; changed XML requires a new run.
+The automated three-fault repair milestone has no implied driving-test pass.
+
 The [advanced testing suite](advanced-testing.md) adds body-aware saved-vehicle analysis,
 all-definition rotation checks, both rudder mounting models, and numbered calibration exhibits
 with recorded player observations. Generated exhibits remain pending until checked in game.
