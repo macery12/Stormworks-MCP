@@ -32,6 +32,8 @@ with recorded player observations. Generated exhibits remain pending until check
 | Ballast (`ballast: "auto"`) and the flotation estimate | Not yet checked: save `patrol_boat` with wedge smoothing, compare where the water meets the hull with the estimated 1.4 m draft (paint ends at 1.0 m), and check it floats level |
 | Railings (`railings: "auto"`) | Written in the format the reference ships save (`bc`/`ac` paint, mirrored diagonal corners as `t`); not yet loaded in game. Check they attach, the transom diagonal corners meet, and the trawler's sheer-step incline lines up |
 | Mooring anchors (`mooring: "auto"`) | Not yet loaded in game. Check each Rope Anchor's plate sits flush in the deck with no hole or leak, and that a rope can be tied between two of them |
+| Per-face paint order (`sc`) | Measured on the reference saves: the up/down faces follow the definition's surface order. The order within the left/right and front/back pairs is ambiguous in the data, so those pairs share a colour (`faces.PAIRS_CONFIRMED`). Run `uv run tools/paint_faces_exhibit.py`, load `paint faces test` and compare each test piece's face colours with what the tool prints |
+| Liveries and paint items | Rendered only. Load a `coast_guard` patrol boat and check the bow flash, deck/hull edge and caps match the preview |
 | Interiors (rooms, doors, hatches) | Not yet verified in game |
 | Placeholder engines | Not yet verified in game |
 | Cylinders, domes, spheres, lattice masts | Not yet verified in game |

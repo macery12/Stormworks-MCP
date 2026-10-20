@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from . import raster
+from .faces import colour_of as faces_colour
 from .meshes import world_arrays
 from .pieces import add, apply
 
@@ -134,7 +135,7 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
     for p in placed:
         if p.piece.d == "01_block":
             v = _mirror(p.origin)
-            blocks.append((v, p.color))
+            blocks.append((v, p))
             for d in _RDIRS:
                 full.add((v, d))
             continue
@@ -156,7 +157,7 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
         for pts, n in _piece_polys(p):
             frags = _fragments(pts)
             d = _axis_dir(n)
-            polys.append((frags, n, d, p.color))
+            polys.append((frags, n, d, p))
             if d is None:
                 continue
             for fr in frags:
@@ -166,19 +167,18 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
                     full.add((inner, d))
     faces = detailed
     cols = {}
-    for v, color in blocks:
+    for v, p in blocks:
         for d in dirs:
             if ((v[0] + d[0], v[1] + d[1], v[2] + d[2]), (-d[0], -d[1], -d[2])) in full:
                 continue
+            color = faces_colour(p, p.origin, _mirror(d)) if p.faces else p.color
             key = (color, d)
             col = cols.get(key)
             if col is None:
                 col = cols[key] = tuple(min(255, int(c * shades[d])) for c in _hex(color))
             faces.append((_square(v, d), d, col, v))
-    for frags, n, d, color in polys:
-        rgb = _hex(color)
+    for frags, n, d, p in polys:
         shade = ambient + (1 - ambient) * max(0.0, _dot(n, light))
-        col = tuple(min(255, int(c * shade)) for c in rgb)
         if facing is not None and _dot(n, facing) >= -1e-6:
             continue
         for fr in frags:
@@ -189,6 +189,8 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
                     continue
             fc = tuple(sum(q[i] for q in fr) / len(fr) for i in range(3))
             cell = tuple(round(fc[i] - n[i] * 0.01) for i in range(3))   # voxel this piece sits in
+            color = faces_colour(p, _mirror(cell), _mirror(n)) if p.faces else p.color
+            col = tuple(min(255, int(c * shade)) for c in _hex(color))
             faces.append((fr, n, col, cell))
     return faces
 

@@ -277,6 +277,13 @@ class Placed:
     settings: dict = field(default_factory=dict)
     raw_xml: str = ""
     protected: bool = False
+    faces: tuple = ()   # one colour per surface in `sc` order (see faces.py); () = all `color`
+
+    def __setattr__(self, name, value):
+        # Repainting a part (edits, highlights) repaints every face: drop per-face colours.
+        if name == "color" and self.__dict__.get("faces") and value != self.__dict__.get("color"):
+            object.__setattr__(self, "faces", ())
+        object.__setattr__(self, name, value)
 
     def voxels(self):
         return [add(self.origin, apply(self.Q, f)) for f in self.piece.footprint]

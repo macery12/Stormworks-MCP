@@ -62,7 +62,8 @@ def _simple_xml(placed):
         r = f' r="{r_attr(rot)}"'
         n = p.piece.surfaces
         # every surface needs its colour: `x` in `sc` means "unpainted", not "same as before"
-        sc = f"{n}" + f",{p.color.upper()}" * n
+        faces = p.faces if len(p.faces) == n else (p.color,) * n
+        sc = f"{n}," + ",".join(c.upper() for c in faces)
         parts.append(f'<c{d}><o{r} sc="{sc}">{_vp(p.origin)}</o></c>')
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<vehicle data_version="3" bodies_id="1"><authors/><bodies><body unique_id="1">'
@@ -183,6 +184,8 @@ def placed_from_text(text, body_id=None):
         if piece is None:
             other[d] = other.get(d, 0) + 1
             piece = Piece(d, BLOCK.surfaces, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
+        faces = tuple(c.upper() if re.fullmatch(r"[0-9a-fA-F]{6}", c) else colour for c in colours)
         out.append(Placed(piece, origin, Q, colour, name=o.get("custom_name", ""),
-                          settings={k: v for k, v in o.attrib.items() if k not in ("r", "sc")}))
+                          settings={k: v for k, v in o.attrib.items() if k not in ("r", "sc")},
+                          faces=faces if len(faces) == piece.surfaces and len(set(faces)) > 1 else ()))
     return out, other

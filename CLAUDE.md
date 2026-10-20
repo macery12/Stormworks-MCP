@@ -39,9 +39,11 @@ verified.
   stopped, and on big ships it outlived the client's timeout and stalled every later call.
 - `swhull/`: `hull` (shape, boxes, scale), `build` (spec resolution, patches, colours, summary),
   `smooth` (skin + wedge fit), `habits` (veteran finishing: box chamfers, ballast, railings),
-  `interior`, `paint`, `jobs` (heavy tool work in a child process the server kills on cancel or
-  timeout), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays, flat painting), `raster` (lit rendering: GPU or CPU
-  rasterizing, one shared NumPy lighting pass), `definitions` (game install detection).
+  `interior`, `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries`
+  (named paint schemes), `jobs` (heavy tool work in a child process the server kills on cancel or
+  timeout), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays,
+  flat painting), `raster` (lit rendering: GPU or CPU rasterizing, one shared NumPy lighting
+  pass), `definitions` (game install detection).
 - `swhull/guide.md` is served to Claude by `hull_design_guide`; keep it in sync with the spec.
 - Wedge fit (`smooth.py`): after changing it, render the calibration shapes (1:1, 1:2, 1:4 hip
   roofs must come out in Wedge, Wedge 1x2, Wedge 1x4) and a few presets. `tests/test_smooth.py`

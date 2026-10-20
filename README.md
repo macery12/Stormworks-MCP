@@ -31,7 +31,9 @@ Pick one of 10 hull archetypes (runabout, rowboat, fishing trawler, tugboat, mot
 craft, lifeboat, patrol boat, catamaran or barge) and adjust its length, beam, deadrise, bow shape,
 sheer and flare. Add superstructure from boxes, cylinders, domes and lattice masts; each shape can be
 pitched, yawed, mirrored to both sides, repeated in rows, or stacked on another by name. Bulbous
-bows, skegs, hull numbers, deck markings and painted panels are also available. To model a real
+bows and skegs are also available. Paint is per face, like a hand-built ship: pick a livery (navy,
+coast guard, workboat, research, yacht, dazzle or splinter camouflage) or design your own with
+hull numbers, bow flashes, stripes, panels, deck markings and camouflage. To model a real
 ship, enter its dimensions with `scale: "1:4"`, or use `scale: "fit"` to size a design to your
 workbench.
 
@@ -303,7 +305,9 @@ only real test. [In-game testing](docs/in-game-testing.md) tracks the status of 
   and the four control assemblies.
 - **Imports** accept single-body, version-3 vehicles only. Some configured original parts can only
   be repainted. Save the result under a new name.
-- **Paint** is one colour per block, so hull blocks show their outside colour inside rooms.
+- **Paint** is per face, but the order of a part's left/right and front/back faces in the file
+  is not yet confirmed in game, so those pairs share a colour (`tools/paint_faces_exhibit.py`
+  writes the test vehicle). Edits repaint whole parts.
 - **Large designs:** a 118 m, 184k-part ship previews in about 15 s, or about 35 s with wedge
   smoothing. The game appears to drop components past 131,072 on spawn; this is not yet confirmed.
 - **The 3D viewer** loads three.js from a CDN, so it needs internet access.

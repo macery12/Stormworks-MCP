@@ -24,6 +24,7 @@ DEFAULT_SPEC = {
     "ballast": "auto",
     "railings": "auto",
     "mooring": "auto",
+    "livery": None,
     "scale": 1,
     "bench": None,
     "interior_units": "game",
@@ -33,7 +34,8 @@ DEFAULT_SPEC = {
     "sheer": {"bow": 0.5, "stern": 0.1},
     "section": {"deadrise": 14.0, "bilge_radius": 0.3, "flare": 0.1, "keel_width": 0.25},
     "colors": {"bottom": "A52A2A", "stripe": "1A1A1A", "topsides": "F0F0F0",
-               "deck": "6E6E6E", "waterline": None, "stripe_height": 0.25, "rail": None},
+               "deck": "6E6E6E", "waterline": None, "stripe_height": 0.25, "rail": None,
+               "roof": None, "trim": None, "sheer_stripe": None},
     "superstructure": [],
     "skegs": [],
     "paint": [],
@@ -58,7 +60,8 @@ _SCALED_BOX = ("z", "length", "width", "height", "x", "taper", "rake_front", "ra
                "corner_radius", "corner_chamfer", "roof_radius")
 _SCALED_BULB = ("length", "width", "height", "y", "protrude")
 _SCALED_SKEG = ("z", "length", "x", "width", "bottom")
-_SCALED_PAINT = ("z", "length", "y", "height", "x", "width", "radius", "thickness")
+_SCALED_PAINT = ("z", "length", "y", "height", "x", "width", "radius", "thickness", "stripe", "scale")
+_SCALED_PAINT_POINTS = ("points", "from", "to", "size")
 _SCALED_ROOM = ("z", "length", "width", "x", "floor", "height")
 _SCALED_HATCH = ("z", "x", "floor", "size")
 _Y_REF = re.compile(r"^(.*?)\s*([+-]\s*\d+(?:\.\d*)?|[+-]\s*\.\d+)?$")
@@ -135,6 +138,8 @@ def _scale_lengths(out, s):
             box["y"] = f"{ref}{off * s:+g}" if off else ref
         if isinstance(box.get("band"), dict):
             mul(box["band"], ("from", "to"))
+        if isinstance(box.get("cap"), dict):
+            mul(box["cap"], ("height",))
         if isinstance(box.get("waist"), dict):
             mul(box["waist"], ("from", "peak", "to", "inset"))
         if isinstance(box.get("repeat"), dict):
@@ -143,6 +148,11 @@ def _scale_lengths(out, s):
         mul(skeg, _SCALED_SKEG)
     for item in out.get("paint") or []:
         mul(item, _SCALED_PAINT)
+        for key in _SCALED_PAINT_POINTS:
+            value = item.get(key)
+            if isinstance(value, list):
+                item[key] = [[c * s if _num(c) else c for c in p] if isinstance(p, list) else
+                             p * s if _num(p) else p for p in value]
     interior = out.get("interior")
     if isinstance(interior, dict) and out.get("interior_units") == "spec":
         for key in ("decks", "bulkheads"):
@@ -190,9 +200,21 @@ def validate(spec):
         problems.append('railings must be "auto" or "none"')
     if spec.get("mooring", "auto") not in ("auto", "none"):
         problems.append('mooring must be "auto" or "none"')
-    rail = (spec.get("colors") or {}).get("rail")
-    if rail is not None and not (isinstance(rail, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", rail)):
-        problems.append("colors.rail must be a 6-digit hex colour such as B4BAC2")
+    for key in ("rail", "roof", "trim", "sheer_stripe"):
+        value = (spec.get("colors") or {}).get(key)
+        if value is not None and not (isinstance(value, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", value)):
+            problems.append(f"colors.{key} must be a 6-digit hex colour such as B4BAC2")
+    for i, box in enumerate(spec.get("superstructure") or []):
+        if not isinstance(box, dict):
+            continue
+        for key in ("color", "roof_color", "trim_color"):
+            value = box.get(key)
+            if value is not None and not (isinstance(value, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", value)):
+                problems.append(f"superstructure[{i}].{key} must be a 6-digit hex colour")
+        cap = box.get("cap")
+        if cap is not None and not (isinstance(cap, dict) and _num(cap.get("height", 0.5))
+                                    and re.fullmatch(r"[0-9A-Fa-f]{6}", str(cap.get("color", "1A1A1A")))):
+            problems.append(f"superstructure[{i}].cap must be {{height (m), color (hex)}}")
     if spec.get("deck") not in ("closed", "open"):
         problems.append('deck must be "closed" or "open"')
     if spec.get("hulls") not in (1, 2, 3):
@@ -274,18 +296,9 @@ def validate(spec):
     for i, skeg in enumerate(spec.get("skegs") or []):
         if not isinstance(skeg, dict) or not all(_num(skeg.get(k)) for k in ("z", "length")):
             problems.append(f"skegs[{i}] needs z and length (metres)")
-    for i, item in enumerate(spec.get("paint") or []):
-        if not isinstance(item, dict):
-            problems.append(f"paint[{i}] must be an object")
-            continue
-        if item.get("shape", "rect") not in ("rect", "circle", "text"):
-            problems.append(f"paint[{i}].shape must be rect, circle or text")
-        if item.get("on", "sides") not in ("deck", "port", "starboard", "sides"):
-            problems.append(f"paint[{i}].on must be deck, port, starboard or sides")
-        if not _num(item.get("z")):
-            problems.append(f"paint[{i}].z is required (metres)")
-        if item.get("shape") == "text" and not isinstance(item.get("text"), str):
-            problems.append(f"paint[{i}].text is required for shape text")
+    from .liveries import validate as livery_problems  # noqa: PLC0415 - both import VOX from here
+    from .paint import validate as paint_problems  # noqa: PLC0415
+    problems += paint_problems(spec.get("paint")) + livery_problems(spec.get("livery"))
     interior = spec.get("interior") or {}
     if not isinstance(interior, dict):
         problems.append("interior must be an object")

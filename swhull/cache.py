@@ -64,11 +64,12 @@ def read(cache_key):
             coords, tags = archive["coords"], archive["tags"]
         parts = []
         for row in meta["parts"]:
-            d, origin, q, color, uid, name, settings = row
+            d, origin, q, color, uid, name, settings, faces = row
             piece = BY_NAME.get(d) or definitions.load(d)
             if piece is None:
                 return None
-            parts.append(Placed(piece, tuple(origin), tuple(tuple(r) for r in q), color, uid, name, settings))
+            parts.append(Placed(piece, tuple(origin), tuple(tuple(r) for r in q), color, uid, name, settings,
+                                faces=tuple(faces)))
         shape = HullShape(meta["info"]["spec"])
         info = meta["info"]
         info["region"] = {tuple(int(n) for n in v): "hull" if t == 0 else f"box{int(t) - 1}"
@@ -87,7 +88,7 @@ def write(cache_key, parts, info):
     temporary = None
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        meta = {"parts": [[p.piece.d, p.origin, p.Q, p.color, p.uid, p.name, p.settings] for p in parts],
+        meta = {"parts": [[p.piece.d, p.origin, p.Q, p.color, p.uid, p.name, p.settings, p.faces] for p in parts],
                 "info": {k: v for k, v in info.items() if k not in ("shape", "form", "region", "interior")},
                 "interior": _plan_data(info["interior"])}
         coords = np.asarray(list(info["region"]), dtype=np.int32)

@@ -253,10 +253,11 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `section.flare` | how much narrower the waterline is than the deck (negative = tumblehome) | 0-0.15 |
 | `section.keel_width` | width of the flat keel strip, m | 0.25-0.5 |
 | `bow.bulb` | bulbous bow: `{length, width, height, y, protrude}` m; `y` is the bulb's centre height, `protrude` how far its tip passes the bow | warships, freighters |
-| `colors` | hex RGB: `bottom`, `stripe` (boot-top), `topsides`, `deck`, `rail` (railings, default light grey B4BAC2); `waterline` height m; `stripe_height` m | |
+| `colors` | hex RGB: `bottom`, `stripe` (boot-top), `topsides`, `deck`, `roof` (box roofs), `trim` (box bevels and chamfers), `sheer_stripe` (a line 0.25-0.5 m below the deck edge, following the sheer), `rail` (railings, default light grey B4BAC2); `waterline` height m; `stripe_height` m | |
+| `livery` | a named paint scheme, see "Paint" | `"navy"`, `"coast_guard"` |
 | `superstructure` | list of boxes, see below | |
 | `skegs` | fins under the hull: `[{z, length, x, width, bottom, mirror_x}]`; each fills from `bottom` (m above the keel, may be negative) up to the hull | twin-screw sterns |
-| `paint` | rectangles, circles and text on the deck or sides, see below | |
+| `paint` | designs on the deck, sides, bow end or transom, face by face, see "Paint" | |
 | `scale` | enter real-world sizes: `"1:4"` or `0.25` multiplies every hull, box, skeg and paint length; `"fit"` fills the `bench` | 1 |
 | `interior_units` | `"game"` (default) or `"spec"`: whether room, deck and hatch positions are scaled like everything else | `"game"` |
 
@@ -299,6 +300,9 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
   The radius must fit within the height and half the width and length. Large values reduce
   usable headroom near the edges. Combined roof rounding, taper, and corner rounding can leave
   visible facets; inspect a close-up preview and the interior before saving.
+- `roof_color` paints the box's roof (default `colors.roof`, else the box colour); `trim_color`
+  its bevels and chamfers; `cap: {"height": 0.5, "color": "1A1A1A"}` a band at its top (funnel
+  and mast caps).
 - `band` paints a horizontal stripe (window band) between `from` and `to` metres above the box
   bottom. Taper and rakes under 0.25 m barely register at 0.25 m per block; the summary warns
   when one changes nothing.
@@ -345,23 +349,75 @@ placeholder blocks. Use named components or the propulsion stage for real propel
 
 ### Paint
 
+Paint is per face: every face of every part takes its own colour, as in the reference builds.
+The scheme alone gives crisp lines: deck colour on the deck and gentle slopes only, hull colours
+by height on the sides, roofs and trim on the boxes. Then paint items and liveries add designs.
+
+**Paint like a veteran.** On the reference ships four to six colours cover 90% of the visible
+faces. The base is neutral (light grey or white hull and superstructure, a darker grey or black
+bottom, a mid-grey deck), large flat walls are broken up by panels in a second tone a few
+percent darker, and identity comes from small accents at 1-3% each: a slanted bow flash, funnel
+caps, hull numbers, hazard stripes on edges and steps. Keep accents few and bold; do not paint
+every box a different colour.
+
+**Liveries** set the whole scheme in one key, sized to the hull. Your own `paint` items go on
+top. `"livery": "coast_guard"` or `{"name": "navy", "number": "61", "seed": 2,
+"colors": {"deck": "6E6E6E"}}`:
+
+| livery | looks like |
+|---|---|
+| `navy` | haze grey like the Hawk and Artemis: panelled light grey, dark grey bottom, mid-grey deck, black caps |
+| `coast_guard` | white with the red and navy slanted bow flash, black bottom |
+| `workboat` | black hull over red antifouling, red-brown deck, white wheelhouse, hazard stripes on the transom edge |
+| `research` | navy hull, light grey superstructure, blue deck, orange caps (like the RSV Almus) |
+| `yacht` | white with a gold boot-top, navy bottom, navy sheer stripe, teak deck |
+| `dazzle` | First World War dazzle: bold black, white, grey and blue angular bands |
+| `splinter` | sharp-edged patches in four greys |
+
+A livery recolours the hull, deck, every box and its roof (window bands stay), puts caps on boxes
+named funnel, stack, exhaust or mast, and adds its designs. `seed` changes the panel and
+camouflage layout; `number` paints hull numbers forward on both sides; `panels: false` drops
+the panels.
+
+**Paint items**, applied in list order (later items paint over earlier ones):
+
 ```json
 "paint": [
   {"shape": "text", "text": "61", "on": "sides", "z": 62, "y": 2.5, "height": 1.25, "color": "F0F0F0"},
   {"shape": "circle", "on": "deck", "z": 4, "x": 0, "radius": 2.5, "thickness": 0.25, "color": "F0F0F0"},
-  {"shape": "text", "text": "H", "on": "deck", "z": 4, "x": 0, "height": 2.5, "color": "F0F0F0"},
-  {"shape": "rect", "on": "starboard", "z": 10, "length": 4, "y": 1.5, "height": 0.5, "color": "F2B705"}
+  {"shape": "polygon", "on": "sides", "box": "hull", "points": [[18, 0.8], [19, 0.8], [19.6, 2.6], [18.6, 2.6]], "color": "BB4242"},
+  {"shape": "line", "on": "sides", "from": [2, 1.0], "to": [20, 1.4], "width": 0.25, "color": "243C55"},
+  {"shape": "stripes", "on": "back", "x": 0, "width": 4, "y": 2.0, "height": 0.5, "colors": ["F2B705", "1A1A1A"]},
+  {"shape": "panels", "on": "sides", "box": "bridge", "shade": -0.08, "size": [1.5, 1.0]},
+  {"shape": "camo", "on": "sides", "style": "splinter", "colors": ["B4BAC2", "7F8890", "4A5058"], "scale": 3}
 ]
 ```
 
-- `on`: `"deck"` paints the topmost surface (deck or box roof); `"port"`, `"starboard"` or
-  `"sides"` (both) paint the outermost surface on that side.
-- Sides: `z` is where a `rect` starts and the centre of `text` and `circle`; `y` is the bottom
-  (rect, text) or centre (circle). Deck: `x` is the centre across, `width` the rect's width.
-- `text` uses 3 x 5 block letters (A-Z, 0-9, `- . / #`). `height` is the letter height;
-  1.25 m gives one block per pixel, and anything smaller loses pixels. Side text reads
-  correctly from outside on both sides; deck text reads with its top toward the bow.
-- Later items paint over earlier ones. Each block takes one colour.
+- `on`: `"deck"` (faces pointing up: deck and roofs), `"port"`, `"starboard"`, `"sides"` (both),
+  `"front"` (faces toward the bow), `"back"` (toward the stern: the transom and the aft faces of
+  boxes). A face takes an item's paint when it leans at least 40% the item's way, so a flared bow
+  takes side paint; side paint never runs onto the deck.
+- `box`: paint only that superstructure box, or `"hull"` for the hull only (a bow flash that must
+  not run onto a deckhouse behind it).
+- Coordinates, in metres: sides use `z` (from the transom) and `y` (from the keel); the deck `z`
+  and `x` (from the centreline, + is starboard); front and back `x` and `y`. A `rect` starts at
+  `z` (sides, deck) and is centred on `x`; `text` and `circle` are centred on `z` (or `x`).
+  `polygon` takes `points` and `line` takes `from`, `to` and `width`, all as [a, b] pairs in the
+  target's coordinates.
+- `stripes` fill their target, or a rect if you give `z`/`x` and a size, with `colors` in
+  diagonal stripes `stripe` m wide at `angle` degrees (default 45): hazard markings.
+- `panels` shade what is already there: about `share` (default 0.45) of a staggered grid of
+  `size` [length, height] m panels gets `shade` (-0.08 darkens 8%; positive lightens).
+- `camo` covers its target (or a rect) with a seeded pattern: `style` `"dazzle"`, `"splinter"` or
+  `"blotch"`, `colors` (two or more), `scale` m, `seed`.
+- `text` uses 3 x 5 block letters (A-Z, 0-9, `- . / #`). `height` is the letter height; 1.25 m
+  gives one block per pixel, and anything smaller loses pixels. Text stays on plain blocks so its
+  pixels stay sharp; everything else follows the slopes. Side text reads correctly from outside
+  on both sides, transom text toward starboard, deck text with its top toward the bow.
+
+Until the in-game face-order check is done, the two faces of a part across its own x and z axes
+(left/right, front/back) share a colour. A hull skin only ever shows one of each pair, so this
+only shows on thin fins and on the inboard end of a sheer ramp under a marking.
 
 ## Interior design
 

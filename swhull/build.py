@@ -10,7 +10,9 @@ from .benches import fit_lines, parse_bench, reach
 from .hull import (DEFAULT_SPEC, LIMITS, VOX, box_report, build_solid, game_units, merge, scale_factor,
                    validate)
 from .interior import plan_interior
-from .paint import paint_map
+from . import liveries
+from .faces import paint as face_paint, world as face_world
+from .paint import face_ops, paint_map, resolve
 from .pieces import BY_NAME, DIRS, add
 from .presets import PRESETS
 from .habits import K_RANGE, RAIL_COLOUR, ballast, cleats, finish_boxes, railings
@@ -162,7 +164,7 @@ def fitted(spec):
 
 def _build_base(spec):
     scale_fit = spec.get("scale") == "fit"
-    spec = fitted(spec)
+    spec = liveries.apply(fitted(spec))
     scale = scale_factor(spec)
     spec = game_units(spec)
     shape, solid, region = build_solid(spec)
@@ -173,7 +175,11 @@ def _build_base(spec):
     stripe = colors.get("stripe_height", 0.25) * VOX
     boxes = shape.boxes
     warnings = list(shape.warnings)
-    painted = paint_map(spec, solid, warnings)
+    box_tags = {b.name: f"box{i}" for i, b in enumerate(boxes)}
+    # Text stays on plain blocks so its letters keep their pixels; other paint follows slopes.
+    text = [item for item in spec.get("paint") or [] if item.get("shape") == "text"]
+    crisp = {v for v, _d in paint_map({"paint": text}, solid, [], region.get, box_tags)} if text else set()
+    painted = {}
 
     probe = ((0, 0, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0))
     box_index = {id(b): i for i, b in enumerate(boxes)}
@@ -209,8 +215,6 @@ def _build_base(spec):
         return tag
 
     def color_of(v):
-        if v in painted:
-            return painted[v]
         tag = tag_of(v)
         if tag != "hull":
             b = boxes[int(tag[3:])]
@@ -231,6 +235,53 @@ def _build_base(spec):
             return colors["stripe"]
         return colors["topsides"]
 
+    decks, occupied = {}, set()
+
+    def deck_at(z):
+        if z not in decks:
+            decks[z] = form.deck(form.s(z))
+        return decks[z]
+
+    def base_face(v, n):
+        """Scheme colour of the face of voxel v whose outward normal is n."""
+        tag = tag_of(v)
+        if tag != "hull":
+            b = boxes[int(tag[3:])]
+            box = b.spec
+            if n[1] > 0.75 and region.get((v[0], v[1] + 1, v[2])) != tag:
+                return box.get("roof_color") or colors.get("roof") or box.get("color", colors["topsides"])
+            if max(abs(c) for c in n) < 0.999 and (box.get("trim_color") or colors.get("trim")):
+                return box.get("trim_color") or colors.get("trim")
+            cap = box.get("cap")
+            if cap and b.y0 + b.h - 0.5 - v[1] < cap.get("height", 0.5) * VOX:
+                return cap.get("color", "1A1A1A")
+            return color_of(v)
+        axis = [round(c) for c in n] if max(abs(c) for c in n) > 0.999 else None
+        if axis:
+            beyond = (v[0] + axis[0], v[1] + axis[1], v[2] + axis[2])
+            if beyond in solid and beyond not in occupied:
+                return colors["deck"]       # inner skin facing the hollow hull (cockpit floor, bilge)
+        if v[1] + 0.5 >= deck_at(v[2]) - 1.5:
+            if n[1] > 0.75:
+                return colors["deck"]
+            # A riser standing on more deck (a sheer step) is deck; a hull side drops to air.
+            if axis and not axis[1] and (v[0] + axis[0], v[1] - 1, v[2] + axis[2]) in solid:
+                return colors["deck"]
+        yc = v[1] + 0.5
+        sheer = colors.get("sheer_stripe")
+        if sheer and 0.25 * VOX <= deck_at(v[2]) - yc <= 0.5 * VOX:
+            return sheer
+        if yc < wl:
+            return colors["bottom"]
+        if yc < wl + stripe:
+            return colors["stripe"]
+        return colors["topsides"]
+
+    def face_colour(v, n):
+        base = base_face(v, n)
+        ops = face_ops(painted, v, n) if painted else None
+        return resolve(base, ops) if ops else base
+
     skin = shell(solid)
     interior = plan_interior(spec, shape, solid, region, skin)
     smoothing_report = {}
@@ -238,18 +289,32 @@ def _build_base(spec):
                        sample_mask=lambda v: shape.sample_mask(v, SAMPLES),
                        smoothing=spec["smoothing"], open_deck=spec["deck"] == "open",
                        region=region, skin=skin, extra=interior.blocks, carve=interior.carve,
-                       fixed={add(v, d) for v in painted for d in DIRS} | set(painted),
+                       fixed={add(v, d) for v in crisp for d in DIRS} | crisp,
                        diagnostics=smoothing_report)
     finish = {"finished": [], "square": {}}
     if spec["smoothing"] in ("wedges", "wedges_v2"):
-        placed, finish = finish_boxes(placed, boxes, shape.box_vox, region, fixed=set(painted))
-    # hull skin that never faces the outside is the inner surface (cockpit floor, bilge)
+        placed, finish = finish_boxes(placed, boxes, shape.box_vox, region, fixed=crisp)
+    # Paint face by face: deck tops, hull sides, roofs, trim and paint items each get their own
+    # colour, and the part's `color` is the one most of its visible faces show.
+    occupied.update(v for p in placed for v in p.voxels())
+    painted.update(paint_map(spec, {v for p in placed if p.piece.d in BY_NAME for v in p.voxels()},
+                             warnings, tag_of, box_tags))
+
+    def exposed(cell, n):
+        """Seen from outside the vehicle: facing out of the shape, not into the hollow hull.
+        Slope pieces just outside the shape only partly cover a face, so they don't hide it."""
+        axis = max(range(3), key=lambda i: abs(n[i]))
+        step = [0, 0, 0]
+        step[axis] = 1 if n[axis] > 0 else -1
+        return abs(n[axis]) < 0.999 or add(cell, tuple(step)) not in solid
+
     for p in placed:
-        if p.origin in interior.blocks:
+        if p.piece.d not in BY_NAME or p.origin in interior.blocks:
             continue
-        if tag_of(p.origin) == "hull" and not any(
-                add(v, d) not in solid for v in p.voxels() for d in DIRS):
-            p.color = colors["deck"]
+        cols = face_paint(p, face_colour, exposed, lambda cell, n: bool(face_ops(painted, cell, n)))
+        shown = [c for c, (cell, n) in zip(cols, face_world(p)) if exposed(cell, n)] or list(cols)
+        p.color = max(set(shown), key=shown.count)
+        p.faces = cols if len(set(cols)) > 1 else ()
     placed += interior.components
     before = placed[0].origin
     placed = centre(placed)
