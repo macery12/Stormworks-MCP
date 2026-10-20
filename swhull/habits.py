@@ -508,3 +508,60 @@ def railings(placed, region, interior, boxes, mode="auto", colour=RAIL_COLOUR):
              for c, (kind, q) in sorted(pieces.items()) if q is not None and region[c] not in loose]
     report.update(pieces=len(added), metres=len(added) / 4)
     return placed + added, report
+
+
+# --- mooring cleats ----------------------------------------------------------------------------
+# The reference ships moor with Rope Anchors set into the deck at its edge: pairs about 0.5 m
+# apart at the stern quarter, amidships and the bow on each side. The anchor's base voxel is a
+# sealed block (every face full) carrying a plate flush with the deck and the hook above it, so
+# it replaces a deck block instead of standing on one.
+CLEAT_STATIONS = (0.12, 0.5, 0.85)   # along the hull, transom to stem
+CLEAT_PAIR = 2                       # blocks between the two anchors of a pair
+CLEAT = Piece("rope_hook", 6, 1.0, ((0, 0, 0), (0, 1, 0)), *_cube_union([(0, 0, 0), (0, 1, 0)]))
+
+
+def cleats(placed, region, interior, mode="auto", colour=RAIL_COLOUR):
+    """Rope Anchors set into the deck edge in port/starboard pairs at CLEAT_STATIONS, inboard of
+    any railing. Returns (pieces, report)."""
+    report = {"anchors": 0, "stations": []}
+    hull = [v for v, tag in region.items() if tag == "hull"]
+    if mode == "none" or not hull:
+        return placed, report
+    owner = {v: p for p in placed for v in p.voxels()}
+    blocked = set(interior.reserved) | set(interior.carve)
+    for room in interior.rooms:
+        blocked |= room.air
+    z0, z1 = min(v[2] for v in hull), max(v[2] for v in hull)
+
+    def seat(c):
+        """A deck block that can become an anchor: a plain block on the hull's top, nothing
+        above it for a standing person, and not on an access path."""
+        p = owner.get(c)
+        return (p is not None and p.piece.d == "01_block" and region.get(c) == "hull"
+                and all((v := (c[0], c[1] + k, c[2])) not in owner and v not in region and v not in blocked
+                        for k in range(1, RAIL_HEIGHT + 1)))
+
+    def side_seat(z):
+        """Starboard anchor cell at z: the outermost deck block, or the one inboard of a railing."""
+        tops = sorted((v for v in owner if v[2] == z and v[0] > 0 and region.get(v) == "hull"
+                       and (v[0], v[1] + 1, v[2]) not in owner), key=lambda v: -v[0])
+        for c in tops[:3]:
+            if seat(c) and seat((-c[0], c[1], c[2])):
+                return c
+        return None
+
+    chosen = []
+    for s in CLEAT_STATIONS:
+        mid = round(z0 + s * (z1 - z0))
+        for z in sorted(range(mid - 4, mid + 5), key=lambda z: (abs(z - mid), z)):
+            a, b = side_seat(z), side_seat(z + CLEAT_PAIR)
+            if a and b and abs(a[0] - b[0]) <= 1 and abs(a[1] - b[1]) <= 1:
+                chosen += [a, b]
+                report["stations"].append(round(s, 2))
+                break
+    # The anchor's sealed base takes the deck block's place.
+    cells = {c for x, y, z in chosen for c in ((x, y, z), (-x, y, z))}
+    replaced = {id(owner[c]) for c in cells}
+    added = [Placed(CLEAT, c, IDENTITY, colour, settings={"bc": colour, "ac": colour}) for c in sorted(cells)]
+    report["anchors"] = len(added)
+    return [p for p in placed if id(p) not in replaced] + added, report

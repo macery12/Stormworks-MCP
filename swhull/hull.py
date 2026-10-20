@@ -23,6 +23,7 @@ DEFAULT_SPEC = {
     "smoothing": "blocks",
     "ballast": "auto",
     "railings": "auto",
+    "mooring": "auto",
     "scale": 1,
     "bench": None,
     "interior_units": "game",
@@ -187,6 +188,8 @@ def validate(spec):
         problems.append('ballast must be "auto" or "none"')
     if spec.get("railings", "auto") not in ("auto", "none"):
         problems.append('railings must be "auto" or "none"')
+    if spec.get("mooring", "auto") not in ("auto", "none"):
+        problems.append('mooring must be "auto" or "none"')
     rail = (spec.get("colors") or {}).get("rail")
     if rail is not None and not (isinstance(rail, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", rail)):
         problems.append("colors.rail must be a 6-digit hex colour such as B4BAC2")

@@ -13,7 +13,7 @@ from .interior import plan_interior
 from .paint import paint_map
 from .pieces import BY_NAME, DIRS, add
 from .presets import PRESETS
-from .habits import K_RANGE, RAIL_COLOUR, ballast, finish_boxes, railings
+from .habits import K_RANGE, RAIL_COLOUR, ballast, cleats, finish_boxes, railings
 from .smooth import SAMPLES, shell, to_pieces
 from .vehicle import SPAWN_LIMIT, centre
 
@@ -306,7 +306,7 @@ def build(spec):
     from .components import place  # noqa: PLC0415
     from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
     base = {k: v for k, v in spec.items()
-            if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings")}
+            if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings", "mooring")}
     if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks"):
         interior = merge({}, base.get("interior") or {})
         interior["door_parts"] = True
@@ -331,8 +331,10 @@ def build(spec):
     if spec.get("components") or spec.get("fitout"):
         placed = place(placed, info, spec)
     colours, form = info["spec"]["colors"], info["form"]
+    rail = (colours.get("rail") or RAIL_COLOUR).upper()
     placed, info["railings"] = railings(placed, info["region"], info["interior"], info["shape"].boxes,
-                                        spec.get("railings", "auto"), (colours.get("rail") or RAIL_COLOUR).upper())
+                                        spec.get("railings", "auto"), rail)
+    placed, info["mooring"] = cleats(placed, info["region"], info["interior"], spec.get("mooring", "auto"), rail)
     # Ballast fills only the space equipment left, and counts the equipment's and railings' mass.
     painted = colours["waterline"] * VOX if colours.get("waterline") is not None else form.depth * 0.45
     structural = sum(1 for p in placed if p.piece.d in BY_NAME)
@@ -463,6 +465,11 @@ def summary(spec, placed, info):
     if rails.get("pieces"):
         lines.append(f"Railings: {rails['metres']:g} m ({rails['pieces']} pieces) along the straight edges of "
                      "open decks, posts at least every 1.5 m. railings: \"none\" leaves them off.")
+    moor = info.get("mooring") or {}
+    if moor.get("anchors"):
+        lines.append(f"Mooring: {moor['anchors']} Rope Anchors set into the deck edge in pairs (stations at "
+                     f"{', '.join(f'{s:.0%}' for s in moor['stations'])} of the length, from the transom). "
+                     "mooring: \"none\" leaves them off.")
     lines += _flotation_lines(info.get("ballast"))
     fit = info.get("smoothing_report")
     if fit:

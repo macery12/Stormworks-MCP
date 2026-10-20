@@ -168,6 +168,11 @@ Railings are game-sized (1 m tall) at any `scale`, are placed after components a
 avoid them, and count toward ballast. Use `railings: "none"` and place them yourself for anything
 else.
 
+With `mooring: "auto"`, pairs of Rope Anchors (0.5 m apart) go into the deck edge on both sides
+at the stern quarter, amidships and the bow, as on the reference ships: each replaces a deck
+block (its base is a sealed block), just inboard of any railing, away from access paths, with
+open space above. Players tie ropes to them in game.
+
 ### Measuring
 
 - `deck_profile` lists the deck height, the `y` a box gets by default, and the deck half-beam
@@ -229,6 +234,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 when smoothing is requested; inspect the result |
 | `ballast` | `"auto"` (default) or `"none"` | weight blocks low in the hull to level the trim, reach the painted waterline and keep it stable; the summary gives the flotation estimate |
 | `railings` | `"auto"` (default) or `"none"` | 1 m railings along the straight edges of open decks; see "Railings" |
+| `mooring` | `"auto"` (default) or `"none"` | Rope Anchors set into the deck edge in pairs; see "Railings" |
 | `hulls` / `hull_spacing` | 1 mono, 2 catamaran, 3 trimaran; spacing is centreline to centreline, m | |
 | `bow.entry` | fraction of length over which the bow narrows | 0.1 blunt, 0.3 normal, 0.45 very fine |
 | `bow.fullness` | plan shape of the bow: 1 = straight V, 2 = rounded, 3 = bluff | 1.2-2.3 |

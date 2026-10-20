@@ -278,3 +278,43 @@ def test_railings_spec_is_validated():
         build(resolve_spec({"colors": {"rail": "white"}}, "barge"))
     parts, _ = build(resolve_spec({"colors": {"rail": "1a1a1a"}}, "barge"))
     assert {p.color for p in rails_of(parts).values()} == {"1A1A1A"}
+
+
+# --- mooring cleats ----------------------------------------------------------------------------
+
+def test_rope_anchor_matches_the_game_definition():
+    data = definitions.metadata("rope_hook")
+    if data is None or definitions.definitions_dir() is None:
+        pytest.skip("game definitions not installed")
+    assert habits.CLEAT.surfaces == len(data["attachment_surfaces"]) and habits.CLEAT.mass == data["mass"]
+    assert list(habits.CLEAT.footprint) == [tuple(v) for v in data["footprint"]]
+    # Its base is a sealed block, so it can take a deck block's place.
+    assert all(s["shape"] == 1 for s in data["sealing_surfaces"]) and len(data["sealing_surfaces"]) == 6
+
+
+def test_anchors_replace_deck_edge_blocks_in_mirrored_pairs():
+    region, placed = box_hull(width=9, height=8, length=40)
+    out, report = habits.cleats(placed, region, no_rooms())
+    anchors = [p for p in out if p.piece.d == "rope_hook"]
+    assert report["anchors"] == len(anchors) == 12 and len(report["stations"]) == 3
+    cells = {p.origin for p in anchors}
+    assert all((-x, y, z) in cells for x, y, z in cells) and all(y == 7 for _, y, _ in cells)
+    assert all(abs(x) == 4 for x, _, _ in cells)                     # at the deck edge
+    blocks = {p.origin for p in out if p.piece.d == "01_block"}
+    assert not cells & blocks and len(out) == len(placed)            # each took a block's place
+    out, _ = habits.railings(placed, region, no_rooms(), [])
+    out, _ = habits.cleats(out, region, no_rooms())
+    assert all(abs(p.origin[0]) == 3 for p in out if p.piece.d == "rope_hook")   # inboard of the rail
+    out, report = habits.cleats(placed, region, no_rooms(), mode="none")
+    assert out == placed and report["anchors"] == 0
+
+
+def test_presets_moor_unless_turned_off():
+    parts, info = build(resolve_spec({"smoothing": "wedges"}, "patrol_boat"))
+    anchors = [p for p in parts if p.piece.d == "rope_hook"]
+    assert len(anchors) == info["mooring"]["anchors"] == 12
+    assert sum(p.origin[0] for p in anchors) == 0
+    parts, info = build(resolve_spec({"smoothing": "wedges", "mooring": "none"}, "patrol_boat"))
+    assert not any(p.piece.d == "rope_hook" for p in parts)
+    with pytest.raises(ValueError, match="mooring must be"):
+        build(resolve_spec({"mooring": "yes"}, "barge"))
