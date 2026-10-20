@@ -22,6 +22,7 @@ DEFAULT_SPEC = {
     "deck": "closed",
     "smoothing": "blocks",
     "ballast": "auto",
+    "railings": "auto",
     "scale": 1,
     "bench": None,
     "interior_units": "game",
@@ -31,7 +32,7 @@ DEFAULT_SPEC = {
     "sheer": {"bow": 0.5, "stern": 0.1},
     "section": {"deadrise": 14.0, "bilge_radius": 0.3, "flare": 0.1, "keel_width": 0.25},
     "colors": {"bottom": "A52A2A", "stripe": "1A1A1A", "topsides": "F0F0F0",
-               "deck": "6E6E6E", "waterline": None, "stripe_height": 0.25},
+               "deck": "6E6E6E", "waterline": None, "stripe_height": 0.25, "rail": None},
     "superstructure": [],
     "skegs": [],
     "paint": [],
@@ -184,6 +185,11 @@ def validate(spec):
         problems.append('smoothing must be "blocks", "wedges" or "wedges_v2"')
     if spec.get("ballast", "auto") not in ("auto", "none"):
         problems.append('ballast must be "auto" or "none"')
+    if spec.get("railings", "auto") not in ("auto", "none"):
+        problems.append('railings must be "auto" or "none"')
+    rail = (spec.get("colors") or {}).get("rail")
+    if rail is not None and not (isinstance(rail, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", rail)):
+        problems.append("colors.rail must be a 6-digit hex colour such as B4BAC2")
     if spec.get("deck") not in ("closed", "open"):
         problems.append('deck must be "closed" or "open"')
     if spec.get("hulls") not in (1, 2, 3):

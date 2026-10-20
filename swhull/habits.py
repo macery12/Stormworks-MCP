@@ -7,7 +7,10 @@ import math
 
 import numpy as np
 
-from .pieces import IDENTITY, PYRAMID, ROTATIONS, WEDGE, WEIGHT, Placed, apply
+from .definitions import _cube_union
+from .pieces import (BY_NAME, IDENTITY, MIRRORED, PYRAMID, ROTATIONS, WEDGE, WEIGHT, Piece, Placed, add,
+                     apply, neg, sub)
+from .smooth import _full_faces
 
 # Single-voxel pieces a finished edge may replace: plain blocks, and the 1x1 closeouts the
 # fitter leaves on boxes that are not a whole number of blocks wide.
@@ -307,4 +310,201 @@ def ballast(placed, region, interior, waterline, structural, mode="auto"):
             depth[pick] += 1
     report.update(blocks=len(added), after=hull.assess(mass, moment / mass), waterline=waterline,
                   bottom=hull.lo - 0.5, drafts=[hull.float(mass, k) for k in K_RANGE])
+    return placed + added, report
+
+
+# --- deck railings -----------------------------------------------------------------------------
+# Measured on the reference ships: railings stand upright on the outermost full deck block, in
+# straight runs with a post at each end, a corner post where two runs meet and a post every 4-8
+# blocks between (median 6). Curved and stepped edges (bows, sheer steps) get none, as on Hawk.
+RAIL_HEIGHT = 4        # blocks: a railing is 1 m tall
+RAIL_SPACING = 6       # most blocks from one post to the next
+RAIL_MIN_RUN = 8       # shortest straight edge, in blocks, that gets a railing (2 m)
+RAIL_DROP = 3          # blocks the deck must fall away outboard; a sheer step is not an edge
+RAIL_COLOUR = "B4BAC2"
+_HORIZONTAL = ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1))
+
+
+def _rail_piece(d, surfaces):
+    cells = tuple((0, y, 0) for y in range(RAIL_HEIGHT))
+    verts, faces = _cube_union(cells)
+    return Piece(d, surfaces, 2.0, cells, verts, faces)
+
+
+# Footprint, attachment surface count and mass match the game definitions (tests check them).
+RAILS = {kind: _rail_piece(f"railing_segment_{kind}", n) for kind, n in
+         (("extension", 8), ("middle", 8), ("end", 5), ("corner", 8), ("corner_diag", 11))}
+RAILS["incline"] = _rail_piece("railing_extension_angle", 10)   # drops one block across its cell
+
+
+def _rail_rotation(pairs):
+    """Upright rotation mapping each (local, world) pair; mirrored (written as `t`, as the
+    reference ships place some railings) only when no plain rotation fits."""
+    pairs = [*pairs, ((0, 1, 0), (0, 1, 0))]
+    return next((Q for Q in (*ROTATIONS, *MIRRORED) if all(apply(Q, a) == b for a, b in pairs)), None)
+
+
+def _plain(box):
+    return box.shape == "box" and not box.rotated and not (
+        box.taper or box.rake_f or box.rake_b or box.waist or box.roof_radius)
+
+
+def _walkable(region, boxes):
+    """Region tags whose top is a deck people walk on: the hull, and plain straight-walled boxes
+    another box stands on. Sloped roof edges are left alone."""
+    tags = {"hull"}
+    for (x, y, z), tag in region.items():
+        if tag != "hull" and tag not in tags and region.get((x, y + 1, z), tag) != tag                 and _plain(boxes[int(tag[3:])]):
+            tags.add(tag)
+    return tags
+
+
+def _rail_edges(owner, region, blocked, boxes):
+    """{outward direction: deck cells on that edge}. An edge cell is a full-topped structural
+    block with deck inboard, open air for a railing above, and a drop just outboard (one block
+    further out past a bevelled roof edge)."""
+    walk, tops = _walkable(region, boxes), {}
+
+    def deck(c):
+        p = owner.get(c)
+        if p is None or p.piece.d not in BY_NAME or region.get(c) not in walk:
+            return False
+        key = (p.piece.d, p.Q)
+        if key not in tops:
+            tops[key] = {f for f, d in _full_faces(p.piece, p.Q) if d == (0, 1, 0)}
+        return sub(c, p.origin) in tops[key]
+
+    def open_above(c):
+        return all((v := (c[0], c[1] + k, c[2])) not in owner and v not in region and v not in blocked
+                   for k in range(1, RAIL_HEIGHT + 1))
+
+    def drop(c, o):
+        """True when the deck falls away at least RAIL_DROP blocks just outboard of c."""
+        out = add(c, o)
+        if out in region:
+            out = add(out, o)          # past a bevelled roof edge
+            if out in region:
+                return False
+        return all((out[0], out[1] - k, out[2]) not in owner for k in range(RAIL_DROP)) and (
+            out[0], out[1] + 1, out[2]) not in owner
+
+    edges = {o: set() for o in _HORIZONTAL}
+    for c in owner:
+        if (c[0], c[1] + 1, c[2]) in owner or not deck(c) or not open_above(c):
+            continue
+        for o in _HORIZONTAL:
+            if deck(sub(c, o)) and not deck(add(c, o)) and drop(c, o):
+                edges[o].add(c)
+    return edges
+
+
+def _rail_links(edges):
+    """{cell: set of directions to railing neighbours} along straight runs long enough to rail."""
+    links, runs = {}, 0
+    for o, cells in edges.items():
+        along = 2 if o[0] else 0
+        e = tuple(int(i == along) for i in range(3))
+        lines = {}
+        for c in cells:
+            lines.setdefault(tuple(c[i] for i in range(3) if i != along), []).append(c)
+        for line in lines.values():
+            line.sort(key=lambda c: c[along])
+            run = [line[0]]
+            for c in [*line[1:], None]:
+                if c is not None and c[along] == run[-1][along] + 1:
+                    run.append(c)
+                    continue
+                if len(run) >= RAIL_MIN_RUN:
+                    runs += 1
+                    for a, b in zip(run, run[1:]):
+                        links.setdefault(a, set()).add(e)
+                        links.setdefault(b, set()).add(neg(e))
+                run = [c]
+    # A cell joined three or more ways is not a run shape we can build: leave it out.
+    for c in [c for c, ls in links.items() if len(ls) > 2]:
+        for d in links.pop(c):
+            if add(c, d) in links:
+                links[add(c, d)].discard(neg(d))
+    return {c: ls for c, ls in links.items() if ls}, runs
+
+
+def railings(placed, region, interior, boxes, mode="auto", colour=RAIL_COLOUR):
+    """Railings along the straight edges of open decks, built the way the reference ships do:
+    end posts, corner posts, diagonal pieces across a chamfered corner and a post at least
+    every RAIL_SPACING blocks. A superstructure roof is railed all round or not at all: every
+    run must close or end against something standing on it. Returns (pieces, report)."""
+    report = {"pieces": 0, "runs": 0, "metres": 0.0}
+    if mode == "none":
+        return placed, report
+    owner = {v: p for p in placed for v in p.voxels()}
+    blocked = set(interior.reserved) | set(interior.carve)
+    for room in interior.rooms:
+        blocked |= room.air
+    links, report["runs"] = _rail_links(_rail_edges(owner, region, blocked, boxes))
+    if not links:
+        return placed, report
+    pieces, lift = {}, set()
+    # A run that steps up one block (a sheer step) carries on through an inclined piece instead
+    # of stopping at two end posts side by side. The incline sits at the upper run's height over
+    # the lower run's last cell, high end toward the upper run, which starts on a post.
+    for low, ls in links.items():
+        if len(ls) != 1:
+            continue
+        d = neg(next(iter(ls)))
+        high = add(add(low, d), (0, 1, 0))
+        if links.get(high) == {d} and (q := _rail_rotation([((0, 0, -1), d)])) is not None                 and add(low, (0, RAIL_HEIGHT + 1, 0)) not in owner:
+            pieces[low], pieces[high] = ("incline", q), ("middle", _rail_rotation([((1, 0, 0), d)]))
+            lift.add(low)
+    # Two run ends diagonally apart across a cut corner join with a pair of diagonal pieces.
+    for a, la in links.items():
+        if len(la) != 1 or a in pieces:
+            continue
+        (da,) = la
+        for gx in (-1, 1):
+            for gz in (-1, 1):
+                g = (gx, 0, gz)
+                b = add(a, g)
+                if len(links.get(b, ())) != 1 or b in pieces:
+                    continue
+                (db,) = links[b]
+                ax = 0 if da[0] else 2
+                if (da[ax] != -g[ax] or db[2 - ax] != g[2 - ax] or db[ax]
+                        or (qa := _rail_rotation([((0, 0, -1), da), ((-1, 0, 1), g)])) is None
+                        or (qb := _rail_rotation([((0, 0, -1), db), ((-1, 0, 1), neg(g))])) is None):
+                    continue
+                pieces[a], pieces[b] = ("corner_diag", qa), ("corner_diag", qb)
+    for c, ls in links.items():
+        if c in pieces:
+            continue
+        if len(ls) == 1:
+            (d,) = ls
+            pieces[c] = ("end", _rail_rotation([((1, 0, 0), d)]))
+            continue
+        d1, d2 = sorted(ls)
+        if d1 == neg(d2):
+            continue
+        q = _rail_rotation([((-1, 0, 0), d1), ((0, 0, 1), d2)]) or _rail_rotation(
+            [((-1, 0, 0), d2), ((0, 0, 1), d1)])
+        pieces[c] = ("corner", q)
+    # Straight stretches between posts, with middle posts spread evenly.
+    for start in [c for c in pieces]:
+        for d in links[start]:
+            stretch, c = [], add(start, d)
+            while c not in pieces:
+                stretch.append(c)
+                c = add(c, d)
+            n = math.ceil((len(stretch) + 1) / RAIL_SPACING)
+            posts = {round(i * (len(stretch) + 1) / n) - 1 for i in range(1, n)}
+            q = _rail_rotation([((1, 0, 0), d)])
+            for i, cell in enumerate(stretch):
+                pieces[cell] = ("middle" if i in posts else "extension", q)
+    # A roof railing that stops where the roof falls away is unfinished: drop that roof's
+    # railing. Ending at a wall, or where the deck carries on or steps down, is fine.
+    loose = {region[c] for c, (kind, _) in pieces.items() if kind == "end" and region[c] != "hull"
+             and all((b := sub(c, *links[c]))[:1] + (b[1] + k,) + b[2:] not in owner
+                     for k in range(1 - RAIL_DROP, 2))}
+    added = [Placed(RAILS[kind], (c[0], c[1] + 1 + (c in lift), c[2]), q, colour,
+                    settings={"bc": colour, "ac": colour})
+             for c, (kind, q) in sorted(pieces.items()) if q is not None and region[c] not in loose]
+    report.update(pieces=len(added), metres=len(added) / 4)
     return placed + added, report

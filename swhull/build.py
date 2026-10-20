@@ -13,7 +13,7 @@ from .interior import plan_interior
 from .paint import paint_map
 from .pieces import BY_NAME, DIRS, add
 from .presets import PRESETS
-from .habits import K_RANGE, ballast, finish_boxes
+from .habits import K_RANGE, RAIL_COLOUR, ballast, finish_boxes, railings
 from .smooth import SAMPLES, shell, to_pieces
 from .vehicle import SPAWN_LIMIT, centre
 
@@ -305,7 +305,8 @@ def build(spec):
     from .editing import apply_edits, identify  # noqa: PLC0415
     from .components import place  # noqa: PLC0415
     from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
-    base = {k: v for k, v in spec.items() if k not in ("edits", "components", "fitout", "tanks", "ballast")}
+    base = {k: v for k, v in spec.items()
+            if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings")}
     if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks"):
         interior = merge({}, base.get("interior") or {})
         interior["door_parts"] = True
@@ -329,8 +330,10 @@ def build(spec):
         placed = place_tanks(placed, info, spec)
     if spec.get("components") or spec.get("fitout"):
         placed = place(placed, info, spec)
-    # Ballast fills only the space equipment left, and counts the equipment's mass.
     colours, form = info["spec"]["colors"], info["form"]
+    placed, info["railings"] = railings(placed, info["region"], info["interior"], info["shape"].boxes,
+                                        spec.get("railings", "auto"), (colours.get("rail") or RAIL_COLOUR).upper())
+    # Ballast fills only the space equipment left, and counts the equipment's and railings' mass.
     painted = colours["waterline"] * VOX if colours.get("waterline") is not None else form.depth * 0.45
     structural = sum(1 for p in placed if p.piece.d in BY_NAME)
     placed, info["ballast"] = ballast(placed, info["region"], info["interior"], painted - 0.5, structural,
@@ -456,6 +459,10 @@ def summary(spec, placed, info):
                      "each roof corner. Set corner_chamfer: 0 on a box to keep it square.")
     for name, reason in (finish.get("square") or {}).items():
         lines.append(f"Box '{name}' kept square corners: {reason}.")
+    rails = info.get("railings") or {}
+    if rails.get("pieces"):
+        lines.append(f"Railings: {rails['metres']:g} m ({rails['pieces']} pieces) along the straight edges of "
+                     "open decks, posts at least every 1.5 m. railings: \"none\" leaves them off.")
     lines += _flotation_lines(info.get("ballast"))
     fit = info.get("smoothing_report")
     if fit:

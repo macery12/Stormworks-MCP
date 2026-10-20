@@ -154,6 +154,20 @@ that limit or a lack of bottom space stops it. A hull that sits below its painte
 warned about, not weighed down further: lighten the superstructure, add hull volume, or move
 `colors.waterline` to where it floats.
 
+### Railings
+
+With `railings: "auto"`, railings go where the reference ships put them: upright on the
+outermost full deck block of every straight open deck edge at least 2 m long with a drop of
+0.75 m or more outboard. The main deck gets them along the parallel sides and a straight transom;
+curved bows and quarters get none, as on the Hawk. A superstructure roof gets them only when it
+is a plain straight-walled box with another box standing on it (a walk-around deck), and then all
+round or not at all: every run must close or end at a wall or where the deck steps down. Each run
+has a post at each end, a corner post where runs meet, a pair of diagonal pieces across a cut
+corner, an inclined piece where the deck steps up one block, and a post at least every 1.5 m.
+Railings are game-sized (1 m tall) at any `scale`, are placed after components and tanks so they
+avoid them, and count toward ballast. Use `railings: "none"` and place them yourself for anything
+else.
+
 ### Measuring
 
 - `deck_profile` lists the deck height, the `y` a box gets by default, and the deck half-beam
@@ -214,6 +228,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `deck` | `"closed"` (sealed, floats reliably) or `"open"` (cockpit/well deck) | |
 | `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 when smoothing is requested; inspect the result |
 | `ballast` | `"auto"` (default) or `"none"` | weight blocks low in the hull to level the trim, reach the painted waterline and keep it stable; the summary gives the flotation estimate |
+| `railings` | `"auto"` (default) or `"none"` | 1 m railings along the straight edges of open decks; see "Railings" |
 | `hulls` / `hull_spacing` | 1 mono, 2 catamaran, 3 trimaran; spacing is centreline to centreline, m | |
 | `bow.entry` | fraction of length over which the bow narrows | 0.1 blunt, 0.3 normal, 0.45 very fine |
 | `bow.fullness` | plan shape of the bow: 1 = straight V, 2 = rounded, 3 = bluff | 1.2-2.3 |
@@ -232,7 +247,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `section.flare` | how much narrower the waterline is than the deck (negative = tumblehome) | 0-0.15 |
 | `section.keel_width` | width of the flat keel strip, m | 0.25-0.5 |
 | `bow.bulb` | bulbous bow: `{length, width, height, y, protrude}` m; `y` is the bulb's centre height, `protrude` how far its tip passes the bow | warships, freighters |
-| `colors` | hex RGB: `bottom`, `stripe` (boot-top), `topsides`, `deck`; `waterline` height m; `stripe_height` m | |
+| `colors` | hex RGB: `bottom`, `stripe` (boot-top), `topsides`, `deck`, `rail` (railings, default light grey B4BAC2); `waterline` height m; `stripe_height` m | |
 | `superstructure` | list of boxes, see below | |
 | `skegs` | fins under the hull: `[{z, length, x, width, bottom, mirror_x}]`; each fills from `bottom` (m above the keel, may be negative) up to the hull | twin-screw sterns |
 | `paint` | rectangles, circles and text on the deck or sides, see below | |

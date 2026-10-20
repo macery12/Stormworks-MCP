@@ -28,6 +28,9 @@ with recorded player observations. Generated exhibits remain pending until check
 | V2 deckhouse corner closeouts | Player screenshot confirms wedge-end notches and protruding cubes on the Zumwalt. Matching pyramid-family replacements now check complete footprints and backing; automated and rendered checks pass. Load the new test copy and compare the same corner in game |
 | Open sheered cockpit skin ribs | Both layers of top skin and longitudinal height-step faces now removed; walking-path tests and Benchy preview checked. Confirm the lines across the walking area are gone in game |
 | Open-deck fixture supports | Minimal supports to explicit walking floors are reported and confined to hull volume; automated attachment checks pass. Inspect cabin, arch and bollard bases and walking clearance in game |
+| Veteran box finishing (1x1 chamfer columns, roof bevel, pyramid caps) | Approved from renders 2026-10-20; not yet loaded in game |
+| Ballast (`ballast: "auto"`) and the flotation estimate | Not yet checked: save `patrol_boat` with wedge smoothing, compare where the water meets the hull with the estimated 1.4 m draft (paint ends at 1.0 m), and check it floats level |
+| Railings (`railings: "auto"`) | Written in the format the reference ships save (`bc`/`ac` paint, mirrored diagonal corners as `t`); not yet loaded in game. Check they attach, the transom diagonal corners meet, and the trawler's sheer-step incline lines up |
 | Interiors (rooms, doors, hatches) | Not yet verified in game |
 | Placeholder engines | Not yet verified in game |
 | Cylinders, domes, spheres, lattice masts | Not yet verified in game |
