@@ -11,8 +11,9 @@ from .hull import (DEFAULT_SPEC, LIMITS, VOX, box_report, build_solid, game_unit
                    validate)
 from .interior import plan_interior
 from .paint import paint_map
-from .pieces import DIRS, add
+from .pieces import BY_NAME, DIRS, add
 from .presets import PRESETS
+from .habits import K_RANGE, ballast, finish_boxes
 from .smooth import SAMPLES, shell, to_pieces
 from .vehicle import SPAWN_LIMIT, centre
 
@@ -239,6 +240,9 @@ def _build_base(spec):
                        region=region, skin=skin, extra=interior.blocks, carve=interior.carve,
                        fixed={add(v, d) for v in painted for d in DIRS} | set(painted),
                        diagnostics=smoothing_report)
+    finish = {"finished": [], "square": {}}
+    if spec["smoothing"] in ("wedges", "wedges_v2"):
+        placed, finish = finish_boxes(placed, boxes, shape.box_vox, region, fixed=set(painted))
     # hull skin that never faces the outside is the inner surface (cockpit floor, bilge)
     for p in placed:
         if p.origin in interior.blocks:
@@ -256,10 +260,43 @@ def _build_base(spec):
     warnings += _loose_parts(placed, region, shape, shift)
     info = {"form": form, "shape": shape, "spec": spec, "region": region, "scale": scale,
             "scale_fit": scale_fit,
-            "smoothing_report": smoothing_report,
+            "smoothing_report": smoothing_report, "finish": finish,
             "solid_voxels": len(solid), "interior": interior, "warnings": warnings,
             "overlaps": overlaps, "shift": shift}
     return placed, info
+
+
+def _flotation_lines(report):
+    """Ballast and the flotation estimate, in game metres above the bottom of the hull."""
+    if not report:
+        return []
+    out = []
+    if report["blocks"]:
+        out.append(f"Ballast: {report['blocks']} weight blocks on the bottom skin to "
+                   f"{' and '.join(report['reasons'])}, as experienced builders do. Set ballast: "
+                   "\"none\" to leave them out.")
+    if report["shortfall"]:
+        out.append(f"Ballast {report['shortfall']}.")
+    after = report["after"]
+    if after is None:
+        return out + ["! Estimated to sink: the parts weigh more than the hull can float. Lighten the "
+                      "superstructure or add hull volume, then check in game."]
+
+    def height(state):
+        return (state["plane"] - report["bottom"]) / VOX if state else None
+
+    deep, shallow = (height(d) for d in report["drafts"])
+    paint = (report["waterline"] - report["bottom"]) / VOX
+    span = f"{shallow:.2f}-{deep:.2f} m" if deep is not None else f"{shallow:.2f} m or deeper"
+    out.append(f"Flotation estimate: draft about {height(after):.2f} m ({span} for buoyancy "
+               f"{K_RANGE[0]}-{K_RANGE[1]} mass per voxel), painted waterline {paint:.2f} m; ends "
+               f"{after['end'] / VOX:+.2f} m (+ bow down); GM {after['gm'] / VOX:.2f} m on a "
+               f"{after['beam'] / VOX:.2f} m waterline beam. Estimated from the reference ships; "
+               "check it floats level in game.")
+    if height(after) > paint + 0.25:
+        out.append(f"! Sits about {height(after) - paint:.2f} m below its painted waterline: lighten the "
+                   "superstructure, add hull volume, or raise colors.waterline to match.")
+    return out
 
 
 def build(spec):
@@ -268,7 +305,7 @@ def build(spec):
     from .editing import apply_edits, identify  # noqa: PLC0415
     from .components import place  # noqa: PLC0415
     from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
-    base = {k: v for k, v in spec.items() if k not in ("edits", "components", "fitout", "tanks")}
+    base = {k: v for k, v in spec.items() if k not in ("edits", "components", "fitout", "tanks", "ballast")}
     if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks"):
         interior = merge({}, base.get("interior") or {})
         interior["door_parts"] = True
@@ -292,6 +329,13 @@ def build(spec):
         placed = place_tanks(placed, info, spec)
     if spec.get("components") or spec.get("fitout"):
         placed = place(placed, info, spec)
+    # Ballast fills only the space equipment left, and counts the equipment's mass.
+    colours, form = info["spec"]["colors"], info["form"]
+    painted = colours["waterline"] * VOX if colours.get("waterline") is not None else form.depth * 0.45
+    structural = sum(1 for p in placed if p.piece.d in BY_NAME)
+    placed, info["ballast"] = ballast(placed, info["region"], info["interior"], painted - 0.5, structural,
+                                      spec.get("ballast", "auto"))
+    identify(placed)
     if spec.get("edits"):
         placed = apply_edits(placed, spec["edits"], reserved=info["interior"].reserved)
     if spec.get("tanks"):
@@ -405,6 +449,14 @@ def summary(spec, placed, info):
                                      + ". Reports are in game metres." if s != 1 else "."),
         "Deck height at every metre: deck_profile.",
     ]
+    finish = info.get("finish") or {}
+    if finish.get("finished"):
+        lines.append(f"Finished {', '.join(finish['finished'])} like an experienced builder: 1x1 wedge "
+                     "chamfers up every vertical corner, a 1x1 bevel round the roof edge and a pyramid at "
+                     "each roof corner. Set corner_chamfer: 0 on a box to keep it square.")
+    for name, reason in (finish.get("square") or {}).items():
+        lines.append(f"Box '{name}' kept square corners: {reason}.")
+    lines += _flotation_lines(info.get("ballast"))
     fit = info.get("smoothing_report")
     if fit:
         old, new = fit["original"], fit["refined"]

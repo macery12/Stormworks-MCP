@@ -22,7 +22,9 @@ def _check(placed, tmp_path):
 @pytest.mark.parametrize("preset", list(PRESETS))
 def test_preset_blocks(preset, tmp_path):
     placed, _ = build(resolve_spec(preset=preset))
-    assert {p.piece.d for p in placed} <= {"01_block", "engine", "aircraft_engine", "engine_diesel"}
+    # Ballast (weight blocks) is on by default; the shape itself stays plain blocks.
+    assert {p.piece.d for p in placed} <= {"01_block", "01_block_weight", "engine", "aircraft_engine",
+                                            "engine_diesel"}
     _check(placed, tmp_path)
 
 

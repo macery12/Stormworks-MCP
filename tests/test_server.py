@@ -36,7 +36,7 @@ def test_tools_registered():
             "complaint", "list_complaints", "get_complaint", "analyze_hull", "suggest_hull_blocks",
             "land_vehicle_guide", "search_land_parts", "find_land_vehicles", "analyze_land_vehicle",
             "create_land_vehicle", "query_connections", "edit_connections", "route_connections",
-            "preflight_vehicle"} <= names
+            "preflight_vehicle", "study_references", "score_vehicle"} <= names
 
 
 def test_choices_are_exposed_in_tool_schemas():

@@ -21,6 +21,7 @@ DEFAULT_SPEC = {
     "hull_spacing": 0.0,
     "deck": "closed",
     "smoothing": "blocks",
+    "ballast": "auto",
     "scale": 1,
     "bench": None,
     "interior_units": "game",
@@ -181,6 +182,8 @@ def validate(spec):
         problems.append(str(exc))
     if spec.get("smoothing") not in ("blocks", "wedges", "wedges_v2"):
         problems.append('smoothing must be "blocks", "wedges" or "wedges_v2"')
+    if spec.get("ballast", "auto") not in ("auto", "none"):
+        problems.append('ballast must be "auto" or "none"')
     if spec.get("deck") not in ("closed", "open"):
         problems.append('deck must be "closed" or "open"')
     if spec.get("hulls") not in (1, 2, 3):

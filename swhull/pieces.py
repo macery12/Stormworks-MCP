@@ -234,7 +234,10 @@ def _piece(d, surfaces, mass, shape, size):
 
 _CUBE_V = tuple((x, y, z) for x in (-.5, .5) for y in (-.5, .5) for z in (-.5, .5))
 BLOCK = Piece("01_block", 6, 1.0, ((0, 0, 0),), _CUBE_V, tuple(_box_faces(_CUBE_V)))
+# Ballast: a block ten times as heavy (01_block_weight in the game definitions).
+WEIGHT = Piece("01_block_weight", 6, 10.0, ((0, 0, 0),), _CUBE_V, tuple(_box_faces(_CUBE_V)))
 CONTAINS["01_block"] = lambda p: all(-0.5 <= c <= 0.5 for c in p)
+CONTAINS["01_block_weight"] = CONTAINS["01_block"]
 # surface counts (the `sc` length) and masses are read from the game's definition files
 WEDGE = _piece("02_wedge", 5, 0.5, _ramp, (1, 1, 1))
 WEDGE2 = _piece("05_wedge_2", 9, 1.0, _ramp, (1, 1, 2))
@@ -255,7 +258,7 @@ INVPYRAMID4X4 = _piece("16_invpyramid_4x4", 52, 12.0, _inv, (4, 1, 4))
 # every slope piece in the game's block catalogue, smallest first
 SLOPES = (WEDGE, PYRAMID, INVPYRAMID, WEDGE2, PYRAMID2, INVPYRAMID2, PYRAMID2X2, INVPYRAMID2X2,
           WEDGE4, PYRAMID4, INVPYRAMID4, PYRAMID2X4, INVPYRAMID2X4, PYRAMID4X4, INVPYRAMID4X4)
-BY_NAME = {p.d: p for p in (BLOCK, *SLOPES)}
+BY_NAME = {p.d: p for p in (BLOCK, WEIGHT, *SLOPES)}
 
 
 def wedge_rotation(tread, riser):

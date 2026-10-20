@@ -10,6 +10,16 @@ from .definitions import definitions_dir
 from .vehicle import vehicles_dir
 
 
+def _renderer():
+    from . import raster  # noqa: PLC0415
+    gl = raster.gpu_context()
+    try:
+        chosen = raster.resolve()
+    except ValueError as exc:
+        chosen = f"unavailable: {exc}"
+    return {"renderer": chosen, "gpu": gl[0].info["GL_RENDERER"] if gl else None}
+
+
 def runtime_status():
     from .desktop_runtime import port, runtime_dir  # noqa: PLC0415
 
@@ -29,6 +39,7 @@ def runtime_status():
         "build_cache_dir": str(cache_dir()),
         "build_cache_enabled": os.environ.get("SW_BUILD_CACHE", "1") != "0",
         "tool_timeout_seconds": float(os.environ.get("SW_TOOL_TIMEOUT", "300")),
+        **_renderer(),
         "notes": ["Blocks and built-in slopes work without game definitions.",
                   "Installed components need your local Stormworks definitions.",
                   "Client tool timeouts should allow at least 300 seconds for large builds."]

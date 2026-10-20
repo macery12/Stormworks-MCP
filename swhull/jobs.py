@@ -24,9 +24,9 @@ from .editing import query, revision
 HIGHLIGHT = "FF2BD6"
 
 
-def preview(full, title):
+def preview(full, title, renderer=None):
     placed, info = build(full)
-    png = render_png(placed, title=title, ruler=design_ruler(info, info["scale"]))
+    png = render_png(placed, title=title, ruler=design_ruler(info, info["scale"]), renderer=renderer)
     return png, summary(full, placed, info)
 
 
@@ -38,20 +38,20 @@ def interior(full, title):
     return png, summary(full, placed, info)
 
 
-def inspect_design(full, title, yaw, pitch, zoom, focus, highlight):
+def inspect_design(full, title, yaw, pitch, zoom, focus, highlight, renderer=None):
     placed, info = build(full)
     labels, note = (), ""
     if highlight:
         labels, note = _highlight(placed, info, highlight, info["scale"])
     png = render_view(placed, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus, title=title,
-                      ruler=design_ruler(info, info["scale"]), labels=labels)
+                      ruler=design_ruler(info, info["scale"]), labels=labels, renderer=renderer)
     return png, note
 
 
-def inspect_vehicle(path, title, yaw, pitch, zoom, focus, body_id=None):
+def inspect_vehicle(path, title, yaw, pitch, zoom, focus, body_id=None, renderer=None):
     placed, _ = load_placed(path, body_id=body_id)
     return render_view(placed, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus, title=title,
-                       ruler=VEHICLE_RULER), "\n" + _mesh_note(placed)
+                       ruler=VEHICLE_RULER, renderer=renderer), "\n" + _mesh_note(placed)
 
 
 def _mesh_note(parts):
@@ -62,7 +62,7 @@ def _mesh_note(parts):
             f"omitted moving geometry: {report['omitted_moving_geometry'] or 'none'}.\n{report['note']}")
 
 
-def game_vehicle(path, name, body_id=None):
+def game_vehicle(path, name, body_id=None, renderer=None):
     from pathlib import Path  # noqa: PLC0415
     from .reference import xml_root  # noqa: PLC0415
     bodies = xml_root(Path(path).read_text(encoding="utf-8-sig")).findall("bodies/body")
@@ -77,7 +77,7 @@ def game_vehicle(path, name, body_id=None):
     text = (f"{name}: {len(placed)} parts, about {size[2]:.2f} m long x {size[0]:.2f} m wide x "
             f"{size[1]:.2f} m tall. Body {body_id} of {len(bodies)} (body-local view).\n"
             f"Missing definitions: {top or 'none'}.\n" + _mesh_note(placed))
-    return render_png(placed, title=name, nautical=False), text
+    return render_png(placed, title=name, nautical=False, renderer=renderer), text
 
 
 def vehicle_xml(full):
@@ -93,7 +93,8 @@ def query_draft(record, selector, offset, limit):
     return {**query(parts, selector, offset, limit), "revision": revision(record)}
 
 
-def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="all", door_state="closed"):
+def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="all", door_state="closed",
+                  renderer=None):
     parts, info = materialize(record, centred=True)
     from .networks import wires  # noqa: PLC0415
     wires(record, parts)  # Fail before persisting edits that leave dangling generated connections.
@@ -105,8 +106,10 @@ def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="
         raise ValueError(f"no parts in {layer} layer")
     ruler = design_ruler(info, info["scale"]) if info else VEHICLE_RULER
     title = f"{title} [{layer}]" if layer != "all" else title
-    png = (render_png(shown, title=title, ruler=ruler, nautical=record.get("kind") != "land", door_state=door_state) if yaw is None else
-           render_view(shown, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus, door_state=door_state))
+    png = (render_png(shown, title=title, ruler=ruler, nautical=record.get("kind") != "land", door_state=door_state,
+                      renderer=renderer) if yaw is None else
+           render_view(shown, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus,
+                       door_state=door_state, renderer=renderer))
     return png, describe(record, parts, info) + "\n" + _mesh_note(shown)
 
 
@@ -282,6 +285,26 @@ def diagnostic_geometry(record):
     return xml, {**geometry(xml), "diagnostics": overlay(record, parts)}
 
 
+def study_references(entries):
+    from .study import study_text  # noqa: PLC0415
+    studies = []
+    for path, kind in entries:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            studies.append(study_text(f.read(), kind))
+    return studies
+
+
+def score_vehicle(path, record, references, kind):
+    from .study import scorecard, study_text  # noqa: PLC0415
+    if path is not None:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    else:
+        text, _, _ = export(record)
+    study = study_text(text, kind)
+    return {**scorecard(study, references, kind), "counts": study["counts"]}
+
+
 def hull_analysis(full, path, body_id, stations, x):
     from pathlib import Path  # noqa: PLC0415
     from .hull_analysis import design_depths, reference_structure, structural_report  # noqa: PLC0415
@@ -365,7 +388,7 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 land_parts, land_library, land_layout, land_draft, viewer_geometry,
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
-                                prepare_validation, diagnostic_geometry)}
+                                prepare_validation, diagnostic_geometry, study_references, score_vehicle)}
 
 
 def _watch_parent():

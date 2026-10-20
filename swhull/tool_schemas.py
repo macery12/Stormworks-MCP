@@ -235,3 +235,10 @@ class AssemblyOptions(Request):
     starter_hotkey: Annotated[int, Field(strict=True, ge=1, le=6)] = 1
     lights_hotkey: Annotated[int, Field(strict=True, ge=1, le=6)] = 2
     reverse_hotkey: Annotated[int, Field(strict=True, ge=1, le=6)] = 3
+
+
+class ReferenceVehicle(Request):
+    name: str
+    source: Literal["vehicles", "workshop"] = "vehicles"
+    kind: Literal["boat", "land", "other"] | None = None
+    label: Annotated[str, Field(max_length=64)] | None = None

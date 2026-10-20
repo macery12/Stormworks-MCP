@@ -91,6 +91,13 @@ connection_candidates and open_transmission_ports. Consult saved examples and mi
 before claiming a rule is verified. **get_calibration_observations(definition)** reads recorded
 player checks and exposes stale or contradictory evidence. See `docs/advanced-testing.md`.
 
+**study_references(references, save_as)** measures how vehicles the player rates are built
+(slope piece sizes, pyramid/inverse pairing, ballast, sub-bodies, detail parts, paint, logic)
+and stores the set locally. Mark hovercraft, aircraft and unusual builds `kind: "other"`.
+**score_vehicle(reference_set, name | design | spec | preset)** compares a vehicle with the
+references of the same kind and gives a hint for each metric outside their range. Use it after
+a preview to choose the next improvement; a miss is where to look, not proof of a fault.
+
 When you encounter a bug, confusing behavior, repeated placement failure or a missing capability,
 use **complaint(title, description, ...)** to save a local report. Include category/severity,
 the affected tool, expected/actual behavior, reproduction steps and relevant tool arguments/errors
@@ -131,6 +138,21 @@ indeterminate, with connected compartments and a highlighted escape path. Suppor
 are closed by default; door_state=open tests their openings. Footprints alone never count
 as seals. Unsupported nearby geometry prevents a confident pass. These checks model geometry;
 the player must still verify attachment, access, orientation and fluid behavior in Stormworks.
+
+### Flotation and ballast
+
+Every hull build reports a flotation estimate: draft (with a range), bow/stern trim at the ends
+(+ = bow down) and metacentric height (GM) against the beam. Buoyancy per submerged voxel comes
+from the reference ships' painted waterlines (about 1.5 mass units, 1.3-1.8), so the draft is
+an estimate until checked in game; trim and GM barely depend on it. With `ballast: "auto"`,
+weight blocks go in port/starboard pairs on the bottom skin, in the lowest quarter of the hull,
+under a deck and clear of rooms and access paths: aft or forward to level the trim within 1
+degree, then near the centre of buoyancy to bring a light hull down to its painted waterline or
+raise a low GM. They fill space left after equipment and count its mass. No more than 40 per
+1,000 structural parts are added (the most the reference ships carry); the summary says when
+that limit or a lack of bottom space stops it. A hull that sits below its painted waterline is
+warned about, not weighed down further: lighten the superstructure, add hull volume, or move
+`colors.waterline` to where it floats.
 
 ### Measuring
 
@@ -191,6 +213,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `depth` | keel to deck at midship, m | 0.6 (dinghy) to 4 |
 | `deck` | `"closed"` (sealed, floats reliably) or `"open"` (cockpit/well deck) | |
 | `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 when smoothing is requested; inspect the result |
+| `ballast` | `"auto"` (default) or `"none"` | weight blocks low in the hull to level the trim, reach the painted waterline and keep it stable; the summary gives the flotation estimate |
 | `hulls` / `hull_spacing` | 1 mono, 2 catamaran, 3 trimaran; spacing is centreline to centreline, m | |
 | `bow.entry` | fraction of length over which the bow narrows | 0.1 blunt, 0.3 normal, 0.45 very fine |
 | `bow.fullness` | plan shape of the bow: 1 = straight V, 2 = rounded, 3 = bluff | 1.2-2.3 |
@@ -237,6 +260,13 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
   units and limits as `corner_radius`; choose one of the two. A chamfer is useful when a deliberate
   faceted corner suits the vehicle and pyramid pairs can follow it. A 0.25 m chamfer on a
   vertical wall can be built with sideways 1x1 wedges.
+- With `smoothing` `wedges` or `wedges_v2`, straight-walled boxes (no taper, rake, waist or
+  `roof_radius`; at least 1 x 1 m and 0.75 m tall) are finished the way experienced builders
+  do it: a 1x1 wedge chamfer up every vertical corner, a 1x1 bevel round the roof edge and a
+  pyramid closing each roof corner. A box is finished completely or not at all; one whose
+  corner meets another box, an opening or a covered roof edge stays square, and the summary
+  says why. Set `corner_chamfer` or `corner_radius` on a box (0 included) to choose its
+  corners yourself.
 - `waist` makes a shallow indentation that returns to the original width above it. Give
   `from`, `peak`, `to`, and `inset` in metres above the box bottom, for example
   `"waist": {"from": 0, "peak": 0.5, "to": 1, "inset": 0.25}`. On a 1 m tall wall this
@@ -454,3 +484,7 @@ plumbing and in-game confirmation of actual capacity and contents remain player 
   make an arbitrary curve exactly representable by the game's limited block catalogue.
 - Previews show a 3/4 view from below too; check the hull bottom there. For details, use
   `inspect_view` (any angle and zoom). `open_in_viewer` gives the player an interactive 3D view.
+- Previews are lit like the game (sun, shadows, ambient occlusion), on the GPU when one is
+  available. Pass `renderer="flat"` to `preview_hull`, `inspect_view`, `preview_vehicle` or
+  `preview_game_vehicle` for the unlit look with an outline on every block, to count blocks
+  or follow a stair-step.

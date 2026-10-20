@@ -23,6 +23,7 @@ def main():
         "--workpath", str(ROOT / "build"), "--specpath", str(ROOT / "build"),
         "--collect-submodules", "mcp.server", "--exclude-module", "mcp.cli",
         "--collect-all", "mcp_types", "--collect-all", "swhull",
+        "--collect-submodules", "glcontext", "--hidden-import", "moderngl",
         "--copy-metadata", "mcp",
         "--add-data", f"{ROOT / 'swhull' / 'guide.md'}:swhull",
         "--add-data", f"{ROOT / 'viewer' / 'index.html'}:viewer",

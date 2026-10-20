@@ -31,7 +31,8 @@ from swhull.presets import PRESETS
 from swhull.vehicle import vehicles_dir
 from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyReport, ChangeReport,
                                  ConnectionBatch, DiagnosticReport, EditBatch, PreflightReport,
-                                 RepairPlan, RouteBatch, Selection, plain)
+                                 ReferenceVehicle, RepairPlan, RouteBatch, Selection, plain)
+from swhull.study import ranges as reference_ranges
 from swhull.validation import Observation, ValidationRun
 
 HERE = Path(__file__).resolve().parent
@@ -47,6 +48,13 @@ def designs_dir():
         return Path(os.environ["SW_DESIGNS_DIR"])
     base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return Path(base) / "stormworks-hull-mcp" / "designs"
+
+
+def references_dir():
+    """Local reference sets (studies of vehicles the player rates). SW_REFERENCES_DIR overrides."""
+    if os.environ.get("SW_REFERENCES_DIR"):
+        return Path(os.environ["SW_REFERENCES_DIR"])
+    return designs_dir().parent / "reference_sets"
 
 
 INSTRUCTIONS = """\
@@ -77,6 +85,8 @@ D=+1 and Axis 2 is W=+1, S=-1. Wheel mount/axle direction alone does not determi
 direction: constrain wheel_forward and wheel_reference_up too. Mirrored right road wheels
 keep drive arrows forward; this reference pairing inverts left steering and uses direct
 right steering. Inspect preflight wheel_direction_checks after rotation/wiring changes.
+study_references stores how the player's favourite builds are made; score_vehicle compares a
+design with them and names the habits it misses (slope sizes, ballast, detail, paint, logic).
 Read workshop references with source=workshop and a numeric item ID. Previews use installed
 component meshes; layer=components exposes equipment inside the body. Extend with
 query_parts/edit_parts, preview_vehicle and save_vehicle. Land specs use actual metres.
@@ -130,6 +140,7 @@ expected/actual behavior, reproduction steps and relevant tool arguments/errors.
 saved locally for review; reporting an issue does not fix it. Continue useful work where possible."""
 
 mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS, version=__version__)
+Renderer = Literal["auto", "gpu", "cpu", "flat"]
 
 
 def _user_errors(fn):
@@ -211,7 +222,10 @@ def _spec(spec=None, preset=None, design=None, patch=None, spec_path=None):
 
 
 def _atomic_design(name, record):
-    path = _design_path(name)
+    _atomic_json(_design_path(name), record)
+
+
+def _atomic_json(path, record):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -366,7 +380,7 @@ def get_hull_spec(preset: str | None = None) -> dict[str, Any]:
 @_user_errors
 async def preview_hull(spec: dict[str, Any] | None = None, preset: str | None = None,
                        design: str | None = None, patch: list[dict[str, Any]] | None = None,
-                       spec_path: str | None = None) -> list:
+                       spec_path: str | None = None, renderer: Renderer | None = None) -> list:
     """Build a hull and return a preview image (3/4 above and below, front, side, top) plus stats.
 
     spec: partial or full hull spec (see hull_design_guide); merged over the preset if given.
@@ -375,9 +389,11 @@ async def preview_hull(spec: dict[str, Any] | None = None, preset: str | None = 
     patch: JSON-Patch ops applied last, e.g. [{"op": "replace", "path":
         "/superstructure/bridge/height", "value": 2.5}]. List items can be named instead of indexed.
     spec_path: a .json file holding a spec (or a stored design), read before `spec` and `patch`.
+    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
+    is the fastest, unlit look with block outlines for counting blocks.
     """
     full = _spec(spec, preset, design, patch, spec_path)
-    png, text = await run_job("preview", full, _title(preset, design))
+    png, text = await run_job("preview", full, _title(preset, design), renderer)
     return [Image(data=png, format="png"), text]
 
 
@@ -642,6 +658,66 @@ async def analyze_vehicle(name: str, search: str = "", offset: int = 0, limit: i
     Search rudder/propeller/engine/trans to focus evidence. Sections: parts, links, controllers,
     bodies, placement_issues, connection_candidates, open_transmission_ports. All are paginated."""
     return await run_job("analyze_reference", str(_reference_path(name, source)), search, offset, limit, section)
+
+
+def _reference_set_path(name):
+    _check_name(name)
+    return references_dir() / f"{name}.json"
+
+
+@mcp.tool()
+@_user_errors
+async def study_references(references: list[ReferenceVehicle], save_as: str | None = None) -> dict[str, Any]:
+    """Measure how vehicles the player rates are built: slope piece sizes, pyramid/inverse
+    pairing, ballast, sub-bodies, detail parts, paint and logic. kind (boat/land/other) is
+    detected from road wheels and marine propulsion unless given; mark hovercraft, aircraft and
+    unusual builds "other" so they don't widen the boat range. save_as stores the set locally,
+    replacing one of the same name, for score_vehicle. Measurements describe habits, not quality."""
+    if not references:
+        raise ValueError("give at least one reference vehicle")
+    if save_as is not None:
+        _check_name(save_as)
+    entries = [(str(_reference_path(r.name, r.source)), r.kind) for r in references]
+    studies = await run_job("study_references", entries)
+    rows = [{"label": r.label or r.name, "name": r.name, "source": r.source, **s}
+            for r, s in zip(references, studies)]
+    out = {"references": [{"label": row["label"], "kind": row["kind"], "parts": row["counts"]["parts"],
+                           "bodies": row["counts"]["bodies"], "metrics": row["metrics"]} for row in rows],
+           "ranges": {kind: reference_ranges(studies, kind) for kind in sorted({s["kind"] for s in studies})}}
+    if save_as is not None:
+        path = _reference_set_path(save_as)
+        _atomic_json(path, {"name": save_as, "references": rows})
+        out["saved"] = str(path)
+    return out
+
+
+@mcp.tool()
+@_user_errors
+async def score_vehicle(reference_set: str, name: str | None = None,
+                        source: Literal["vehicles", "workshop"] = "vehicles", design: str | None = None,
+                        spec: dict[str, Any] | None = None, preset: str | None = None,
+                        patch: list[dict[str, Any]] | None = None,
+                        kind: Literal["boat", "land", "other"] | None = None) -> dict[str, Any]:
+    """Compare a saved vehicle (name), a draft or stored design, or a hull spec/preset with a
+    reference set from study_references. Each construction metric is checked against the
+    min-max of references of the same kind, with a hint where it falls outside. A miss says
+    where to look, not that the vehicle is broken: references differ in size and purpose."""
+    path = _reference_set_path(reference_set)
+    if not path.is_file():
+        stored = sorted(p.stem for p in references_dir().glob("*.json")) if references_dir().is_dir() else []
+        raise ValueError(f"no reference set named '{reference_set}'; " + (
+            f"stored sets: {', '.join(stored)}" if stored else "create one with study_references(save_as=...)"))
+    references = json.loads(path.read_text(encoding="utf-8"))["references"]
+    if name is not None:
+        if any(v is not None for v in (design, spec, preset, patch)):
+            raise ValueError("choose a saved vehicle name or a design/spec, not both")
+        return await run_job("score_vehicle", str(_reference_path(name, source)), None, references, kind)
+    if all(v is None for v in (design, spec, preset)):
+        raise ValueError("give a saved vehicle name, a design, a spec or a preset")
+    record = _read_design(design) if design is not None else None
+    if not (record and record.get("kind") in ("imported", "land") and patch is None and spec is None):
+        record = {"spec": _spec(spec, preset, design, patch)}
+    return await run_job("score_vehicle", None, record, references, kind)
 
 
 @mcp.tool()
@@ -963,13 +1039,18 @@ def record_vehicle_validation(run_id: str, export_sha256: str, observations: lis
 @_user_errors
 async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 25,
                           zoom: float = 1, focus: list[float] | None = None, layer: str = "all",
-                          door_state: Literal["closed", "open"] = "closed") -> list:
+                          door_state: Literal["closed", "open"] = "closed",
+                          renderer: Renderer | None = None) -> list:
     """Preview a draft using installed meshes. yaw/pitch/zoom/focus gives a close-up.
     layer=all/components/structure; components hides bodywork to inspect seats/tanks/powertrain.
-    Paint and wheel neutral poses are approximate; the image is not an in-game screenshot."""
+    Paint and wheel neutral poses are approximate; the image is not an in-game screenshot.
+    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
+    is the fastest, unlit look with block outlines for counting blocks.
+    """
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must contain three fractions")
-    png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus, layer, door_state)
+    png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus, layer,
+                              door_state, renderer)
     return [Image(data=png, format="png"), note]
 
 
@@ -1014,14 +1095,17 @@ def list_game_vehicles(search: str = "") -> list[str]:
 
 @mcp.tool()
 @_user_errors
-async def preview_game_vehicle(name: str, source: str = "vehicles", body_id: str | None = None) -> list:
+async def preview_game_vehicle(name: str, source: str = "vehicles", body_id: str | None = None,
+                               renderer: Renderer | None = None) -> list:
     """Render any vehicle from the player's vehicles folder, e.g. to study their existing boats.
 
     Uses installed component meshes, with reported footprint fallbacks. source=workshop
     reads an installed numeric item ID. For articulated vehicles choose body_id; by default
     show the largest body alone, without pretending unrelated local frames line up.
+    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
+    is the fastest, unlit look with block outlines for counting blocks.
     """
-    png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id)
+    png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id, renderer)
     return [Image(data=png, format="png"), text]
 
 
@@ -1031,7 +1115,8 @@ async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = No
                        preset: str | None = None, yaw: float = 35.0, pitch: float = 25.0,
                        zoom: float = 1.0, focus: list[float] | None = None, design: str | None = None,
                        patch: list[dict[str, Any]] | None = None, highlight: str | None = None,
-                       spec_path: str | None = None, source: str = "vehicles", body_id: str | None = None) -> list:
+                       spec_path: str | None = None, source: str = "vehicles", body_id: str | None = None,
+                       renderer: Renderer | None = None) -> list:
     """Render one large view of a hull design or saved vehicle from any angle, like a
     camera you can point. Use it to check details the fixed previews hide.
 
@@ -1043,6 +1128,8 @@ async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = No
     highlight: a superstructure box name (designs only): painted magenta and labelled, and
     its position is reported in spec units and as game-metre heights above the keel. Views at pitch 0 or +-90 get metre rulers in spec units
     (z from the transom, y from the keel, x from the centreline).
+    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
+    is the fastest, unlit look with block outlines for counting blocks.
     """
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must be [fx, fy, fz]")
@@ -1051,14 +1138,14 @@ async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = No
         if highlight:
             raise ValueError("highlight works on designs, not saved vehicles")
         png, note = await run_job("inspect_vehicle", str(_reference_path(name, source)), name, yaw, pitch,
-                                  zoom, focus, body_id)
+                                  zoom, focus, body_id, renderer)
         title = name
     else:
         if source != "vehicles" or body_id is not None:
             raise ValueError("source/body_id apply only to a reference name")
         full = _spec(spec, preset, design, patch, spec_path)
         title = _title(preset, design)
-        png, note = await run_job("inspect_design", full, title, yaw, pitch, zoom, focus, highlight)
+        png, note = await run_job("inspect_design", full, title, yaw, pitch, zoom, focus, highlight, renderer)
     return [Image(data=png, format="png"), f"{title}: yaw {yaw}, pitch {pitch}, zoom {zoom}{note}"]
 
 

@@ -1,10 +1,13 @@
 """Flat-shaded preview renders (3/4 view + side/top/front orthographics) with Pillow."""
+import functools
 import io
 import math
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .meshes import world_triangles
+from . import raster
+from .meshes import world_arrays
 from .pieces import add, apply
 
 BG = (38, 45, 56)
@@ -110,8 +113,10 @@ def _square(c, d):
     return out
 
 
-def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, door_state="closed"):
+def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, door_state="closed", bake=True):
     """(polygon, outward normal, rgb, voxel cell) per visible voxel-sized face fragment.
+
+    bake=False leaves colours unshaded, for the lit renderer to light.
 
     Plain blocks, nearly every piece of a hull, take a fast path: their six faces are unit
     squares, emitted only where no neighbour covers them. Other pieces go through the general
@@ -121,6 +126,8 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
         raise ValueError("door_state must be closed or open")
     dirs = _RDIRS if facing is None else tuple(d for d in _RDIRS if _dot(d, facing) < -1e-6)
     light = _norm(light)
+    if not bake:
+        ambient = 1.0
     shades = {d: ambient + (1 - ambient) * max(0.0, _dot(d, light)) for d in _RDIRS}
     blocks, polys, detailed = [], [], []
     full = set()  # (voxel, direction) pairs covered by a full square face, in render coordinates
@@ -131,19 +138,20 @@ def _world_faces(placed, light=LIGHT, ambient=0.42, facing=None, native=True, do
             for d in _RDIRS:
                 full.add((v, d))
             continue
-        mesh = world_triangles(p, door_state) if native else None
+        mesh = world_arrays(p, door_state) if native else None
         if mesh is not None:
-            for points, rgb in mesh:
-                pts = [_mirror(q) for q in points]
-                # Display's x reflection reverses triangle winding.
-                n = tuple(-c for c in _newell(pts))
-                if facing is not None and _dot(n, facing) >= -1e-6:
-                    continue
-                mesh_ambient = max(ambient, .62)
-                shade = mesh_ambient + (1 - mesh_ambient) * max(0.0, _dot(n, light))
-                col = tuple(min(255, int(c * shade)) for c in rgb)
-                fc = tuple(sum(q[i] for q in pts) / len(pts) for i in range(3))
-                detailed.append((pts, n, col, tuple(round(c) for c in fc)))
+            pts, rgb = mesh
+            pts = pts * (-1.0, 1.0, 1.0)  # _mirror for display
+            # Display's x reflection reverses triangle winding.
+            n = -np.cross(pts[:, 1] - pts[:, 0], pts[:, 2] - pts[:, 0])
+            n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+            keep = slice(None) if facing is None else n @ np.asarray(facing, np.float64) < -1e-6
+            pts, n, rgb = pts[keep], n[keep], rgb[keep]
+            mesh_ambient = max(ambient, .62) if bake else 1.0
+            shade = mesh_ambient + (1 - mesh_ambient) * np.maximum(0.0, n @ np.asarray(light))
+            cols = np.minimum(255, (rgb * shade[:, None]).astype(np.int64))
+            cells = np.round(pts.mean(1)).astype(np.int64)
+            detailed.extend(zip(pts.tolist(), n.tolist(), map(tuple, cols.tolist()), cells.tolist()))
             continue
         for pts, n in _piece_polys(p):
             frags = _fragments(pts)
@@ -259,25 +267,34 @@ def _ruler_axes(ruler, right, up, cx, cy, scale, w, h, ox, oy):
 
 
 def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=None, labels=(),
-               ruler=None, segments=()):
+               ruler=None, segments=(), lit=None):
+    """lit: (raster.Scene, backend, supersample) to light the faces; None paints them flat."""
     d, right, up = cam
     img = Image.new("RGB", (w, h), BG)
     dr = ImageDraw.Draw(img)
-    vis = [(pts, col, cell) for pts, n, col, cell in faces if _dot(n, d) < -1e-6]
-    if not vis:
-        return img, scale
-    # Back-to-front by the depth of each fragment's voxel cell: exact for unit cells in an
-    # orthographic view, unlike sorting by face centroid (which lets floors paint over walls).
-    proj = [([(_dot(p, right), _dot(p, up)) for p in pts],
-             (_dot(cell, d), sum(_dot(p, d) for p in pts) / len(pts)), col)
-            for pts, col, cell in vis]
-    xs = [q[0] for pts, _, _ in proj for q in pts]
-    ys = [q[1] for pts, _, _ in proj for q in pts]
+    if lit is None:
+        vis = [(pts, col, cell) for pts, n, col, cell in faces if _dot(n, d) < -1e-6]
+        if not vis:
+            return img, scale
+        # Back-to-front by the depth of each fragment's voxel cell: exact for unit cells in an
+        # orthographic view, unlike sorting by face centroid (which lets floors paint over walls).
+        proj = [([(_dot(p, right), _dot(p, up)) for p in pts],
+                 (_dot(cell, d), sum(_dot(p, d) for p in pts) / len(pts)), col)
+                for pts, col, cell in vis]
+        xs = [q[0] for pts, _, _ in proj for q in pts]
+        ys = [q[1] for pts, _, _ in proj for q in pts]
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    else:
+        pts = lit[0].tris[lit[0].normal @ np.asarray(d, np.float32) < -1e-6].reshape(-1, 3)
+        if not len(pts):
+            return img, scale
+        xs, ys = pts @ np.asarray(right), pts @ np.asarray(up)
+        x0, x1, y0, y1 = float(xs.min()), float(xs.max()), float(ys.min()), float(ys.max())
     margin = 28
     if scale is None:
-        scale = min((w - 2 * margin) / max(1e-6, max(xs) - min(xs)),
-                    (h - 2 * margin - 16) / max(1e-6, max(ys) - min(ys)))
-    cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+        scale = min((w - 2 * margin) / max(1e-6, x1 - x0),
+                    (h - 2 * margin - 16) / max(1e-6, y1 - y0))
+    cx, cy = (x1 + x0) / 2, (y1 + y0) / 2
     scale *= zoom
     if focus is not None:
         cx, cy = _dot(focus, right), _dot(focus, up)
@@ -293,17 +310,26 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
             col = tuple(c + 10 for c in GRID) if major else GRID
             dr.line([(px, 20), (px, h)] if which == "h" else [(0, px), (w, px)], fill=col)
     if grid and not ruler:  # 1 m grid (4 voxels)
-        for gx in range(int(math.floor(min(xs) / 4)) - 1, int(math.ceil(max(xs) / 4)) + 2):
+        for gx in range(int(math.floor(x0 / 4)) - 1, int(math.ceil(x1 / 4)) + 2):
             x = to_px((gx * 4, 0))[0]
             dr.line([(x, 20), (x, h)], fill=GRID)
-        for gy in range(int(math.floor(min(ys) / 4)) - 1, int(math.ceil(max(ys) / 4)) + 2):
+        for gy in range(int(math.floor(y0 / 4)) - 1, int(math.ceil(y1 / 4)) + 2):
             y = to_px((0, gy * 4))[1]
             dr.line([(0, y), (w, y)], fill=GRID)
-    outline_px = scale >= 5
-    for pts, _, col in sorted(proj, key=lambda f: (-f[1][0], -f[1][1])):
-        poly = [to_px(q) for q in pts]
-        edge = tuple(int(c * 0.82) for c in col) if outline_px and len(pts) > 3 else None
-        dr.polygon(poly, fill=col, outline=edge)
+    if lit is None:
+        outline_px = scale >= 5
+        for pts, _, col in sorted(proj, key=lambda f: (-f[1][0], -f[1][1])):
+            poly = [to_px(q) for q in pts]
+            edge = tuple(int(c * 0.82) for c in col) if outline_px and len(pts) > 3 else None
+            dr.polygon(poly, fill=col, outline=edge)
+    else:
+        scene, backend, supersample = lit
+        colour, coverage = raster.shade(scene, d, right, up, (cx, cy, scale, ox, oy), w, h,
+                                        backend, supersample)
+        base = np.asarray(img, np.float32) / 255.0
+        out = colour + base * (1.0 - coverage[..., None])
+        img.paste(Image.fromarray((np.clip(out, 0, 1) * 255 + 0.5).astype(np.uint8)))
+        dr = ImageDraw.Draw(img)
     font = ImageFont.load_default()
     for segment in segments:
         a, b = [to_px((_dot(segment[key], right), _dot(segment[key], up))) for key in ("start", "end")]
@@ -353,16 +379,30 @@ def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=
     return img, scale
 
 
+SUPERSAMPLE = {"gpu": 3, "cpu": 2}
+
+
+def _scene(placed, renderer, door_state):
+    """Faces for a view, plus the lit-renderer setup unless the flat renderer was chosen."""
+    backend = raster.resolve(renderer)
+    if backend == "flat":
+        return _world_faces(placed, door_state=door_state), None
+    faces = _world_faces(placed, door_state=door_state, bake=False)
+    return faces, (raster.Scene(faces), backend, SUPERSAMPLE[backend])
+
+
 def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
-                width=1200, height=800, ruler=None, labels=(), door_state="closed", segments=()):
+                width=1200, height=800, ruler=None, labels=(), door_state="closed", segments=(),
+                renderer=None):
     """One large view from any angle.
 
     yaw: 0 = side view with the bow to the right, 90 = from the bow, 180 = the other side,
     270 = from the stern. pitch: degrees above (+) or below (-) the horizon.
     zoom: 1 fits the whole vehicle; 2-6 for close-ups. focus: (fx, fy, fz) fractions of the
     bounding box to centre on, e.g. (0.5, 0.2, 0.9) = low on the bow; default is the middle.
+    renderer: auto (GPU, else CPU), gpu, cpu or flat; default SW_RENDERER, else auto.
     """
-    faces = _world_faces(placed, door_state=door_state)
+    faces, lit = _scene(placed, renderer, door_state)
     yr, pr = math.radians(yaw), math.radians(max(-89.9, min(89.9, pitch)))
     cam_pos = (-math.cos(pr) * math.cos(yr), math.sin(pr), math.cos(pr) * math.sin(yr))
     cam = _camera(tuple(-c for c in cam_pos))
@@ -376,14 +416,16 @@ def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
         target = tuple(lo[i] + (hi[i] - lo[i]) * f[i] for i in range(3))
     label = f"{title}  yaw {yaw:.0f}, pitch {pitch:.0f}, zoom {zoom:g}".strip()
     img, _ = _draw_view(faces, cam, width, height, label, grid=abs(pitch) < 1 or abs(pitch) > 89,
-                        zoom=zoom, focus=target, ruler=ruler, labels=labels, segments=segments)
+                        zoom=zoom, focus=target, ruler=ruler, labels=labels, segments=segments, lit=lit)
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()
 
 
-def render_png(placed, title="", width=1350, height=900, ruler=None, nautical=True, door_state="closed"):
-    faces = _world_faces(placed, door_state=door_state)
+def render_png(placed, title="", width=1350, height=900, ruler=None, nautical=True, door_state="closed",
+               renderer=None):
+    faces, lit = _scene(placed, renderer, door_state)
+    view = functools.partial(_draw_view, lit=lit)
     top_h = int(height * 0.5)
     low_h = height - top_h
     third, half = width // 3, width // 2
@@ -393,14 +435,14 @@ def render_png(placed, title="", width=1350, height=900, ruler=None, nautical=Tr
     side = "side (bow right)" if nautical else "side (+z right)"
     top = "top (bow right)" if nautical else "top (+z right)"
     panels = [
-        ((0, 0), _draw_view(faces, VIEWS["3/4 view"], third, top_h, "3/4 from above")[0]),
-        ((third, 0), _draw_view(faces, _camera((-1.0, 0.8, -1.1)), third, top_h,
+        ((0, 0), view(faces, VIEWS["3/4 view"], third, top_h, "3/4 from above")[0]),
+        ((third, 0), view(faces, _camera((-1.0, 0.8, -1.1)), third, top_h,
                                 underside)[0]),
-        ((2 * third, 0), _draw_view(faces, VIEWS["front (from bow)"], width - 2 * third, top_h,
+        ((2 * third, 0), view(faces, VIEWS["front (from bow)"], width - 2 * third, top_h,
                                     f"{front}  grid = 1 m", grid=True, ruler=ruler)[0]),
-        ((0, top_h), _draw_view(faces, VIEWS["side (bow right)"], half, low_h,
+        ((0, top_h), view(faces, VIEWS["side (bow right)"], half, low_h,
                                 f"{side}  grid = 1 m", grid=True, ruler=ruler)[0]),
-        ((half, top_h), _draw_view(faces, VIEWS["top (bow right)"], width - half, low_h,
+        ((half, top_h), view(faces, VIEWS["top (bow right)"], width - half, low_h,
                                    f"{top}  grid = 1 m", grid=True, ruler=ruler)[0]),
     ]
     for pos, img in panels:

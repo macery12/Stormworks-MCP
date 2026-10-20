@@ -15,6 +15,7 @@ dependencies = [
     "tomlkit>=0.13,<1",
     "pydantic>=2.11,<3",
     "typing-extensions>=4.12",
+    "moderngl>=5.12",
 ]
 
 [dependency-groups]

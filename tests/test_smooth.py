@@ -44,7 +44,9 @@ def test_piece_matches_game_definition(d):
     for m in re.finditer(r'<surface orientation="(\d)" rotation="\d+" shape="(\d+)"[^>]*>\s*'
                          r'<position ([^/]*)/>', surfaces):
         pos = dict(re.findall(r'([xyz])="(-?\d+)"', m.group(3)))
-        if m.group(2) == "1":
+        # Weight blocks use their own full-square code (5); they attach like blocks, as the
+        # hundreds embedded in the reference ships' hulls show.
+        if m.group(2) == "1" or d == "01_block_weight" and m.group(2) == "5":
             full.add((tuple(int(pos.get(k, 0)) for k in "xyz"), ORIENT[int(m.group(1))]))
     test = CONTAINS[d]
     mine = {(c, n) for c in piece.footprint for n in DIRS
@@ -53,7 +55,7 @@ def test_piece_matches_game_definition(d):
 
 
 def test_catalogue_is_every_slope_piece():
-    assert len(SLOPES) == 15 and len(BY_NAME) == 16
+    assert len(SLOPES) == 15 and len(BY_NAME) == 17   # block, weight block and 15 slopes
     counts = {p.d: len(_placements(p)) for p in SLOPES}
     assert counts["02_wedge"] == 12 and counts["03_pyramid"] == counts["04_invpyramid"] == 8
     # the 2x4 pieces have three different sides: their mirror images are new shapes

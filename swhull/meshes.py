@@ -9,9 +9,11 @@ from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+
 from . import definitions
 from .land import road_wheel
-from .pieces import BY_NAME, _det, add, apply
+from .pieces import BY_NAME, _det, add
 from .seal import MANUAL_DOORS
 
 
@@ -130,23 +132,48 @@ def triangles(p, door_state="closed"):
     return out
 
 
-def world_triangles(p, door_state="closed"):
-    local = triangles(p, door_state)
+_LOCAL = {}
+
+
+def _local_arrays(p, door_state):
+    """(points (T, 3, 3) wound outward, rgb (T, 3)) in block units, cached per definition and paint."""
+    key = (definitions.definitions_dir(), p.piece.d, p.color, door_state)
+    if key not in _LOCAL:
+        local = triangles(p, door_state)
+        value = None
+        if local is not None:
+            pts = np.array([t[0] for t in local], np.float64).reshape(-1, 3, 3)
+            normal = np.array([t[1] for t in local], np.float64).reshape(-1, 3)
+            # Derive the winding from the actual triangle, with source normals choosing the
+            # outward side. This also handles mirrored or XML-scaled read-only previews.
+            cross = np.cross(pts[:, 1] - pts[:, 0], pts[:, 2] - pts[:, 0])
+            flip = (cross * normal).sum(1) < 0
+            pts[flip] = pts[flip][:, ::-1]
+            value = (pts, np.array([t[2] for t in local], np.uint8).reshape(-1, 3))
+        if len(_LOCAL) > 1024:
+            _LOCAL.clear()
+        _LOCAL[key] = value
+    return _LOCAL[key]
+
+
+def world_arrays(p, door_state="closed"):
+    """(world points (T, 3, 3), rgb (T, 3)) for a part's native mesh, or None."""
+    local = _local_arrays(p, door_state)
     if local is None:
         return None
-    # Derive transformed normals from the actual triangle, with source normals to
-    # choose the outward side. This also handles mirrored or XML-scaled read-only previews.
-    out = []
-    for pts, normal, rgb in local:
-        a, b, c = pts
-        u, v = tuple(b[i] - a[i] for i in range(3)), tuple(c[i] - a[i] for i in range(3))
-        cross = (u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0])
-        ordered = tuple(reversed(pts)) if sum(cross[i] * normal[i] for i in range(3)) < 0 else pts
-        world = tuple(add(p.origin, apply(p.Q, q)) for q in ordered)
-        if _det(p.Q) < 0:
-            world = tuple(reversed(world))
-        out.append((world, rgb))
-    return out
+    pts, rgb = local
+    world = pts @ np.array(p.Q, np.float64).T + np.array(p.origin, np.float64)
+    if _det(p.Q) < 0:
+        world = world[:, ::-1]
+    return world, rgb
+
+
+def world_triangles(p, door_state="closed"):
+    arrays = world_arrays(p, door_state)
+    if arrays is None:
+        return None
+    world, rgb = arrays
+    return [(tuple(map(tuple, tri)), tuple(colour)) for tri, colour in zip(world.tolist(), rgb.tolist())]
 
 
 def coverage(parts):
