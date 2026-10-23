@@ -86,6 +86,40 @@ roof radius with tapered and raked walls is still difficult to tile cleanly. Rev
 corners in a close-up preview. A long wedge should be selected with its side closeout in
 mind; a good volume fit alone does not make its edge coherent.
 
+## Symmetry and the stem
+
+Learned from "Slim Speedboat" and the player's hand-fixed copy (2026-10-21). The greedy fit
+placed one piece at a time with no idea of the centreline, so port and starboard drifted apart
+(notches on one side only, a 4x4 inverse pyramid on one quarter), and the stem ended in a
+one-wide wedge that sloped to one side. The player mirrored one side and ended the bow on a
+three-wide nose: wedge, block, wedge on every layer, with pyramids on inverse pyramids under it.
+
+- **Mirror pairs.** When the hull is mirror-symmetric (`smooth.mirror_plane`, decided by the
+  hull voxels so an off-centre deckhouse does not stop it), every piece on symmetric cells is
+  scored, placed, swapped and removed together with its mirror image, in the fit and in the
+  corner closeouts. A piece on the centre column must be its own mirror image (a block, or a
+  slope facing fore, aft, up or down). A piece reaching across the centreline is not used.
+  Cells whose mirror differs (paint, an off-centre box, an edit) are fitted on their own.
+- **Stem sliver.** A sharp stem on a hull an odd number of blocks wide runs down the middle
+  of the centre column, and the last voxel of a row is solid even when the stem reaches only a
+  third of the way into it. No piece there is both symmetric and close to the shape, so that
+  voxel is dropped when it is one wide, at the end of its row and under half full
+  (`hull._trim_stem_slivers`). The bow then ends a block earlier, on the three-wide nose.
+- **Air beside the hull** takes the colour of the hull block it rests against. It used to be
+  coloured as deck one layer under the deck edge, which stopped a wedge from spanning it and a
+  topsides voxel and left a notch in the bow side.
+- **Pieces touching only blocks are attached.** A slope in an air cell that touches a hull
+  block but no other slope (the nose wedges beside the stem block) was dropped as floating.
+- **Late additions.** A piece that only pays off next to one placed in the last greedy pass
+  or a swap (pyramids under the nose wedges) is offered once more at full cost.
+- **Stacks.** A hull side is the same piece repeated layer over layer, so changing one layer
+  leaves seams with its neighbours and never pays off alone. Closeouts also try each candidate
+  over the whole vertical stack it replaces, each layer keeping its own colour.
+
+At the nose the fitter prefers a 1x2 wedge beside the stem block, following the true taper,
+where the hand fix used a block and a 1x1 wedge. The player chose the 1x2 nose (2026-10-22):
+it keeps the taper line straight and the point sharper.
+
 These are approximation metrics. A seam can be an intentional edge, and a sample cannot
 prove a subvoxel seal. Neither metric is a percentage of visual correctness. Keep reviewing
 the preview and run geometric seal diagnostics and an in-game check before calling a ship finished.

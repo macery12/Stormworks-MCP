@@ -237,6 +237,69 @@ def _catalogue():
     return _CACHE
 
 
+def mirror_mask(m):
+    """Sample mask of the voxel's mirror image across x. SAMPLES are not nudged along x, so
+    mirroring is an exact swap of the four 16-sample x layers."""
+    m = int(m)
+    return sum(((m >> (16 * ix)) & 0xFFFF) << (16 * (3 - ix)) for ix in range(4))
+
+
+def _mirror_map():
+    """For each catalogue placement, (mirror placement index, k_of): the placement with the
+    shape mirrored across x, and for each of its cells k' the cell k of the original that
+    mirrors onto it. The catalogue holds every distinct shape (mirrored ones included), so
+    the mirror always exists."""
+    if "mirror" not in _CACHE:
+        cat = _catalogue()["placements"]
+
+        def key(offs, vols):
+            base = min(offs)
+            return frozenset((tuple(o[a] - base[a] for a in range(3)), v) for o, v in zip(offs, vols))
+        lookup = {}
+        for t, pl in enumerate(cat):
+            offs = [tuple(int(x) for x in o) for o in pl["offs"]]
+            lookup[(pl["piece"].d, key(offs, [int(v) for v in pl["vol"]]))] = t
+        out = []
+        for pl in cat:
+            offs = [(-int(o[0]), int(o[1]), int(o[2])) for o in pl["offs"]]
+            vols = [mirror_mask(v) for v in pl["vol"]]
+            m = lookup[(pl["piece"].d, key(offs, vols))]
+            base = min(offs)
+            mine = {tuple(o[a] - base[a] for a in range(3)): k for k, o in enumerate(offs)}
+            moffs = [tuple(int(x) for x in o) for o in cat[m]["offs"]]
+            mbase = min(moffs)
+            out.append((m, [mine[tuple(o[a] - mbase[a] for a in range(3))] for o in moffs]))
+        _CACHE["mirror"] = out
+    return _CACHE["mirror"]
+
+
+def mirror_plane(S, region=None):
+    """Doubled x of the plane the hull is mirror-symmetric about (mirror x -> x2 - x), or None
+    when the hull is not symmetric. Superstructure boxes may sit off-centre, so only the
+    voxels tagged "hull" decide."""
+    hull = [v for v in S if region is None or region.get(v) == "hull"] or list(S)
+    if not hull:
+        return None
+    xs = [v[0] for v in hull]
+    x2 = min(xs) + max(xs)
+    cells = set(hull)
+    if any((x2 - x, y, z) not in cells for x, y, z in hull):
+        return None
+    return x2
+
+
+def _symmetric_cells(cells, masks, solid, colour, x2):
+    """Cells whose mirror image is a cell with the mirrored shape, fill and colour: where the
+    design is symmetric, the fit must be too."""
+    out = set()
+    for v in cells:
+        w = (x2 - v[0], v[1], v[2])
+        if (w in masks and v in masks and masks[w] == mirror_mask(masks[v])
+                and solid(v) == solid(w) and (colour is None or colour(v) == colour(w))):
+            out.add(v)
+    return out
+
+
 def shell(S):
     """Voxels of S with any of their 26 neighbours missing. The full 3x3x3 test is separable,
     so the solid core is found with three 1-D erosions instead of 26 lookups per voxel."""
@@ -474,7 +537,7 @@ def _refined_planes(cells, masks, gradients, inside, active):
 
 
 def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset(), colour=None,
-               refined=False):
+               refined=False, mirror_x2=None):
     """Choose slope pieces. `inside(point)` tests the continuous shape; `sample_mask(voxel)`,
     when given, returns the SAMPLES bit mask for a whole voxel at once (much faster).
     `fixed` voxels never get a slope piece (painted areas stay crisp blocks). With `colour`,
@@ -482,6 +545,11 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     because a piece takes the colour of one cell.
     `refined` additionally measures continuous boundary planes and their position. The public
     V2 path in to_pieces compares final sealed skins and can retain the original fitter.
+    `mirror_x2` (see mirror_plane): wherever the shape is symmetric about x = mirror_x2 / 2,
+    every piece is placed together with its mirror image, as a builder does with mirror mode.
+    A piece on the centre column must be its own mirror image (a block, or a slope facing
+    fore, aft, up or down), and a piece reaching across the centreline is not used: the greedy
+    fit otherwise lets port and starboard drift apart and puts a one-sided wedge on the stem.
 
     Returns {cell: (piece, origin, Q, paint cell)} for every cell covered by a non-block
     piece; the paint cell is the one the piece fills most, whose colour it should take.
@@ -501,6 +569,18 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
         reach = (np.bitwise_count(M) > 0) | solid
         col = np.array([ids.setdefault(colour(c), len(ids)) if r else -1
                         for c, r in zip(cells, reach.tolist())], dtype=np.int32)
+    index = {c: i for i, c in enumerate(cells)}
+    mirror_of = np.full(n, -1, dtype=np.int64)
+    sym = np.zeros(n, dtype=bool)
+    if mirror_x2 is not None:
+        solid_set = set(S)
+        shade = dict(zip(cells, col.tolist())) if colour is not None else None
+        sym_cells = _symmetric_cells(cells, dict(zip(cells, M.tolist())), lambda v: v in solid_set,
+                                     shade.__getitem__ if shade is not None else None, mirror_x2)
+        for i, (x, y, z) in enumerate(cells):
+            if (x, y, z) in sym_cells:
+                mirror_of[i] = index[(mirror_x2 - x, y, z)]
+                sym[i] = True
 
     # dense lookups over the cells' bounding box: cell index, kept solid, how full
     lo = xyz.min(axis=0) - 5
@@ -686,11 +766,36 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
         keep = dE <= ALLOW
         if keep.any():
             found.append((t, cix[keep], dE[keep], res[keep]))
+
+    # symmetric fit: each candidate on symmetric cells comes with its mirror image (or is its
+    # own); one reaching across the centreline, or half on asymmetric cells, is dropped
+    mates = []
+    if mirror_x2 is not None:
+        mmap = _mirror_map()
+        kept_found = []
+        for t, cix, dE, res in found:
+            m, k_of = mmap[t]
+            on = sym[cix]
+            every, some = on.all(axis=1), on.any(axis=1)
+            mrows = mirror_of[cix[:, k_of]]
+            same = (np.sort(cix, axis=1) == np.sort(mrows, axis=1)).all(axis=1)
+            overlap = (cix[:, :, None] == mrows[:, None, :]).any(axis=(1, 2))
+            alone = ~some
+            own = every & same & (m == t)
+            pair = every & ~overlap
+            ok = alone | own | pair
+            if not ok.any():
+                continue
+            kept_found.append((t, cix[ok], dE[ok], res[ok]))
+            mates.append([(m, r.tolist()) if p else None
+                          for p, r in zip(pair[ok].tolist(), mrows[ok])])
+        found = kept_found
+    else:
+        mates = [[None] * len(cix) for _t, cix, _dE, _res in found]
     if not found:
         return {}
 
     # 2. take pieces greedily, best first, re-scoring any piece whose neighbours changed
-    index = {c: i for i, c in enumerate(cells)}
     solid_l, base_l, M_l = solid.tolist(), base.tolist(), M.tolist()
     nrm_l = nrm.tolist()
     conf_l, flat_l, tilt_l = conf.tolist(), slope_flat.tolist(), tilt_ref.tolist()
@@ -782,6 +887,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
             stamp[q] = clock[0]
 
     chosen = {}                 # piece id -> (type, cells, energy against plain blocks)
+    partner = {}                # piece id -> id of its mirror image, placed and removed with it
     piece_of = [None] * n
     ids = iter(range(1 << 62))
 
@@ -793,6 +899,7 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
             piece_of[c] = i
             touch(c)
         chosen[i] = (t, row, e0)
+        return i
 
     def remove(i):
         _t, row, _e = chosen.pop(i)
@@ -801,6 +908,37 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
             label[c] = None
             piece_of[c] = None
             touch(c)
+        mate = partner.pop(i, None)
+        if mate is not None:
+            partner.pop(mate, None)
+            remove(mate)
+
+    def place_group(group):
+        """Place [(type, cells, e0)], one piece or a piece and its mirror; returns the ids."""
+        placed_ids = [place(t, row, e0) for t, row, e0 in group]
+        if len(placed_ids) == 2:
+            partner[placed_ids[0]], partner[placed_ids[1]] = placed_ids[1], placed_ids[0]
+        return placed_ids
+
+    def group_of(i):
+        return [chosen[j] for j in (i, partner[i])] if i in partner else [chosen[i]]
+
+    def free(group):
+        return all(label[c] is None for _t, row, *_ in group for c in row)
+
+    def group_delta(group, hope=OPTIMISM, both=False):
+        """delta() for a group: the mirror piece is scored with the first one in place."""
+        total_e = total_r = 0.0
+        for t, row, *_ in group:
+            e, r = delta(t, row, hope, both=True)
+            total_e += e
+            total_r += r
+            for k, c in enumerate(row):
+                label[c] = (t, k)
+        for _t, row, *_ in group:
+            for c in row:
+                label[c] = None
+        return (total_e, total_r) if both else total_e
 
     # greedy, most certain first: by the error a piece leaves per voxel it covers, not by
     # how much it gains over blocks. Gain favours whatever covers the half-full voxels where
@@ -809,36 +947,38 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     # still beat the blocks it replaces by MIN_GAIN. A candidate whose neighbourhood changed
     # since it was scored is scored again and goes back in line, so a plane laid in pyramids
     # and inverse pyramids grows outward from its best-fitting piece instead of several
-    # patterns meeting in a seam.
-    cand = [(e, t, row, r) for t, cix, dE, res in found
-            for e, row, r in zip(dE.tolist(), cix.tolist(), res.tolist())]
+    # patterns meeting in a seam. A mirrored pair is scored, placed and removed together.
+    cand = [(e, t, row, r, mate) for (t, cix, dE, res), group_mates in zip(found, mates)
+            for e, row, r, mate in zip(dE.tolist(), cix.tolist(), res.tolist(), group_mates)]
     cand.sort(key=lambda c: (c[3] / len(c[2]), -len(c[2]), c[1]))
-    size = [len(c[2]) for c in cand]
-    heap = [(r / size[j], j, 0, e) for j, (e, _t, _row, r) in enumerate(cand)]
-    cand = [c[:3] for c in cand]
+    groups = [[(t, row, e)] + ([(mate[0], mate[1], e)] if mate else [])
+              for e, t, row, _r, mate in cand]
+    size = [sum(len(row) for _t, row, _e in g) for g in groups]
+    heap = [(r * len(groups[j]) / size[j], j, 0, e * len(groups[j]))
+            for j, (e, _t, _row, r, _m) in enumerate(cand)]
     heapq.heapify(heap)
     for _pass in range(PASSES):
         parked = []             # not worth it when last scored; may become so later
         while heap:
             _k, j, when, e = heapq.heappop(heap)
-            _e0, t, row = cand[j]
-            if any(label[c] is not None for c in row):
+            group = groups[j]
+            if not free(group):
                 continue
-            if any(stamp[c] > when for c in row):
-                e, r = delta(t, row, both=True)
+            if any(stamp[c] > when for _t, row, _e in group for c in row):
+                e, r = group_delta(group, both=True)
                 heapq.heappush(heap, (r / size[j], j, clock[0], e))
                 continue
-            if e > -MIN_GAIN:
+            if e > -MIN_GAIN * len(group):
                 parked.append((j, when))
                 continue
-            place(t, row, _e0)
+            place_group(group)
         # only pieces next to something placed since can have changed
         heap = []
         for j, when in parked:
-            row = cand[j][2]
-            if all(label[c] is None for c in row) and any(stamp[c] > when for c in row):
-                e, r = delta(cand[j][1], row, both=True)
-                if e <= -MIN_GAIN:
+            group = groups[j]
+            if free(group) and any(stamp[c] > when for _t, row, _e in group for c in row):
+                e, r = group_delta(group, both=True)
+                if e <= -MIN_GAIN * len(group):
                     heap.append((r / size[j], j, clock[0], e))
         if not heap:
             break
@@ -847,102 +987,147 @@ def fit_pieces(S, inside, removed=frozenset(), sample_mask=None, fixed=frozenset
     # swap passes: try each good piece in place of whatever overlaps it, refill the cells
     # that frees, and keep the result when the exact total energy goes down. This is what
     # lets a straight row of wedges replace a zigzag of long pieces, and the other way round.
-    good = [c for c in cand if c[0] <= -MIN_GAIN]
+    good = [g for g in groups if g[0][2] <= -MIN_GAIN]
     by_cell = {}
-    for j, (_e, _t, row) in enumerate(good):
-        for c in row:
-            by_cell.setdefault(c, []).append(j)
+    for j, g in enumerate(good):
+        for _t, row, _e in g:
+            for c in row:
+                by_cell.setdefault(c, []).append(j)
+
+    def cells_in(group):
+        return sum(len(o[1]) for o in group)
 
     def refill(freed):
         """Greedily fill free cells around `freed`; returns (energy change, piece ids)."""
         opts = {j for c in freed for j in by_cell.get(c, ())}
-        scored = []
-        for j in opts:
-            _e, t, row = good[j]
-            if all(label[c] is None for c in row):
-                scored.append((delta(t, row), j))
-        scored.sort(key=lambda s: s[0] / len(good[s[1]][2]))
+        scored = [(group_delta(good[j]), j) for j in opts if free(good[j])]
+        scored.sort(key=lambda s: s[0] / cells_in(good[s[1]]))
         total, added = 0.0, []
         for e_first, j in scored:
-            e0, t, row = good[j]
-            if e_first > -MIN_GAIN or any(label[c] is not None for c in row):
+            group = good[j]
+            limit = -MIN_GAIN * len(group)
+            if e_first > limit or not free(group):
                 continue
-            e = delta(t, row) if added else e_first
-            if e > -MIN_GAIN:
+            e = group_delta(group) if added else e_first
+            if e > limit:
                 continue
-            place(t, row, e0)
-            added.append(piece_of[row[0]])
+            added += place_group(group)
             total += e
         return total, added
 
+    def unique_groups(piece_ids):
+        out, seen = [], set()
+        for i in piece_ids:
+            if i in seen or i not in chosen:
+                continue
+            seen.update((i, partner.get(i, i)))
+            out.append(group_of(i))
+        return out
+
     for _round in range(SWAPS):
         swapped = 0
-        for e0, t, row in good:
-            here = {piece_of[c] for c in row}
+        for group in good:
+            limit = -MIN_GAIN * len(group)
+            here = {piece_of[c] for _t, row, _e in group for c in row}
             if here == {None}:                           # all free: a plain addition
-                if delta(t, row) <= -MIN_GAIN:
-                    place(t, row, e0)
+                if group_delta(group) <= limit:
+                    place_group(group)
                     swapped += 1
                 continue
             here.discard(None)
-            if len(here) == 1:
-                i = next(iter(here))
-                if chosen[i][0] == t and chosen[i][1] == row:
-                    continue
-            old = [chosen[i] for i in here]
-            e_was = sum(o[2] for o in old)
-            size_was = sum(len(o[1]) for o in old)
+            here |= {partner[i] for i in here if i in partner}
+            if sorted((chosen[i][0], chosen[i][1]) for i in here) == sorted(
+                    (t, row) for t, row, _e in group):
+                continue
+            old = unique_groups(here)
+            e_was = sum(o[2] for g in old for o in g)
+            size_was = sum(cells_in(g) for g in old)
+            e0 = sum(o[2] for o in group)
             # only worth trying if better in isolation, in total or per voxel
-            if e0 >= e_was - 1.0 and e0 / len(row) >= e_was / size_was - 0.5:
+            if e0 >= e_was - 1.0 and e0 / cells_in(group) >= e_was / size_was - 0.5:
                 continue
             e_old = 0.0
             for i in here:                               # what the evicted pieces are worth
-                remove(i)
-            for ot, orow, oe in old:
-                e_old += delta(ot, orow)
-                place(ot, orow, oe)
-            for i in {piece_of[c] for o in old for c in o[1]}:
-                remove(i)
-            e_new = delta(t, row)
-            if e_new > -MIN_GAIN:
-                for ot, orow, oe in old:
-                    place(ot, orow, oe)
+                if i in chosen:
+                    remove(i)
+            for g in old:
+                e_old += group_delta(g)
+                place_group(g)
+            for i in {piece_of[c] for g in old for o in g for c in o[1]}:
+                if i in chosen:
+                    remove(i)
+            e_new = group_delta(group)
+            if e_new > limit:
+                for g in old:
+                    place_group(g)
                 continue
-            place(t, row, e0)
-            mine = piece_of[row[0]]
-            freed = [c for o in old for c in o[1] if label[c] is None]
+            mine = place_group(group)
+            freed = [c for g in old for o in g for c in o[1] if label[c] is None]
             e_fill, added = refill(freed)
             if e_new + e_fill < e_old - 1.0:
                 swapped += 1
                 continue
-            for i in [mine, *added]:                     # no better: put it all back
-                remove(i)
-            for ot, orow, oe in old:
-                place(ot, orow, oe)
+            for i in mine + added:                       # no better: put it all back
+                if i in chosen:
+                    remove(i)
+            for g in old:
+                place_group(g)
         if not swapped:
             break
+    # late additions: a piece that only pays off next to one placed in the last greedy pass or
+    # a swap (the pyramids under the nose wedges of a stem) is never looked at again above.
+    # Offer every free candidate beside a placed piece once more, at full cost.
+    near = {q for c in range(n) if label[c] is not None for q in nbr[c] if label[q] is None}
+    late = [(group_delta(g, hope=1.0), j) for j, g in enumerate(groups)
+            if any(c in near for _t, row, _e in g for c in row) and free(g)]
+    late.sort(key=lambda s: s[0] / size[s[1]])
+    added_late = False
+    for e_first, j in late:
+        group = groups[j]
+        limit = -MIN_GAIN * len(group)
+        if e_first > limit or not free(group):
+            continue
+        if added_late and group_delta(group, hope=1.0) > limit:
+            continue
+        place_group(group)
+        added_late = True
     # clean-up at full cost: drop any piece that, against its final neighbours, makes the
     # surface worse than the plain blocks it replaced (a lone wedge whose partner never came)
     for _round in range(3):
         bad = []
-        for i, (t, row, e0) in list(chosen.items()):
-            remove(i)
-            e = delta(t, row, hope=1.0)
-            place(t, row, e0)
+        for g in unique_groups(list(chosen)):
+            for i in {piece_of[o[1][0]] for o in g}:
+                if i in chosen:
+                    remove(i)
+            e = group_delta(g, hope=1.0)
+            new_ids = place_group(g)
             if e > 0:
-                bad.append(piece_of[row[0]])
+                bad.append(new_ids[0])
         for i in bad:
-            remove(i)
+            if i in chosen:
+                remove(i)
         if not bad:
             break
     picked = [(t, row) for t, row, _e in chosen.values()]
 
-    # 3. drop pieces in the air that touch neither the hull nor a piece that does
+    # 3. drop pieces in the air that touch neither the hull nor a piece that does. The hull
+    # is every kept solid voxel, including plain blocks: the nose wedges beside a stem block
+    # sit in air cells and touch only blocks, and were dropped as floating before.
     owner = {}
     for i, (_t, row) in enumerate(picked):
         for r in row:
             owner[cells[r]] = i
-    attached = {i for i, (_t, row) in enumerate(picked) if any(solid_l[r] for r in row)}
+
+    def on_hull(r):
+        if solid_l[r]:
+            return True
+        x, y, z = cells[r]
+        for d in DIRS:
+            q = (x + d[0] - lo[0], y + d[1] - lo[1], z + d[2] - lo[2])
+            if all(0 <= q[a] < dims[a] for a in range(3)) and kept[q]:
+                return True
+        return False
+    attached = {i for i, (_t, row) in enumerate(picked) if any(on_hull(r) for r in row)}
     stack = list(attached)
     while stack:
         i = stack.pop()
@@ -1070,14 +1255,107 @@ def _diagonal_corner_templates(cat):
     return templates
 
 
+def _mirror_candidates(candidates, cells, masks, S, colour, x2):
+    """Closeout candidates made symmetric: one on symmetric cells also changes its mirror
+    image (or is its own); one reaching across the centreline or half onto asymmetric cells
+    is dropped."""
+    cat = _catalogue()["placements"]
+    mmap = _mirror_map()
+    sym = _symmetric_cells(cells, masks, lambda v: v in S, colour, x2)
+    out = []
+    for entries, row, color in candidates:
+        on = [v in sym for v in row]
+        if not any(on):
+            out.append((entries, row, color))
+            continue
+        if not all(on):
+            continue
+        mirrored = []
+        for t, origin in entries:
+            m, k_of = mmap[t]
+            src = add(origin, tuple(int(x) for x in cat[t]["offs"][k_of[0]]))
+            mirrored.append((m, sub((x2 - src[0], src[1], src[2]),
+                                    tuple(int(x) for x in cat[m]["offs"][0]))))
+        mrow = [(x2 - v[0], v[1], v[2]) for v in row]
+        if set(mrow) == set(row):
+            if set(mirrored) == set(entries):
+                out.append((entries, row, color))
+            continue
+        if set(mrow) & set(row):
+            continue
+        out.append((tuple(entries) + tuple(mirrored), list(row) + mrow,
+                    color + color if isinstance(color, tuple) else color))
+    return out
+
+
+def _stack_candidates(candidates, parts, owner, allowed, fixed, masks, colour):
+    """Single-part closeout candidates repeated over every layer of the stack they replace.
+
+    A hull side is the same part repeated layer over layer. Changing one layer alone leaves
+    seams with the layers above and below, so no single change ever pays off: on "Slim
+    Speedboat" (2026-10-21) a stack of 1x2 nose wedges that a builder makes a block and a 1x1
+    wedge scored better as a whole but was never tried. Each layer keeps its own colour.
+    """
+    cat = _catalogue()["placements"]
+    layers = {}
+    for part in parts.values():
+        if part.piece.d != BLOCK.d:
+            layers.setdefault((part.piece.d, part.Q, part.origin[0], part.origin[2]), set()).add(part.origin[1])
+    stack_of = {}
+    for (d, Q, x, z), ys in layers.items():
+        for y in ys:
+            lo_y, hi_y = y, y
+            while lo_y - 1 in ys:
+                lo_y -= 1
+            while hi_y + 1 in ys:
+                hi_y += 1
+            if hi_y > lo_y:
+                stack_of[(d, Q, x, y, z)] = (lo_y, hi_y)
+    out, seen = [], set()
+    for entries, row, _color in candidates:
+        if len(entries) != 1:
+            continue
+        hit = next(((p.origin[1], s) for v in row if (i := owner.get(v)) is not None
+                    for p in (parts[i],)
+                    if (s := stack_of.get((p.piece.d, p.Q, *p.origin)))), None)
+        if hit is None:
+            continue
+        y0, (lo_y, hi_y) = hit
+        t, origin = entries[0]
+        offs = [tuple(int(a) for a in o) for o in cat[t]["offs"]]
+        vols = [int(m) for m in cat[t]["vol"]]
+        stack, cells_all, colours = [], [], []
+        for y in range(lo_y, hi_y + 1):
+            o = (origin[0], origin[1] + y - y0, origin[2])
+            layer = [add(o, off) for off in offs]
+            if any(v not in allowed or v in fixed for v in layer):
+                break
+            if any((masks[v] ^ m).bit_count() > CELL_MAX or (not masks[v] and m)
+                   or (v not in owner and masks[v] == FULL_MASK) for v, m in zip(layer, vols)):
+                break
+            shades = {colour(v) for v in layer if masks[v]}
+            if len(shades) != 1:
+                break
+            stack.append((t, o))
+            cells_all += layer
+            colours.append(next(iter(shades)))
+        else:
+            key = tuple(stack)
+            if len(stack) > 1 and key not in seen and len(set(cells_all)) == len(cells_all):
+                seen.add(key)
+                out.append((key, cells_all, tuple(colours)))
+    return out
+
+
 def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=frozenset(),
-                      diagnostics=None):
+                      diagnostics=None, mirror_x2=None):
     """Refit complete parts around a crease, including wedge ends facing empty air.
 
     A seam count between occupied footprints misses a notch at a wedge's empty end.
     Compare exposed face bits to the continuous target instead. Changes must improve
     both sampled volume and exposed-face error locally; full/empty cells and protected
-    floors are never used as new corner material.
+    floors are never used as new corner material. With `mirror_x2`, every change on the
+    symmetric part of the shape is made on both sides at once (see fit_pieces).
     """
     M = np.array([masks[v] for v in cells], dtype=np.uint64)
     allowed = set(cells)
@@ -1160,10 +1438,9 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
         p = actual(v, replacement)
         return part_face(p.piece.d, p.Q, sub(v, p.origin), di) if p else 0
 
-    def errors(changed, replacement):
+    def volumes(changed, replacement):
         volume = 0
         partial_volume = 0
-        joints = set()
         for v in changed:
             p = actual(v, replacement)
             m = material(p.piece.d, p.Q, sub(v, p.origin)) if p else 0
@@ -1172,9 +1449,12 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
             volume += wrong
             if 0 < target < FULL_MASK:
                 partial_volume += wrong
-            for di, d in enumerate(DIRS):
-                q = add(v, d)
-                joints.add((v, di) if di % 2 == 0 else (q, di ^ 1))
+        return volume, partial_volume
+
+    def errors(changed, replacement, sampled=None):
+        volume, partial_volume = sampled or volumes(changed, replacement)
+        joints = {(v, di) if di % 2 == 0 else (add(v, d), di ^ 1)
+                  for v in changed for di, d in enumerate(DIRS)}
         steps = 0
         seams = 0
         for v, di in joints:
@@ -1275,6 +1555,9 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
             if result is not None:
                 candidates.append(result)
                 valid_chains += 1
+    candidates += _stack_candidates(candidates, parts, owner, allowed, fixed, masks, colour)
+    if mirror_x2 is not None:
+        candidates = _mirror_candidates(candidates, cells, masks, S, colour, mirror_x2)
     if diagnostics is not None:
         diagnostics.update({"run_sites": len(run_sites), "run_candidates": valid_chains})
     changes = 0
@@ -1286,8 +1569,9 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
             if any(v in fixed or v not in allowed for i in here for v in parts[i].voxels()):
                 continue
             changed = set(row) | {v for i in here for v in parts[i].voxels()}
-            new_parts = [Placed(cat[t]["piece"], origin, cat[t]["Q"], color)
-                         for t, origin in entries]
+            colours = color if isinstance(color, tuple) else (color,) * len(entries)
+            new_parts = [Placed(cat[t]["piece"], origin, cat[t]["Q"], c)
+                         for (t, origin), c in zip(entries, colours)]
             replacement = {v: (Placed(BLOCK, v, color=colour(v)) if v in S else None)
                            for v in changed}
             for new in new_parts:
@@ -1306,7 +1590,12 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
                                 and (w, d) not in full_cache[key]):
                             replacement[v] = Placed(BLOCK, v, color=colour(v))
                             changed.add(v)
-            before, after = errors(changed, {}), errors(changed, replacement)
+            # sampled volume first: most candidates fail on it, and joints cost far more
+            vol_before, vol_after = volumes(changed, {}), volumes(changed, replacement)
+            if vol_after[0] > vol_before[0] or vol_after[1] > vol_before[1]:
+                continue
+            before = errors(changed, {}, vol_before)
+            after = errors(changed, replacement, vol_after)
             if (after[0] <= before[0] and after[1] < before[1]
                     and after[2] <= before[2] and after[3] <= before[3]):
                 scored.append((1.5 * (after[0] - before[0]) + 4 * (after[1] - before[1]),
@@ -1342,10 +1631,12 @@ def _corner_closeouts(placed, S, cells, masks, inside, fixed, colour, removed=fr
 
 def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, region=None,
               skin=None, extra=None, carve=frozenset(), sample_mask=None, fixed=frozenset(),
-              diagnostics=None):
+              diagnostics=None, symmetric=True):
     """Skin of S as pieces. `extra` adds interior blocks {voxel: colour}; `carve` opens holes
-    in the skin (doors, hatches)."""
+    in the skin (doors, hatches). With `symmetric`, a hull that is mirror-symmetric gets a
+    mirror-symmetric fit (see fit_pieces)."""
     source_skin = skin
+    mirror_x2 = mirror_plane(S, region) if symmetric and smoothing != "blocks" else None
     if smoothing == "wedges_v2" and sample_mask is not None:
         sample_mask = cache(sample_mask)
     skin = set(skin if skin is not None else shell(S))
@@ -1361,7 +1652,7 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
     protected = set(fixed) | set(extra)
     protected |= {add(v, d) for v in extra for d in DIRS if add(v, d) in S}
     plan = (fit_pieces(S, inside, removed | set(carve), sample_mask, protected, color_of,
-                       refined=smoothing == "wedges_v2")
+                       refined=smoothing == "wedges_v2", mirror_x2=mirror_x2)
             if smoothing in ("wedges", "wedges_v2") else {})
     plan = {c: e for c, e in plan.items()
             if not any(add(e[1], apply(e[2], f)) in carve for f in e[0].footprint)}
@@ -1402,7 +1693,7 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
         done.add(v)
     if smoothing == "wedges_v2":
         original = to_pieces(S, color_of, inside, "wedges", open_deck, region, source_skin,
-                             extra, carve, sample_mask, fixed)
+                             extra, carve, sample_mask, fixed, symmetric=symmetric)
         cells, masks = _cells(S, inside, removed | set(carve), sample_mask, protected)
         old_metrics, new_metrics = _fit_metrics(original, cells, masks), _fit_metrics(placed, cells, masks)
         use_refined = _prefer_refined(old_metrics, new_metrics)
@@ -1414,7 +1705,8 @@ def to_pieces(S, color_of, inside=None, smoothing="blocks", open_deck=False, reg
         before = new_metrics if use_refined else old_metrics
         corner_diagnostics = {}
         repaired, changes = _corner_closeouts(selected, S, cells, masks, inside, protected,
-                                              color_of, removed | set(carve), corner_diagnostics)
+                                              color_of, removed | set(carve), corner_diagnostics,
+                                              mirror_x2=mirror_x2)
         after = _fit_metrics(repaired, cells, masks) if changes else before
         accept = (changes > 0 and after["wrong_samples"] <= before["wrong_samples"]
                   and after["mismatched_joints"] <= before["mismatched_joints"])

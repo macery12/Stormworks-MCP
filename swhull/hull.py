@@ -937,6 +937,7 @@ def build_solid(spec):
             for o in shape.offsets:
                 for x in range(max(lo[0], math.ceil(o - w - 1e-6)), min(hi[0], math.floor(o + w + 1e-6)) + 1):
                     region[(x, y, z)] = "hull"
+    _trim_stem_slivers(shape, region)
     extras = []                       # bulb and skeg candidates, tested with the full hull test
     if shape.bulb:
         b = shape.bulb
@@ -961,6 +962,36 @@ def build_solid(spec):
             if v not in region:
                 region[v] = tag
     return shape, set(region), region
+
+
+_GRID = (-0.375, -0.125, 0.125, 0.375)
+
+
+def _trim_stem_slivers(shape, region):
+    """Drop the one-block-wide, less-than-half-full voxel at the very end of a hull row.
+
+    A sharp stem (or a pointed stern) on a hull an odd number of blocks wide runs down the
+    middle of the centre column. A voxel is solid when its centre is inside, so the last
+    voxel of the row is solid even where the true stem only reaches a third of the way into
+    it. Nothing can be placed there that is both symmetric and close to the shape: a block,
+    or a fore/aft wedge, pokes out of the bow as a one-wide stub (seen on "Slim Speedboat",
+    2026-10-20). Builders end the bow a block earlier, on a nose of wedge, block, wedge.
+    """
+    for _ in range(4):
+        trim = []
+        for (x, y, z), tag in region.items():
+            if tag != "hull" or (x - 1, y, z) in region or (x + 1, y, z) in region:
+                continue
+            if (x, y, z + 1) in region and (x, y, z - 1) in region:
+                continue
+            inside = sum(shape.in_hull(x + dx, y + dy + 0.02, z + dz - 0.03)
+                         for dx in _GRID for dy in _GRID for dz in _GRID)
+            if inside < 32:
+                trim.append((x, y, z))
+        if not trim:
+            return
+        for v in trim:
+            del region[v]
 
 
 def box_voxels(box, lo=None, hi=None):

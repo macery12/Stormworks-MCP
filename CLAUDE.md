@@ -23,6 +23,9 @@ These were each found by loading generated files in Stormworks; tests guard them
 - **The game's axes are left-handed.** The renderers negate x for display; keep that when
   adding views.
 - Never cut the hull skin below the main deck (doors and hatches in `interior.py` check this).
+- **A symmetric hull gets a mirror-image skin**, and a sharp stem ends on a three-wide nose
+  (wedge, block, wedge), never a one-wide stub (from the player's hand fix of "Slim
+  Speedboat"; `tests/test_symmetry.py`).
 
 ## Testing reality
 

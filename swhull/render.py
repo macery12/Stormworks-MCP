@@ -269,10 +269,11 @@ def _ruler_axes(ruler, right, up, cx, cy, scale, w, h, ox, oy):
 
 
 def _draw_view(faces, cam, w, h, title, scale=None, grid=False, zoom=1.0, focus=None, labels=(),
-               ruler=None, segments=(), lit=None):
-    """lit: (raster.Scene, backend, supersample) to light the faces; None paints them flat."""
+               ruler=None, segments=(), lit=None, background=None):
+    """lit: (raster.Scene, backend, supersample) to light the faces; None paints them flat.
+    background: an RGB image of size (w, h) to draw on instead of the plain BG colour."""
     d, right, up = cam
-    img = Image.new("RGB", (w, h), BG)
+    img = background.copy() if background is not None else Image.new("RGB", (w, h), BG)
     dr = ImageDraw.Draw(img)
     if lit is None:
         vis = [(pts, col, cell) for pts, n, col, cell in faces if _dot(n, d) < -1e-6]
@@ -421,6 +422,37 @@ def render_view(placed, yaw=35.0, pitch=25.0, zoom=1.0, focus=None, title="",
                         zoom=zoom, focus=target, ruler=ruler, labels=labels, segments=segments, lit=lit)
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+# The game's own vehicle thumbnails (measured from ones it saved, 2026-10-21): 512 x 512 RGBA,
+# opaque, #101010 behind three #1E1E1E chevron bands, the vehicle seen from above at three
+# quarters. The game only writes one when the player saves at a workbench, so vehicles saved
+# by this tool showed a blank tile in the Load menu.
+THUMB_SIZE = 512
+THUMB_BG = (16, 16, 16)
+THUMB_BAND = (30, 30, 30)
+
+
+def _thumbnail_background(size=THUMB_SIZE):
+    img = Image.new("RGB", (size, size), THUMB_BG)
+    dr = ImageDraw.Draw(img)
+    k = size / THUMB_SIZE
+    for o in (0, 164, 328):
+        dr.polygon([(32 * k, (62 + o) * k), (256 * k, (19 + o) * k), (477 * k, (64 + o) * k),
+                    (477 * k, (152 + o) * k), (256 * k, (108 + o) * k), (32 * k, (151 + o) * k)],
+                   fill=THUMB_BAND)
+    return img
+
+
+def render_thumbnail(placed, renderer=None, size=THUMB_SIZE):
+    """PNG for the game's Load menu, saved beside the vehicle XML with the same name."""
+    faces, lit = _scene(placed, renderer, "closed")
+    # bow toward the lower right, seen from above on the same side as the game's own
+    img, _ = _draw_view(faces, _camera((1.0, -1.0, -1.1)), size, size, "", zoom=0.72, lit=lit,
+                        background=_thumbnail_background(size))
+    buf = io.BytesIO()
+    img.convert("RGBA").save(buf, "PNG", optimize=True)
     return buf.getvalue()
 
 

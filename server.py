@@ -269,7 +269,8 @@ def _save_target(name, record, overwrite):
     return target, None
 
 
-def _write_vehicle(target, xml, previous):
+def _write_vehicle(target, xml, previous, thumbnail=None):
+    """Write the vehicle XML, and its Load-menu thumbnail (same name, .png) when given."""
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -284,6 +285,31 @@ def _write_vehicle(target, xml, previous):
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+    if thumbnail:
+        _write_thumbnail(target.with_suffix(".png"), thumbnail)
+
+
+def _write_thumbnail(path, png):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, suffix=".tmp", delete=False) as f:
+            temporary = Path(f.name)
+            f.write(png)
+        os.replace(temporary, path)
+    except OSError:
+        pass  # the vehicle is saved; the game shows a blank tile without its thumbnail
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+async def _thumbnail(xml):
+    """The game only draws a thumbnail when the player saves at a workbench, so vehicles
+    written here had a blank tile in the Load menu. A failed drawing never stops a save."""
+    try:
+        return await run_job("thumbnail", xml, timeout=120)
+    except ValueError:
+        return None
 
 
 def _title(preset, design):
@@ -440,8 +466,9 @@ async def save_hull(name: str, spec: dict[str, Any] | None = None, preset: str |
     record = {"preset": preset, "vehicle": True, "spec": full}
     target, stamp = _save_target(name, record, overwrite)
     xml, parts, text = await run_job("vehicle_xml", full)
+    thumbnail = await _thumbnail(xml)
     with DESIGN_LOCK:
-        _write_vehicle(target, xml, stamp)
+        _write_vehicle(target, xml, stamp, thumbnail)
         previous = _read_design(name) if _design_path(name).exists() else {}
         _atomic_design(name, {**record, "generation": previous.get("generation", 0) + 1})
     return (f"Saved {parts} parts to {target}\n{text}\n"
@@ -989,13 +1016,14 @@ async def prepare_vehicle_validation(name: str, design: str, overwrite: bool = F
     record = _read_design(design)
     target, stamp = _save_target(name, record, overwrite)
     xml, report = await run_job("prepare_validation", record, design, name, str(target))
+    thumbnail = await _thumbnail(xml)
     with DESIGN_LOCK:
         if _revision(_read_design(design)) != _revision(record):
             raise ValueError("draft changed while exporting; prepare validation again")
         path = _validation_path(report["run_id"])
         if path.exists():
             raise ValueError("validation run already exists; get_vehicle_validation to review it")
-        _write_vehicle(target, xml, stamp)
+        _write_vehicle(target, xml, stamp, thumbnail)
         _atomic_design(name, {**record, "vehicle": True})
         _write_validation(report)
     return report
@@ -1061,11 +1089,12 @@ async def save_vehicle(name: str, design: str, overwrite: bool = False) -> str:
     record = _read_design(design)
     target, stamp = _save_target(name, record, overwrite)
     xml, count, note = await run_job("export_draft", record)
+    thumbnail = await _thumbnail(xml)
     # Recheck after the worker to avoid an external file created while building.
     with DESIGN_LOCK:
         if _revision(_read_design(design)) != _revision(record):
             raise ValueError("draft changed while building; save the new revision")
-        _write_vehicle(target, xml, stamp)
+        _write_vehicle(target, xml, stamp, thumbnail)
         _atomic_design(name, {**record, "vehicle": True})
     return f"Saved {count} parts to {target}\n{note}"
 

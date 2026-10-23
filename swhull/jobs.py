@@ -16,8 +16,8 @@ import time
 import traceback
 
 from .build import build, summary
-from .render import VEHICLE_RULER, design_ruler, render_interior, render_png, render_view
-from .vehicle import load_placed, to_xml
+from .render import VEHICLE_RULER, design_ruler, render_interior, render_png, render_thumbnail, render_view
+from .vehicle import load_placed, placed_from_text, to_xml
 from .drafts import describe, edited, export, materialize
 from .editing import query, revision
 
@@ -86,6 +86,14 @@ def vehicle_xml(full):
     from .tanks import ensure_valid  # noqa: PLC0415
     ensure_valid(info)
     return to_xml(placed), len(placed), summary(full, placed, info)
+
+
+def thumbnail(xml):
+    """Load-menu PNG for a saved vehicle, drawn from the exact XML being written."""
+    placed, _other = placed_from_text(xml)
+    if not placed:
+        raise ValueError("no parts to draw")
+    return render_thumbnail(placed)
 
 
 def query_draft(record, selector, offset, limit):
@@ -388,7 +396,8 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 land_parts, land_library, land_layout, land_draft, viewer_geometry,
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
-                                prepare_validation, diagnostic_geometry, study_references, score_vehicle)}
+                                prepare_validation, diagnostic_geometry, study_references, score_vehicle,
+                                thumbnail)}
 
 
 def _watch_parent():

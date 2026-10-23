@@ -215,6 +215,15 @@ def _build_base(spec):
         return tag
 
     def color_of(v):
+        if v not in solid and (v[0], v[1] - 1, v[2]) not in solid:
+            # Air beside the hull side (a slope piece reaching past the voxels) takes the colour
+            # of the hull it rests against. By the deck rule below it would be deck coloured
+            # one layer under the deck, and a wedge spanning it and a topsides voxel was refused
+            # for mixing colours, leaving a notch in the side under the deck edge.
+            for d in ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)):
+                n = (v[0] + d[0], v[1], v[2] + d[2])
+                if n in solid:
+                    return color_of(n)
         tag = tag_of(v)
         if tag != "hull":
             b = boxes[int(tag[3:])]

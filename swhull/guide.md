@@ -19,7 +19,9 @@ Use `get_runtime_status` if game parts are missing or the save location is uncle
    brief: silhouette, bow shape, sheer line, proportions, colours. Iterate 2-4 times.
 4. Offer the player 2-3 distinct variations when they are unsure. Different archetypes
    mixed together is where the interesting boats come from.
-5. `save_hull` with a name. In game: open a workbench, press Load, pick the name.
+5. `save_hull` with a name. In game: open a workbench, press Load, pick the name. Saves also
+   write the Load-menu thumbnail (`<name>.png`), which the game itself only draws when the
+   player saves at a workbench.
 
 ### Big designs: store once, then send patches
 

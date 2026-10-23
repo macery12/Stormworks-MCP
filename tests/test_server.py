@@ -128,6 +128,8 @@ def test_save_and_overwrite_protection(dirs):
     vehicles, _ = dirs
     call(server.save_hull, "test boat", preset="rowboat")
     assert (vehicles / "test boat.xml").is_file()
+    # the Load menu thumbnail the game would otherwise leave blank
+    assert (vehicles / "test boat.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert server.list_designs() == ["test boat"]
     with pytest.raises(ToolError, match="overwrite"):
         call(server.save_hull, "test boat", preset="rowboat")
