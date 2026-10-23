@@ -20,7 +20,8 @@ MAX_ENTRIES = 20
 
 
 def cache_dir():
-    return Path(os.environ.get("SW_BUILD_CACHE_DIR", Path(tempfile.gettempdir()) / "stormworks-mcp-builds"))
+    # An empty value means unset: Path("") is the working folder, which filled repos with cache files.
+    return Path(os.environ.get("SW_BUILD_CACHE_DIR") or Path(tempfile.gettempdir()) / "stormworks-mcp-builds")
 
 
 def key(spec):
