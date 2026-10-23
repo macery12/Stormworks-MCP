@@ -100,14 +100,6 @@ and stores the set locally. Mark hovercraft, aircraft and unusual builds `kind: 
 references of the same kind and gives a hint for each metric outside their range. Use it after
 a preview to choose the next improvement; a miss is where to look, not proof of a fault.
 
-When you encounter a bug, confusing behavior, repeated placement failure or a missing capability,
-use **complaint(title, description, ...)** to save a local report. Include category/severity,
-the affected tool, expected/actual behavior, reproduction steps and relevant tool arguments/errors
-in context. Optional design, vehicle and definition references identify the affected parts;
-suggestion records a possible improvement. Reports include structured JSON and readable Markdown.
-Use **list_complaints** to search/filter previous reports and **get_complaint(id)** for full evidence.
-Report observed problems accurately; recording one does not fix it or publish an external issue.
-
 For a single block or region: **query_parts(design, select)** returns stable ids, footprints
 and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
 mirror, repeat and configure batches. Configure edits supported non-geometric engine,

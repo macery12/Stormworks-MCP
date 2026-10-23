@@ -44,7 +44,7 @@ async def exercise(command, args):
     with tempfile.TemporaryDirectory(prefix="stormworks-package-test-") as folder:
         temporary = Path(folder)
         env = {**os.environ, "SW_VEHICLES_DIR": str(temporary / "vehicles"),
-               "SW_DESIGNS_DIR": str(temporary / "designs"), "SW_COMPLAINTS_DIR": str(temporary / "complaints"),
+               "SW_DESIGNS_DIR": str(temporary / "designs"),
                "SW_BUILD_CACHE_DIR": str(temporary / "cache"), "SW_DEFINITIONS_DIR": str(temporary / "no-game"),
                "SW_MCP_RUNTIME_DIR": str(temporary / "runtime"), "SW_MCP_PORT": str(available_port())}
         # Prove configuration targets the actual executable, also when invoked from another cwd.

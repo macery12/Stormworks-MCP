@@ -257,7 +257,6 @@ one it did create needs `overwrite=true`.
 | Part catalogue | `search_parts`, `get_part_definition`, `get_part_orientation` | [Staged builder](docs/staged-builder.md) |
 | Inspection and analysis | `inspect_view`, `open_in_viewer`, `list_game_vehicles`, `preview_game_vehicle`, `analyze_vehicle`, `analyze_hull`, `suggest_hull_blocks` | [Hull smoothing](docs/hull-smoothing.md) |
 | Reference builds | `study_references`, `score_vehicle` | [v0.2 plan](docs/v0.2-plan.md) |
-| Issue reports | `complaint`, `list_complaints`, `get_complaint` | Saved locally as JSON and Markdown |
 
 ## Configuration
 
@@ -272,7 +271,6 @@ environment variables before starting the desktop app:
 | `SW_WORKSHOP_DIR` | Found through your Steam libraries | Installed workshop vehicles used as references. |
 | `SW_DESIGNS_DIR` | `%APPDATA%\stormworks-hull-mcp\designs` | Stored designs and drafts. |
 | `SW_REFERENCES_DIR` | `%APPDATA%\stormworks-hull-mcp\reference_sets` | Stored reference-set studies for `score_vehicle`. |
-| `SW_COMPLAINTS_DIR` | `%APPDATA%\stormworks-hull-mcp\complaints` | Local JSON and Markdown issue reports. |
 | `SW_TOOL_TIMEOUT` | `300` | Seconds a build or render may run before the server stops it. |
 | `SW_BUILD_CACHE` | `1` | Set to `0` to turn off geometry caching. |
 | `SW_RENDERER` | `auto` | Preview lighting: `auto` (GPU, else CPU), `gpu`, `cpu`, or `flat` (unlit, fastest). |

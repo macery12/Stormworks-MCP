@@ -33,7 +33,7 @@ def test_tools_registered():
             "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
             "undo_edits", "preview_vehicle", "save_vehicle", "check_seal",
             "get_part_orientation", "analyze_vehicle", "get_calibration_observations",
-            "complaint", "list_complaints", "get_complaint", "analyze_hull", "suggest_hull_blocks",
+            "analyze_hull", "suggest_hull_blocks",
             "land_vehicle_guide", "search_land_parts", "find_land_vehicles", "analyze_land_vehicle",
             "create_land_vehicle", "query_connections", "edit_connections", "route_connections",
             "preflight_vehicle", "study_references", "score_vehicle"} <= names
@@ -54,8 +54,6 @@ def test_every_tool_documents_its_behaviour_and_parameters():
 
 def test_choices_are_exposed_in_tool_schemas():
     tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
-    assert "analysis" in tools["complaint"].parameters["properties"]["category"]["enum"]
-    assert tools["complaint"].parameters["properties"]["severity"]["enum"] == ["low", "medium", "high", "blocker"]
     assert {"edits", "topics"} <= set(tools["hull_design_guide"].parameters["properties"]["topic"]["enum"])
     assert tools["preview_vehicle"].parameters["properties"]["door_state"]["enum"] == ["closed", "open"]
 

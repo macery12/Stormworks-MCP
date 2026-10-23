@@ -139,10 +139,7 @@ remain in place. Use check_seal after edits, including explicit seed points for 
 Unknown sealing geometry is indeterminate. Invalid custom tanks cannot be exported.
 Use search_parts/get_part_definition for installed footprints/surfaces and seal coverage.
 Heavy tools use cancellable workers and a
-shared geometry cache. Read docs/staged-builder.md through the design guide for examples.
-Use complaint to record encountered bugs, confusing behavior or missing capabilities with
-expected/actual behavior, reproduction steps and relevant tool arguments/errors. The report is
-saved locally for review; reporting an issue does not fix it. Continue useful work where possible."""
+shared geometry cache. Read docs/staged-builder.md through the design guide for examples."""
 
 mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS, version=__version__)
 
@@ -606,59 +603,6 @@ def get_calibration_observations(definition: Annotated[str, Field(description=(
     from swhull.calibration import observations  # noqa: PLC0415
     directory = os.environ.get("SW_CALIBRATION_DIR", str(Path(__file__).parent / "out/advanced-suite/calibration"))
     return observations(definition, directory)
-
-
-@mcp.tool(annotations=CREATE)
-@_user_errors
-def complaint(title: Annotated[str, Field(description="One-line summary of the problem.")],
-              description: Annotated[str, Field(description="What happened and why it matters.")],
-              category: Annotated[Literal["placement", "rotation", "smoothing", "connections", "definitions",
-                                          "performance", "tool_error", "usability", "missing_feature",
-                                          "analysis", "other"], Field(description="Area of the problem.")] = "other",
-              severity: Annotated[Literal["low", "medium", "high", "blocker"], Field(description=(
-                  "blocker = the task cannot continue."))] = "medium",
-              tool: Annotated[str, Field(description="Name of the tool that failed, if any.")] = "",
-              expected: Annotated[str, Field(description="What should have happened.")] = "",
-              actual: Annotated[str, Field(description="What happened instead, with error text.")] = "",
-              steps: Annotated[list[str] | None, Field(description="Steps that reproduce it.")] = None,
-              context: Annotated[dict[str, Any] | None, Field(description=(
-                  "Failing tool arguments or other data needed to reproduce it."))] = None,
-              design: Annotated[str, Field(description="Affected stored draft, if any.")] = "",
-              vehicle: Annotated[str, Field(description="Affected saved vehicle, if any.")] = "",
-              definition: Annotated[str, Field(description="Affected part definition id, if any.")] = "",
-              suggestion: Annotated[str, Field(description="A suggested fix, if known.")] = "") -> dict[str, Any]:
-    """Record a problem with these tools, or a missing capability, as local JSON and Markdown
-    reports for the developer. Use it when a tool errors, behaves unexpectedly or cannot do what
-    the player needs, then carry on with the work: it fixes nothing and publishes nothing
-    outside this computer. Returns the report id and file paths; list_complaints and
-    get_complaint read reports back."""
-    from swhull.complaints import create  # noqa: PLC0415
-    return create(title, description, category, severity, tool, expected, actual, steps, context,
-                  design, vehicle, definition, suggestion)
-
-
-@mcp.tool(annotations=READ)
-@_user_errors
-def list_complaints(search: Annotated[str, Field(description="Text anywhere in the report; empty matches all.")] = "",
-                    category: Annotated[str, Field(description="Only this category (see complaint); empty for all.")] = "",
-                    severity: Annotated[str, Field(description="Only low, medium, high or blocker; empty for all.")] = "",
-                    offset: Offset = 0, limit: Limit(200) = 50) -> dict[str, Any]:
-    """List complaints recorded with `complaint`, newest first, as summary rows (id, title,
-    date, category, severity, tool) with paging. Use get_complaint with an id for the full
-    report. Read-only."""
-    from swhull.complaints import catalogue  # noqa: PLC0415
-    return catalogue(search, category, severity, offset, limit)
-
-
-@mcp.tool(annotations=READ)
-@_user_errors
-def get_complaint(complaint_id: Annotated[str, Field(description=(
-        "Report id returned by complaint or listed by list_complaints."))]) -> dict[str, Any]:
-    """Read one recorded complaint in full: description, failing tool and arguments, expected
-    and actual behaviour, reproduction steps, and the Markdown report. Read-only; fails when the
-    id is unknown."""
-    from swhull.complaints import read  # noqa: PLC0415
-    return read(complaint_id)
 
 
 @mcp.tool(annotations=READ)

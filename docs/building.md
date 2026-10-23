@@ -80,7 +80,7 @@ cooling choices are radiators.
 | Ship fits the editor but truncates on spawn | Read the part-count warning; the suspected 131,072-component spawn cap needs further in-game confirmation |
 | Tool cancelled or timed out | Workers stop; reduce size/detail, preview blocks first, or increase the client timeout and `SW_TOOL_TIMEOUT` together |
 | Cannot place installed components | Call `get_runtime_status`; check `SW_GAME_DIR` or `SW_DEFINITIONS_DIR` |
-| Geometry passes but vehicle fails in game | Record exact expected/actual behavior using `complaint`, with arguments and an in-game reproduction |
+| Geometry passes but vehicle fails in game | Note the exact expected and actual behavior, the tool arguments and an in-game reproduction |
 
 [In-game testing](in-game-testing.md) distinguishes verified behavior from geometric checks.
 Tests do not simulate Stormworks physics, buoyancy, fluid flow or working controls.

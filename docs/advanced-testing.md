@@ -143,32 +143,3 @@ results and stale definition hashes. Set `SW_CALIBRATION_DIR` when keeping exhib
 Observations do not automatically change placement rules: reproduce a failure, correct the model,
 and add a regression before accepting the new behavior. A fully working boat propulsion system
 still needs explicit routing, wiring, controls and game verification.
-
-## Report friction and failures
-
-The MCP AI can call `complaint` when it hits a bug, confusing behavior, a missing feature or an
-unhelpful tool result. Only `title` and `description` are required. An actionable report includes
-the affected tool, expected/actual behavior, error messages, reproduction steps and relevant
-arguments in `context`:
-
-```json
-{"title": "Fin rudder placement cannot find a mount",
- "description": "A transom has free space but the requested fin was skipped.",
- "category": "placement", "severity": "high", "tool": "preview_hull",
- "expected": "Base against the transom, blade extending aft",
- "actual": "The summary reports no fitting mounted location",
- "steps": ["Request rudder_surface in the propulsion stage", "Preview the vehicle"],
- "definition": "rudder_surface", "design": "test boat",
- "context": {"orientation": {"mount_normal": [0,0,1], "span_axis": [0,1,0]}}}
-```
-
-Each report gets a unique ID, UTC timestamp, runtime details, structured JSON and a readable
-Markdown file. Reports live in `%APPDATA%/stormworks-hull-mcp/complaints` on Windows, or
-`~/.local/share/stormworks-hull-mcp/complaints` without APPDATA. `SW_COMPLAINTS_DIR` overrides
-the location. References are recorded as supplied, so issues can also describe missing designs
-or unsupported parts; reports do not automatically attach vehicle files or saved designs.
-
-`list_complaints(search, category, severity, offset, limit)` returns newest-first summaries.
-`get_complaint(complaint_id)` returns full evidence and the Markdown report. Creation returns
-the ID and both file paths. Reports stay local and can guide a reproducible test or fix; they
-do not automatically create a GitHub issue or change vehicle geometry.
