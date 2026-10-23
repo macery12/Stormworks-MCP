@@ -14,11 +14,12 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
+from pydantic import Field
 
 from swhull.benches import describe as describe_benches
 from swhull._version import __version__
@@ -33,6 +34,10 @@ from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyRepo
                                  ConnectionBatch, DiagnosticReport, EditBatch, PreflightReport,
                                  ReferenceVehicle, RepairPlan, RouteBatch, Selection, plain)
 from swhull.study import ranges as reference_ranges
+from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, DoorState, Draft,
+                                Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName, Overwrite,
+                                Patch, Pitch, Preset, RendererChoice, Revision, Source, Spec, SpecPath,
+                                VehicleName, Yaw, Zoom)
 from swhull.validation import Observation, ValidationRun
 
 HERE = Path(__file__).resolve().parent
@@ -140,7 +145,6 @@ expected/actual behavior, reproduction steps and relevant tool arguments/errors.
 saved locally for review; reporting an issue does not fix it. Continue useful work where possible."""
 
 mcp = MCPServer("stormworks-hulls", instructions=INSTRUCTIONS, version=__version__)
-Renderer = Literal["auto", "gpu", "cpu", "flat"]
 
 
 def _user_errors(fn):
@@ -342,12 +346,19 @@ def _reference_path(name, source="vehicles"):
     raise ValueError(f"workshop vehicle {name} not installed (set SW_WORKSHOP_DIR if needed)")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def hull_design_guide(topic: Literal["full", "workflow", "units", "spec", "interior", "archetypes", "style",
-                                    "limits", "staged", "building", "testing", "smoothing", "edits", "topics"] = "full") -> str:
-    """Read first. Topics: full, workflow, units, spec, interior, archetypes, style, limits,
-    staged, building, testing, smoothing. Focused topics avoid resending the entire spec reference."""
+def hull_design_guide(topic: Annotated[Literal["full", "workflow", "units", "spec", "interior", "archetypes", "style",
+                                               "limits", "staged", "building", "testing", "smoothing", "edits",
+                                               "topics"], Field(description=(
+        "Section to return: full (everything), workflow (start here), units, spec (every field), "
+        "interior, archetypes (starting proportions), style, limits, staged (staged builder), "
+        "building and edits (building step by step, exact edits), testing (what is verified in game), "
+        "smoothing (wedge skins), topics (list the topics)."))] = "full") -> str:
+    """Return the boat design guide as Markdown: workflow, units, every spec field, style rules
+    and lessons from in-game testing. Read topic="workflow" before designing a boat, then fetch
+    focused topics as needed instead of resending the full guide. Road and land vehicles have
+    their own guide (land_vehicle_guide). Read-only."""
     if topic == "full":
         return GUIDE
     if topic == "topics":
@@ -366,18 +377,24 @@ def hull_design_guide(topic: Literal["full", "workflow", "units", "spec", "inter
     return f"## {headings[topic]}\n{section}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def get_runtime_status() -> dict[str, Any]:
-    """Diagnose version, runtime paths, game definitions and timeout without writing files."""
+    """Report the server version and the paths it uses: Stormworks vehicles folder, game part
+    definitions, stored designs, build cache, and the tool timeout, with notes on anything missing.
+    Use it when a tool cannot find the game, its parts or the player's vehicles. Read-only; it
+    never creates folders."""
     from swhull.diagnostics import runtime_status  # noqa: PLC0415
     return runtime_status()
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def list_hull_presets() -> str:
-    """List built-in hull archetypes with a one-line description and main dimensions."""
+    """List the built-in boat hull presets: name, one-line description, length x beam x depth
+    in metres, and whether it has an interior. Pass a name as `preset` to preview_hull or
+    save_hull, or to get_hull_spec to see every value it sets. Stored designs are listed by
+    list_designs and the player's saved vehicles by list_game_vehicles. Read-only."""
     lines = []
     for name, p in PRESETS.items():
         s = p["spec"]
@@ -386,82 +403,79 @@ def list_hull_presets() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def list_workbenches() -> str:
-    """Bench size keywords (S, M, L, XL, XXL, MAX) with their size in metres and the edit areas
-    in the player's game (including workbench mods) that are at least that big. Set one as
-    `bench` in a spec; preview summaries then say whether the design fits and by how much not."""
+    """List the workbench size keywords (S, M, L, XL, XXL, MAX) with each size in metres and
+    the edit areas in the player's game, including workbench mods, that are at least that big.
+    Ask the player which bench they will build at, then set it as `bench` in the spec; preview
+    summaries then say whether the design fits and by how much it misses. Read-only."""
     return describe_benches()
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_hull_spec(preset: str | None = None) -> dict[str, Any]:
-    """Full resolved spec (every parameter) for a preset, or the defaults. Use as a starting point."""
+def get_hull_spec(preset: Annotated[str | None, Field(description=(
+        "Preset name from list_hull_presets; omit for the plain defaults."))] = None) -> dict[str, Any]:
+    """Return the fully resolved hull spec, every parameter with its value, for a preset or for
+    the defaults. Use it to see what a preset sets or as a starting spec to copy and change;
+    hull_design_guide(topic="spec") explains each field. Read-only."""
     return resolve_spec(preset=preset)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preview_hull(spec: dict[str, Any] | None = None, preset: str | None = None,
-                       design: str | None = None, patch: list[dict[str, Any]] | None = None,
-                       spec_path: str | None = None, renderer: Renderer | None = None) -> list:
-    """Build a hull and return a preview image (3/4 above and below, front, side, top) plus stats.
-
-    spec: partial or full hull spec (see hull_design_guide); merged over the preset if given.
-    preset: optional preset name to start from.
-    design: a stored design (store_design / save_hull) to start from instead of a preset.
-    patch: JSON-Patch ops applied last, e.g. [{"op": "replace", "path":
-        "/superstructure/bridge/height", "value": 2.5}]. List items can be named instead of indexed.
-    spec_path: a .json file holding a spec (or a stored design), read before `spec` and `patch`.
-    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
-    is the fastest, unlit look with block outlines for counting blocks.
-    """
+async def preview_hull(spec: Spec = None, preset: Preset = None, design: Design = None, patch: Patch = None,
+                       spec_path: SpecPath = None, renderer: RendererChoice = None) -> list:
+    """Build a hull and return a preview image (3/4 views from above and below, front, side,
+    top) plus a text summary: size, part counts, deck heights, flotation estimate, bench fit and
+    warnings. This is the design loop: preview, compare the image with the player's brief,
+    adjust, repeat, then save_hull. Use inspect_view for one large close-up from any angle and
+    preview_interior for rooms. Nothing is written. Spec sources apply in order: preset or
+    design, spec_path, spec, patch."""
     full = _spec(spec, preset, design, patch, spec_path)
     png, text = await run_job("preview", full, _title(preset, design), renderer)
     return [Image(data=png, format="png"), text]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preview_interior(spec: dict[str, Any] | None = None, preset: str | None = None,
-                           design: str | None = None, patch: list[dict[str, Any]] | None = None,
-                           spec_path: str | None = None) -> list:
-    """Cutaway of the interior: a section on the centreline plus a labelled deck plan for
-    every room level, and a per-room report (clear size, floor width, doors with sill heights
-    and floor steps, engines, warnings). Use after adding `interior` to a spec (see
-    hull_design_guide, "Interior design"). Floors above the main deck are drawn cropped to
-    their rooms. design/patch/spec_path: as in preview_hull."""
+async def preview_interior(spec: Spec = None, preset: Preset = None, design: Design = None, patch: Patch = None,
+                           spec_path: SpecPath = None) -> list:
+    """Render an interior cutaway: a centreline section plus a labelled deck plan for every room
+    level, and a per-room report (clear size, floor width, doors with sill heights and floor
+    steps, engines, warnings). Use it after adding `interior` to a spec (hull_design_guide
+    topic=interior); preview_hull shows the outside. Floors above the main deck are cropped to
+    their rooms. Nothing is written."""
     full = _spec(spec, preset, design, patch, spec_path)
     png, text = await run_job("interior", full, _title(preset, design))
     return [Image(data=png, format="png"), text]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def deck_profile(spec: dict[str, Any] | None = None, preset: str | None = None,
-                 design: str | None = None, patch: list[dict[str, Any]] | None = None,
-                 step: float = 1.0, spec_path: str | None = None) -> str:
-    """Deck height above the keel, the `y` a box gets when left out, and the deck half-beam,
-    every `step` metres from the transom. Use it to place turrets and deckhouses on a sheered
-    deck. Lengths are in spec units (real-world metres when the spec has a `scale`)."""
+def deck_profile(spec: Spec = None, preset: Preset = None, design: Design = None, patch: Patch = None,
+                 step: Annotated[float, Field(description="Station spacing in spec units (metres), "
+                                              "measured forward from the transom.", gt=0)] = 1.0,
+                 spec_path: SpecPath = None) -> str:
+    """Tabulate the deck at stations from the transom: deck height above the keel, the `y` a
+    superstructure box gets when y is left out, and the deck half-beam. Use it to place turrets
+    and deckhouses on a sheered deck instead of guessing heights. Lengths are in spec units
+    (real-world metres when the spec has a `scale`). Read-only; returns a text table."""
     return _deck_profile(_spec(spec, preset, design, patch, spec_path), step)
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def save_hull(name: str, spec: dict[str, Any] | None = None, preset: str | None = None,
-                    overwrite: bool = False, design: str | None = None,
-                    patch: list[dict[str, Any]] | None = None, spec_path: str | None = None) -> str:
-    """Save a hull into the Stormworks vehicles folder so it can be loaded at a workbench.
-
-    name: vehicle name shown in the game's Load menu. The spec is also stored as a design of
-    the same name.
-    overwrite: replace an earlier design saved by this tool under the same name. Vehicles
-    not made by this tool are never overwritten.
-    design/patch: as in preview_hull, e.g. save_hull(name="Iowa", design="Iowa").
-    """
+async def save_hull(name: NewVehicleName, spec: Spec = None, preset: Preset = None,
+                    overwrite: Overwrite = False, design: Design = None,
+                    patch: Patch = None, spec_path: SpecPath = None) -> str:
+    """Write a hull into the Stormworks vehicles folder as <name>.xml with its Load-menu
+    thumbnail, and store the spec as a design of the same name. Use it once the preview is
+    approved, e.g. save_hull(name="Iowa", design="Iowa"); drafts edited part by part (imports,
+    land vehicles) use save_vehicle. Refuses a name already used by a vehicle this tool did not
+    write, and replaces its own earlier save only with overwrite=true. Returns the file path, part
+    count and summary; the player loads it from a workbench's Load menu."""
     full = _spec(spec, preset, design, patch, spec_path)
     record = {"preset": preset, "vehicle": True, "spec": full}
     target, stamp = _save_target(name, record, overwrite)
@@ -475,19 +489,20 @@ async def save_hull(name: str, spec: dict[str, Any] | None = None, preset: str |
             f"In game: open a workbench, press Load, choose '{name}'.")
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACE)
 @_user_errors
-def store_design(name: str, spec: dict[str, Any] | None = None, preset: str | None = None,
-                 design: str | None = None, patch: list[dict[str, Any]] | None = None,
-                 spec_path: str | None = None) -> str:
+def store_design(name: Annotated[str, Field(description=(
+                     "Name to store the spec under (letters, digits, spaces, _ - ( ), at most 64); "
+                     "replaces any stored design of that name."))],
+                 spec: Spec = None, preset: Preset = None, design: Design = None, patch: Patch = None,
+                 spec_path: SpecPath = None) -> str:
     """Keep a design spec on the server without writing a vehicle, so later calls can send
     only changes. Typical loop: store_design("Iowa", spec=...) once, then
     preview_hull(design="Iowa", patch=[...]) to try a change and
     store_design("Iowa", design="Iowa", patch=[...]) to keep it. Replaces any stored design
     of that name; save_hull(name, design=name) writes the vehicle when ready.
-    spec_path: read the spec from a .json file instead of sending it. Stored designs are
-    plain JSON files that every call re-reads, so editing one on disk takes effect at once.
-    """
+    Stored designs are plain JSON files that every call re-reads, so editing one on disk takes
+    effect at once. Returns the stored file's path."""
     full = _spec(spec, preset, design, patch, spec_path)
     path = _design_path(name)
     with DESIGN_LOCK:
@@ -500,18 +515,25 @@ def store_design(name: str, spec: dict[str, Any] | None = None, preset: str | No
             "on disk apply to the next call.")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def list_designs() -> list[str]:
-    """Names of stored hull, land and imported drafts."""
+    """List the names of drafts stored on this server, sorted: hull designs (store_design,
+    save_hull), imported vehicles (import_vehicle) and land drafts (create_land_vehicle). Pass a
+    name as `design` to other tools, or to load_design to read it. Vehicles in the game's folder
+    are listed by list_game_vehicles instead. Read-only."""
     d = designs_dir()
     return sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def load_design(name: str) -> dict[str, Any]:
-    """Hull spec, or land/import draft metadata and revision. Use part tools to edit land/imports."""
+def load_design(name: Annotated[str, Field(description="Stored draft name from list_designs.")]) -> dict[str, Any]:
+    """Read a stored draft. A hull design returns its full spec; to change it, prefer
+    design=name with patch=[...] in preview_hull or store_design over resending the spec. An
+    imported or land draft returns its kind, source, current revision, coordinate frame and edit
+    log; change those with query_parts and edit_parts, not a spec. Read-only; fails when no
+    draft has that name."""
     record = _read_design(name)
     if record.get("kind") == "land":
         return {"kind": "land", "spec": record["spec"], "revision": _revision(record),
@@ -522,17 +544,29 @@ def load_design(name: str) -> dict[str, Any]:
     return record["spec"]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def search_parts(search: str = "", offset: int = 0, limit: int = 50) -> dict[str, Any]:
-    """Search installed part definitions by name/id; returns actual sizes, mass and pagination."""
+def search_parts(search: Annotated[str, Field(description=(
+                     "Case-insensitive text in the definition id or display name; empty lists every part."))] = "",
+                 offset: Offset = 0, limit: Limit(200) = 50) -> dict[str, Any]:
+    """Search the installed Stormworks part catalogue by definition id or display name. Each
+    row gives the id, display name, size in blocks and metres, and mass, with the total and
+    next_offset for paging. Use it to find a definition id, then get_part_definition for
+    surfaces and sealing or get_part_orientation for mounting axes. search_land_parts groups
+    land-build families; query_parts lists the parts inside a draft. Read-only."""
     return definitions.catalogue(search, offset, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_part_definition(definition: str) -> dict[str, Any]:
-    """Installed footprint, attachment/sealing surfaces and relevant part settings."""
+def get_part_definition(definition: Annotated[str, Field(description=(
+        'Definition id: the game file name without .xml, e.g. "01_block"; find ids with search_parts.'))]
+        ) -> dict[str, Any]:
+    """Return one installed part's definition: footprint voxels, attachment and sealing
+    surfaces, logic nodes, settings, mass, seal coverage, and whether new placement is allowed
+    (with the reason when it is not). Use it after search_parts to check how a part mounts,
+    connects or seals; get_part_orientation solves its rotation. Read-only; fails when the
+    definition is not installed."""
     result = definitions.metadata(definition)
     if result is None:
         raise ValueError(definitions.unavailable(definition))
@@ -542,108 +576,157 @@ def get_part_definition(definition: str) -> dict[str, Any]:
             "placement_restriction": restriction(definition)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_part_orientation(definition: str, targets: dict[str, list[int]] | None = None) -> dict[str, Any]:
-    """Explain local mounting/motion/function axes and solve their requested world directions.
-    Example Fin Rudder targets: mount_normal=[0,0,1], span_axis=[0,1,0]. Road wheel targets should
-    include axle_axis, wheel_reference_up and wheel_forward; right placements can require mirror.
-    Returns effective rotation plus proper r/mirror for XML. Arrow signs still need game checks."""
+def get_part_orientation(definition: Annotated[str, Field(description=(
+                             'Definition id, e.g. "rudder"; find ids with search_parts.'))],
+                         targets: Annotated[dict[str, list[int]] | None, Field(description=(
+                             "Wanted world direction per local axis, as integer unit vectors, e.g. "
+                             '{"mount_normal": [0,0,1], "span_axis": [0,1,0]}; omit to see the axes '
+                             "and the default solution."))] = None) -> dict[str, Any]:
+    """Explain a part's local mounting, motion and function axes and solve the rotation that
+    points them in the requested world directions. Example Fin Rudder targets:
+    mount_normal=[0,0,1], span_axis=[0,1,0]. Road wheel targets should include axle_axis,
+    wheel_reference_up and wheel_forward; right placements can require mirror. Returns the
+    effective rotation plus the proper r and mirror for edit_parts or XML. Read-only; arrow
+    signs still need checking in game."""
     from swhull.orientation import describe  # noqa: PLC0415
     return describe(definition, targets)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_calibration_observations(definition: str) -> dict[str, Any]:
-    """Read recorded in-game checks for a part; expose stale evidence and contradictory reports."""
+def get_calibration_observations(definition: Annotated[str, Field(description=(
+        'Definition id the player tested, e.g. "rudder".'))]) -> dict[str, Any]:
+    """Read the player's recorded in-game checks for one part: the latest result per test case
+    and check, the number of stale reports (the definition or test vehicle changed since), and
+    checks with contradictory results. Use it before relying on an orientation or mounting rule
+    for that part. It reports evidence and runs no test. Read-only; returns no checks when
+    nothing was recorded."""
     from swhull.calibration import observations  # noqa: PLC0415
     directory = os.environ.get("SW_CALIBRATION_DIR", str(Path(__file__).parent / "out/advanced-suite/calibration"))
     return observations(definition, directory)
 
 
-@mcp.tool()
+@mcp.tool(annotations=CREATE)
 @_user_errors
-def complaint(title: str, description: str,
-              category: Literal["placement", "rotation", "smoothing", "connections", "definitions", "performance",
-                                "tool_error", "usability", "missing_feature", "analysis", "other"] = "other",
-              severity: Literal["low", "medium", "high", "blocker"] = "medium",
-              tool: str = "", expected: str = "", actual: str = "", steps: list[str] | None = None,
-              context: dict[str, Any] | None = None, design: str = "", vehicle: str = "",
-              definition: str = "", suggestion: str = "") -> dict[str, Any]:
-    """Report an encountered problem or improvement request; save local JSON and Markdown reports.
-    Required: title and description. Include failing tool/arguments, expected vs actual behavior,
-    error messages, steps, affected design/vehicle/definition and a suggested improvement if known.
-    Categories: placement, rotation, smoothing, connections, definitions, performance, tool_error,
-    usability, missing_feature, other. Severity: low, medium, high, blocker.
-    Returns a report id and file paths; no external issue is published."""
+def complaint(title: Annotated[str, Field(description="One-line summary of the problem.")],
+              description: Annotated[str, Field(description="What happened and why it matters.")],
+              category: Annotated[Literal["placement", "rotation", "smoothing", "connections", "definitions",
+                                          "performance", "tool_error", "usability", "missing_feature",
+                                          "analysis", "other"], Field(description="Area of the problem.")] = "other",
+              severity: Annotated[Literal["low", "medium", "high", "blocker"], Field(description=(
+                  "blocker = the task cannot continue."))] = "medium",
+              tool: Annotated[str, Field(description="Name of the tool that failed, if any.")] = "",
+              expected: Annotated[str, Field(description="What should have happened.")] = "",
+              actual: Annotated[str, Field(description="What happened instead, with error text.")] = "",
+              steps: Annotated[list[str] | None, Field(description="Steps that reproduce it.")] = None,
+              context: Annotated[dict[str, Any] | None, Field(description=(
+                  "Failing tool arguments or other data needed to reproduce it."))] = None,
+              design: Annotated[str, Field(description="Affected stored draft, if any.")] = "",
+              vehicle: Annotated[str, Field(description="Affected saved vehicle, if any.")] = "",
+              definition: Annotated[str, Field(description="Affected part definition id, if any.")] = "",
+              suggestion: Annotated[str, Field(description="A suggested fix, if known.")] = "") -> dict[str, Any]:
+    """Record a problem with these tools, or a missing capability, as local JSON and Markdown
+    reports for the developer. Use it when a tool errors, behaves unexpectedly or cannot do what
+    the player needs, then carry on with the work: it fixes nothing and publishes nothing
+    outside this computer. Returns the report id and file paths; list_complaints and
+    get_complaint read reports back."""
     from swhull.complaints import create  # noqa: PLC0415
     return create(title, description, category, severity, tool, expected, actual, steps, context,
                   design, vehicle, definition, suggestion)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def list_complaints(search: str = "", category: str = "", severity: str = "",
-                    offset: int = 0, limit: int = 50) -> dict[str, Any]:
-    """List locally recorded complaints newest first; filter by text, category or severity."""
+def list_complaints(search: Annotated[str, Field(description="Text anywhere in the report; empty matches all.")] = "",
+                    category: Annotated[str, Field(description="Only this category (see complaint); empty for all.")] = "",
+                    severity: Annotated[str, Field(description="Only low, medium, high or blocker; empty for all.")] = "",
+                    offset: Offset = 0, limit: Limit(200) = 50) -> dict[str, Any]:
+    """List complaints recorded with `complaint`, newest first, as summary rows (id, title,
+    date, category, severity, tool) with paging. Use get_complaint with an id for the full
+    report. Read-only."""
     from swhull.complaints import catalogue  # noqa: PLC0415
     return catalogue(search, category, severity, offset, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_complaint(complaint_id: str) -> dict[str, Any]:
-    """Read a complaint's complete reproduction evidence and Markdown report by its id."""
+def get_complaint(complaint_id: Annotated[str, Field(description=(
+        "Report id returned by complaint or listed by list_complaints."))]) -> dict[str, Any]:
+    """Read one recorded complaint in full: description, failing tool and arguments, expected
+    and actual behaviour, reproduction steps, and the Markdown report. Read-only; fails when the
+    id is unknown."""
     from swhull.complaints import read  # noqa: PLC0415
     return read(complaint_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def land_vehicle_guide() -> str:
-    """Road vehicle workflow, installed parts, chassis spec, units, layout limits and game checks."""
+    """Return the road and land vehicle guide as Markdown: workflow, installed parts, chassis
+    spec, units, layout limits and the checks to do in game. Read it before create_land_vehicle
+    or any land work; boats use hull_design_guide instead. Read-only."""
     return (HERE / "docs" / "land-vehicles.md").read_text(encoding="utf-8")
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def search_land_parts(category: Literal["", "wheels", "tracks", "lights", "controls", "propulsion", "transmission",
-                                            "power", "fuel", "cooling", "body", "logic", "utility"] = "",
-                            search: str = "", offset: int = 0,
-                            limit: int = 50) -> dict[str, Any]:
-    """Installed components useful for land builds, with footprints and actual connection ports.
-    Categories: wheels, tracks, lights, controls, propulsion, transmission, power, fuel,
-    cooling, body, logic, utility. Use get_part_definition/get_part_orientation for details.
-    Family filters are a convenience; search_parts exposes the full installed catalogue."""
+async def search_land_parts(category: Annotated[Literal["", "wheels", "tracks", "lights", "controls", "propulsion",
+                                                        "transmission", "power", "fuel", "cooling", "body", "logic",
+                                                        "utility"], Field(description=(
+                                "Land-build family to list; empty lists all families."))] = "",
+                            search: Annotated[str, Field(description=(
+                                "Case-insensitive text in the definition id or display name."))] = "",
+                            offset: Offset = 0, limit: Limit(200) = 50) -> dict[str, Any]:
+    """List installed components useful for land builds, by family, with footprints and their
+    actual connection ports, with paging. Use it to choose parts for a land draft. search_parts
+    covers the whole catalogue without families; get_part_definition and get_part_orientation
+    give one part's detail. Read-only."""
     return await run_job("land_parts", category, search, offset, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def find_land_vehicles(search: str = "", kind: str = "wheeled", offset: int = 0,
-                             limit: int = 50, source: str = "vehicles") -> dict[str, Any]:
-    """Read the player's saves for wheel/track examples, including unnamed experiments.
-    kind=wheeled/tracked/all. Counts only vehicle body components, not controller internals.
-    Wheel-based boats/aircraft can match; this does not establish vehicle purpose or quality."""
+async def find_land_vehicles(search: Annotated[str, Field(description="Text in the vehicle name; empty for all.")] = "",
+                             kind: Annotated[str, Field(description='"wheeled" (default), "tracked" or "all".')] = "wheeled",
+                             offset: Offset = 0, limit: Limit(200) = 50,
+                             source: Source = "vehicles") -> dict[str, Any]:
+    """Scan the player's saved vehicles, or installed Workshop items, for wheel or track
+    layouts to use as land-build references, including unnamed experiments, with paging. Counts
+    vehicle body components only, not controller internals; wheeled boats or aircraft can match,
+    so a hit says nothing about a vehicle's purpose or quality. Follow up on a match with
+    analyze_land_vehicle; list_game_vehicles only lists names. Read-only."""
     if source not in ("vehicles", "workshop"):
         raise ValueError("source must be vehicles or workshop")
     directories = definitions.workshop_dirs() if source == "workshop" else [vehicles_dir()]
     return await run_job("land_library", directories, search, kind, offset, limit, source)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def analyze_land_vehicle(name: str | None = None, design: str | None = None,
-                               body_id: str | None = None, forward: list[int] | None = None,
-                               section: str = "wheels", offset: int = 0, limit: int = 50,
-                               source: str = "vehicles", wheel_roles: dict[str, Literal["road", "spare", "excluded"]] | None = None,
-                               exclude_wheel_ids: list[str] | None = None) -> dict[str, Any]:
-    """Analyze a saved v3 vehicle or draft: body-local axles, wheelbase, mounts and light axes.
-    Sections: wheels, lights, controls, equipment, issues. All component rows are paginated.
-    forward is a horizontal unit vector; otherwise infer each body's driver-seat facing,
-    falling back to +z explicitly. Axle span measures mounting origins, not tyre-centre track.
-    Multi-body references stay separate. Suspension/steering sweep and mesh edits need game checks."""
+async def analyze_land_vehicle(name: OptionalVehicleName = None,
+                               design: Annotated[str | None, Field(description=(
+                                   "Stored land or imported draft to analyse instead of a saved vehicle."))] = None,
+                               body_id: BodyId = None,
+                               forward: Annotated[list[int] | None, Field(description=(
+                                   "Horizontal unit vector for the vehicle's forward, body-local, e.g. "
+                                   "[0,0,1]; default infers it from the driver seat, else +z."))] = None,
+                               section: Annotated[str, Field(description=(
+                                   '"wheels" (default), "lights", "controls", "equipment" or "issues".'))] = "wheels",
+                               offset: Offset = 0, limit: Limit(200) = 50,
+                               source: Source = "vehicles",
+                               wheel_roles: Annotated[dict[str, Literal["road", "spare", "excluded"]] | None, Field(
+                                   description="Role per wheel component id; spare and excluded wheels "
+                                               "stay out of axle measurements.")] = None,
+                               exclude_wheel_ids: Annotated[list[str] | None, Field(description=(
+                                   "Wheel component ids to leave out of axle measurements."))] = None) -> dict[str, Any]:
+    """Measure a saved vehicle or a land draft for land building: body-local axles, wheelbase,
+    mounts, light axes, controls and equipment, one section per call with paging. Use it on
+    references from find_land_vehicles or on your own draft before editing; general part audits
+    of boats use analyze_vehicle. Axle span measures mounting origins, not tyre-centre track;
+    multi-body vehicles stay separate; suspension, steering sweep and mesh fit still need game
+    checks. Read-only."""
     if (name is None) == (design is None):
         raise ValueError("choose exactly one saved vehicle name or draft design")
     if design is not None and source != "vehicles":
@@ -653,17 +736,21 @@ async def analyze_land_vehicle(name: str | None = None, design: str | None = Non
     return await run_job("land_layout", path, record, body_id, forward, section, offset, limit, wheel_roles, exclude_wheel_ids)
 
 
-@mcp.tool()
+@mcp.tool(annotations=CREATE)
 @_user_errors
-async def create_land_vehicle(design: str, spec: dict[str, Any] | None = None) -> list:
-    """Create a land draft: default utility_buggy, or preset=chassis for a custom bare layout.
-    Read land_vehicle_guide for the spec. Dimensions/positions are game metres on the 0.25 m
-    grid. Buggy includes bodywork, four suspension wheels, saddle, premade fuel tanks, engine,
-    battery, radiator and actual lights. Parts must fit, mount and leave driver/service access.
-    preset=humvee_4x4 has open custom-door bays, compact glass and enclosed chassis pipes.
-    humvee_4x4 and utility_4x4 include radiator/fuel/air/exhaust/driveline pipes and typed links.
-    Use query_connections/edit_connections/route_connections/preflight_vehicle to complete custom
-    layouts. Extend through query_parts/edit_parts/preview_vehicle, then save_vehicle."""
+async def create_land_vehicle(design: Annotated[str, Field(description=(
+                                  "Name for the new draft; must not exist yet (see list_designs)."))],
+                              spec: Annotated[dict[str, Any] | None, Field(description=(
+                                  "Land spec (fields in land_vehicle_guide). spec.preset chooses utility_buggy "
+                                  "(default), humvee_4x4, utility_4x4 or chassis (bare custom layout). "
+                                  "Dimensions in game metres on the 0.25 m grid."))] = None) -> list:
+    """Create a new land vehicle draft and return its preview image, notes and revision. The
+    default utility buggy has bodywork, four suspension wheels, saddle, premade fuel tanks,
+    engine, battery, radiator and lights; humvee_4x4 has four seats, open custom-door bays,
+    compact glass and enclosed chassis pipework; utility_4x4 keeps the older sliding-door layout.
+    Read land_vehicle_guide first. Writes only a stored draft, never a game file, and refuses
+    an existing name. Then complete it with query_parts/edit_parts and the connection tools,
+    check it with preflight_vehicle, and save it with save_vehicle."""
     _check_name(design)
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
@@ -676,14 +763,22 @@ async def create_land_vehicle(design: str, spec: dict[str, Any] | None = None) -
             {"design": design, "kind": "land", "revision": _revision(record)}]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def analyze_vehicle(name: str, search: str = "", offset: int = 0, limit: int = 50,
-                          section: str = "parts", source: str = "vehicles") -> dict[str, Any]:
-    """Read saved-vehicle examples, body groups, link coverage and rudder mounting/motion issues.
-    Supports multi-body references without editing them. Observations are not game verification.
-    Search rudder/propeller/engine/trans to focus evidence. Sections: parts, links, controllers,
-    bodies, placement_issues, connection_candidates, open_transmission_ports. All are paginated."""
+async def analyze_vehicle(name: VehicleName,
+                          search: Annotated[str, Field(description=(
+                              "Filter rows by text, e.g. rudder, propeller, engine or trans."))] = "",
+                          offset: Offset = 0, limit: Limit(200) = 50,
+                          section: Annotated[str, Field(description=(
+                              '"parts" (default), "links", "controllers", "bodies", "placement_issues", '
+                              '"connection_candidates" or "open_transmission_ports".'))] = "parts",
+                          source: Source = "vehicles") -> dict[str, Any]:
+    """Audit how a saved vehicle is built: parts, logic links, controllers, bodies, placement
+    issues such as rudder mounting and motion, connection candidates and open transmission
+    ports, one section per call with paging. Use it to learn from the player's vehicles or to
+    debug a save. Wheel layouts use analyze_land_vehicle, and hull material and floor gaps use
+    analyze_hull. Handles multi-body vehicles. Read-only; findings are observations, not game
+    verification."""
     return await run_job("analyze_reference", str(_reference_path(name, source)), search, offset, limit, section)
 
 
@@ -692,14 +787,20 @@ def _reference_set_path(name):
     return references_dir() / f"{name}.json"
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACE)
 @_user_errors
-async def study_references(references: list[ReferenceVehicle], save_as: str | None = None) -> dict[str, Any]:
+async def study_references(references: Annotated[list[ReferenceVehicle], Field(description=(
+                               "Vehicles to study: name (saved vehicle or Workshop ID), source "
+                               "(vehicles or workshop), optional kind (boat, land, other) and label."))],
+                           save_as: Annotated[str | None, Field(description=(
+                               "Store the set under this name for score_vehicle, replacing a set of the "
+                               "same name; omit to only measure."))] = None) -> dict[str, Any]:
     """Measure how vehicles the player rates are built: slope piece sizes, pyramid/inverse
     pairing, ballast, sub-bodies, detail parts, paint and logic. kind (boat/land/other) is
     detected from road wheels and marine propulsion unless given; mark hovercraft, aircraft and
-    unusual builds "other" so they don't widen the boat range. save_as stores the set locally,
-    replacing one of the same name, for score_vehicle. Measurements describe habits, not quality."""
+    unusual builds "other" so they don't widen the boat range. Returns per-vehicle metrics and
+    the min-max range per kind. Writes nothing unless save_as is given. Measurements describe
+    habits, not quality."""
     if not references:
         raise ValueError("give at least one reference vehicle")
     if save_as is not None:
@@ -718,17 +819,23 @@ async def study_references(references: list[ReferenceVehicle], save_as: str | No
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def score_vehicle(reference_set: str, name: str | None = None,
-                        source: Literal["vehicles", "workshop"] = "vehicles", design: str | None = None,
-                        spec: dict[str, Any] | None = None, preset: str | None = None,
-                        patch: list[dict[str, Any]] | None = None,
-                        kind: Literal["boat", "land", "other"] | None = None) -> dict[str, Any]:
+async def score_vehicle(reference_set: Annotated[str, Field(description=(
+                            "Reference set stored by study_references(save_as=...)."))],
+                        name: OptionalVehicleName = None,
+                        source: Annotated[Literal["vehicles", "workshop"], Field(description=(
+                            "Where name is read from: the vehicles folder or a Workshop item."))] = "vehicles",
+                        design: Design = None, spec: Spec = None, preset: Preset = None,
+                        patch: Patch = None,
+                        kind: Annotated[Literal["boat", "land", "other"] | None, Field(description=(
+                            "Compare against references of this kind; default detects it."))] = None
+                        ) -> dict[str, Any]:
     """Compare a saved vehicle (name), a draft or stored design, or a hull spec/preset with a
     reference set from study_references. Each construction metric is checked against the
     min-max of references of the same kind, with a hint where it falls outside. A miss says
-    where to look, not that the vehicle is broken: references differ in size and purpose."""
+    where to look, not that the vehicle is broken: references differ in size and purpose.
+    Read-only."""
     path = _reference_set_path(reference_set)
     if not path.is_file():
         stored = sorted(p.stem for p in references_dir().glob("*.json")) if references_dir().is_dir() else []
@@ -747,29 +854,38 @@ async def score_vehicle(reference_set: str, name: str | None = None,
     return await run_job("score_vehicle", None, record, references, kind)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def suggest_hull_blocks(normal: list[float], limit: int = 6) -> dict[str, Any]:
-    """Rank real block slope families by an outward x/y/z normal. Read the selection rules:
-    the angle alone cannot choose pyramid vs inverse, location, or a watertight joint."""
+def suggest_hull_blocks(normal: Annotated[list[float], Field(description=(
+                            "Outward surface normal as world [x, y, z] (y up, z forward); need not be unit length."))],
+                        limit: Limit(20, "Families to return") = 6) -> dict[str, Any]:
+    """Rank the game's slope block families (wedges, pyramids and inverse pyramids by slope
+    ratio) by how closely they match a surface's outward normal, with the rules for choosing
+    between them. Use it when placing hull slopes by hand. The angle alone cannot choose
+    pyramid vs inverse, the position, or a watertight joint: check those with inspect_view and
+    check_seal. Read-only."""
     from swhull.hull_analysis import block_choices  # noqa: PLC0415
     return block_choices(normal, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def analyze_hull(name: str | None = None, spec: dict[str, Any] | None = None,
-                       preset: str | None = None, design: str | None = None,
-                       patch: list[dict[str, Any]] | None = None,
-                       body_id: str | None = None, stations: list[int] | None = None,
-                       x: int = 0, source: str = "vehicles") -> dict[str, Any]:
-    """Measure actual hull material, floor gaps, and partial-face seams at z stations.
-    x/stations are integer BLOCK coordinates. name reads a saved v3 vehicle (one body at
-    a time); otherwise build spec/preset/design in the fixed build frame. Procedural reports
-    include floor height above keel and drop from rim, so verify depth before saving.
-    Imported saved vehicles use their original body-local frame; choose body_id explicitly
-    when the largest structural body isn't the hull. source="backups" reads data/backups/vehicles,
-    e.g. name="autosave9". This is read-only geometry, not a seal test."""
+async def analyze_hull(name: Annotated[str | None, Field(description=(
+                           "Saved vehicle to measure (one body at a time); omit to build spec/preset/design."))] = None,
+                       spec: Spec = None, preset: Preset = None, design: Design = None, patch: Patch = None,
+                       body_id: BodyId = None,
+                       stations: Annotated[list[int] | None, Field(description=(
+                           "z stations to report, in integer blocks; default picks representative ones."))] = None,
+                       x: Annotated[int, Field(description="x column for the section, in integer blocks.")] = 0,
+                       source: Annotated[str, Field(description=(
+                           '"vehicles" (default) or "backups" (data/backups/vehicles, e.g. name="autosave9").'))]
+                       = "vehicles") -> dict[str, Any]:
+    """Measure actual hull material, floor gaps and partial-face seams at z stations: keel,
+    walking floor and rim separately, since a part's footprint is not its solid material. Use it
+    before saving to check depth and floor height, or to study a saved hull. Procedural reports
+    use the fixed build frame and include floor height above keel and drop from the rim; saved
+    vehicles use their own body-local frame, so pick body_id when the largest body is not the
+    hull. Read-only geometry, not a seal test (use check_seal)."""
     if source not in ("vehicles", "backups"):
         raise ValueError('source must be "vehicles" or "backups"')
     if name is not None:
@@ -786,11 +902,17 @@ async def analyze_hull(name: str | None = None, spec: dict[str, Any] | None = No
     return await run_job("hull_analysis", _spec(spec, preset, design, patch), None, None, stations, x)
 
 
-@mcp.tool()
+@mcp.tool(annotations=CREATE)
 @_user_errors
-async def import_vehicle(name: str, design: str, source: str = "vehicles") -> str:
-    """Import an existing single-body version-3 vehicle into a new draft; never changes the source.
-    Existing configured/wired parts are protected. Use query_parts/edit_parts and save_vehicle."""
+async def import_vehicle(name: VehicleName,
+                         design: Annotated[str, Field(description=(
+                             "Name for the new draft; must not exist yet (see list_designs)."))],
+                         source: Source = "vehicles") -> str:
+    """Copy an existing single-body vehicle (data version 3) into a new editable draft; the
+    source file is never changed. Use it to modify a vehicle the player already has, then
+    query_parts/edit_parts, preview_vehicle, and save_vehicle under a different name. Configured
+    and wired parts are protected. Fails when the draft name exists, the vehicle has several
+    bodies or it uses an older data version. Returns the part count."""
     _check_name(design)
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
@@ -803,30 +925,39 @@ async def import_vehicle(name: str, design: str, source: str = "vehicles") -> st
     return f"Imported {count} parts into '{design}'. Source '{name}' remains untouched."
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def query_parts(design: str, select: Selection | None = None,
-                      offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    """Parts and revision for precise editing. select: ids, name, definition or inclusive bounds
-    [[min_x,min_y,min_z],[max_x,max_y,max_z]]. Coordinates are integer blocks (0.25 m), in the
-    uncentred build frame for generated hulls/land drafts and original body-local frame for imports.
-    Rows include scalar settings, proper rotation plus a local mirror bitmask, and the effective
-    transform matrix. Partial multi-voxel selections are rejected; select an id to target the whole component."""
+async def query_parts(design: Draft,
+                      select: Annotated[Selection | None, Field(description=(
+                          "Filter by ids, name, definition, or inclusive bounds [[min_x,min_y,min_z],"
+                          "[max_x,max_y,max_z]] in blocks; omit for all parts."))] = None,
+                      offset: Offset = 0, limit: Limit(1000) = 100) -> dict[str, Any]:
+    """List a draft's parts and its current revision for exact editing. Rows include id,
+    definition, position, scalar settings, proper rotation plus a local mirror bitmask, and the
+    effective transform matrix. Coordinates are integer blocks (0.25 m): the uncentred build
+    frame for generated hulls and land drafts, the original body-local frame for imports. Call it
+    before edit_parts and pass its revision. A selection that cuts through a multi-voxel part is
+    rejected; select its id instead. Read-only."""
     return await run_job("query_draft", _read_design(design), plain(select, Selection) if select is not None else None, offset, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def edit_parts(design: str, operations: EditBatch, revision: str,
-                     commit: bool = False) -> list:
-    """Atomic part edits; defaults to preview only. Pass the revision from query_parts.
+async def edit_parts(design: Draft,
+                     operations: Annotated[EditBatch, Field(description=(
+                         "1-100 operations applied in order as one atomic batch; see the description."))],
+                     revision: Revision, commit: Commit = False) -> list:
+    """Add, remove, move, rotate, paint or copy parts in a draft as one atomic batch; previews
+    by default. Pass the revision from query_parts.
     Ops: add(part/parts), fill(bounds,color), remove/replace/move/rotate/paint/copy/mirror/repeat.
     Selection ops need select={ids/bounds/name/definition}. move/copy/repeat use delta in blocks;
     repeat count is additional copies; rotate uses a local-to-world matrix or r string and pivot;
     mirror uses axis and plane. replace needs part; paint needs color. Added parts use definition,
     position in blocks, rotation, optional mirror (1=x, 2=y, 4=z), color, name and scalar settings.
     Placement rotation accepts an effective mirrored matrix; use that or proper rotation plus
-    mirror. Prebuilt engines default to max_force_scale=1 (100%). commit=true keeps one undo step."""
+    mirror. Prebuilt engines default to max_force_scale=1 (100%). Returns a preview image, notes
+    and the new revision; commit=true keeps one undo step (undo_edits). Wires and pipes use
+    edit_connections and route_connections."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_parts again before editing")
@@ -838,10 +969,13 @@ async def edit_parts(design: str, operations: EditBatch, revision: str,
              "base_revision": revision, "operations": len(operations)}]
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-def undo_edits(design: str, revision: str) -> dict[str, Any]:
-    """Restore the previous committed edit batch. Keeps up to ten batches of undo history."""
+def undo_edits(design: Draft, revision: Revision) -> dict[str, Any]:
+    """Revert a draft to before its last committed batch from edit_parts, edit_connections,
+    route_connections, repair_vehicle or apply_vehicle_assembly. Keeps up to ten batches; there
+    is no redo. Fails when the revision is stale or nothing is left to undo. Returns the new
+    revision and the number of undo steps remaining."""
     with DESIGN_LOCK:
         record = _read_design(design)
         if _revision(record) != revision:
@@ -856,23 +990,32 @@ def undo_edits(design: str, revision: str) -> dict[str, Any]:
         return {"revision": _revision(restored), "remaining_undo": len(history) - 1}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def query_connections(design: str, offset: int = 0, limit: int = 100) -> dict[str, Any]:
-    """Installed/configured node indices, transmission surface indices, wires and draft revision.
-    Wire endpoints: {part_id,port}; pipe endpoints: {part_id,surface_index}. Coordinates are
-    uncentred integer blocks. Paginate components; links retain stable IDs for disconnect."""
+async def query_connections(design: Draft, offset: Offset = 0, limit: Limit(200, "Components per page") = 100
+                            ) -> dict[str, Any]:
+    """List a draft's connection points and links: each component's logic and electric node
+    indices and its pipe/transmission surface indices, existing wires and routes with stable
+    link ids, and the draft revision. Call it before edit_connections, route_connections or
+    apply_vehicle_assembly. Wire endpoints are {part_id,port}; pipe endpoints are
+    {part_id,surface_index}. Coordinates are uncentred integer blocks. Read-only, paged by
+    component; query_parts lists geometry instead."""
     return await run_job("query_connections", _read_design(design), offset, limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def edit_connections(design: str, operations: ConnectionBatch, revision: str,
-                           commit: bool = False) -> list:
-    """Preview/commit typed control and electrical wires. Uses the query_connections revision.
+async def edit_connections(design: Draft,
+                           operations: Annotated[ConnectionBatch, Field(description=(
+                               "1-100 connect/disconnect operations applied as one atomic batch."))],
+                           revision: Revision, commit: Commit = False) -> list:
+    """Add or remove typed control and electrical wires in a draft; previews by default. Uses
+    the query_connections revision.
     Ops: {op:'connect',from:{part_id,port},to:{part_id,port}} or {op:'disconnect',link_id}.
     Signal outputs connect to inputs; electricity is bidirectional. One driver per signal input.
-    Power/fluid use route_connections. Original XML/settings remain lossless; commit has undo."""
+    Pipes and shafts use route_connections; whole starter, clutch, brake or light set-ups use
+    apply_vehicle_assembly. Original XML and settings stay lossless. Returns a preview image,
+    notes and the new revision; commit=true keeps one undo step."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
@@ -883,11 +1026,14 @@ async def edit_connections(design: str, operations: ConnectionBatch, revision: s
             {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def route_connections(design: str, routes: RouteBatch, revision: str,
-                            commit: bool = False) -> list:
-    """Preview/commit actual pipes between transmission faces, preserving access and structure.
+async def route_connections(design: Draft,
+                            routes: Annotated[RouteBatch, Field(description=(
+                                "1-100 routes to add or {op:'remove',route_id} entries; see the description."))],
+                            revision: Revision, commit: Commit = False) -> list:
+    """Lay physical pipes between transmission faces in a draft, preserving access and
+    structure; previews by default. Wires use edit_connections instead.
     Each route: {from:{part_id,surface_index},to:{part_id,surface_index},bounds?:[[lo],[hi]],
     waypoints?:[[x,y,z],...],name?:str,pipe_style?:auto|exposed|enclosed,through_blocks?:[part_id,...]}.
     Bounds/waypoints use integer blocks. Routes minimize length, then bends. Default auto uses
@@ -896,7 +1042,8 @@ async def route_connections(design: str, routes: RouteBatch, revision: str,
     All selected blocks must lie on the route (use waypoints if needed); removal restores them.
     Other structure and access are preserved; routes never join unrelated pipe networks.
     Clutch/gearbox ports may use several routes; create an explicit T-piece for a branch.
-    Remove an added route with {op:'remove',route_id} from query_connections, then reroute."""
+    Remove an added route with {op:'remove',route_id} from query_connections, then reroute.
+    Returns a preview image, notes and the new revision; commit=true keeps one undo step."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
@@ -907,15 +1054,16 @@ async def route_connections(design: str, routes: RouteBatch, revision: str,
             {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preflight_vehicle(design: str) -> PreflightReport:
-    """Check engine fuel/air/exhaust/radiator paths, driveline, electrical power and controls.
-    Reports configuration_checks (explicit engine power), gearbox_configuration_checks (saved
-    off/on ratio indices, including reverse-off warnings) and wheel_direction_checks (drive
-    arrows and steering signs for supported direct/inverting paths). Unknown logic stays unknown.
-    Includes blocked transmission exits. Separates physical pipes from typed wires and keeps
-    functional component circuits distinct. Connected geometry still needs in-game testing."""
+async def preflight_vehicle(design: Draft) -> PreflightReport:
+    """Check that a draft's systems are connected: engine fuel/air/exhaust/radiator paths,
+    driveline, electrical power and controls. Reports configuration_checks (explicit engine
+    power), gearbox_configuration_checks (saved off/on ratio indices, including reverse-off
+    warnings), wheel_direction_checks (drive arrows and steering signs for supported paths) and
+    blocked transmission exits; unknown logic stays unknown. Run it after wiring or routing and
+    before saving; plan_vehicle_repairs turns its findings into fixes. Read-only; connected
+    geometry still needs testing in game."""
     return await run_job("preflight_vehicle", _read_design(design))
 
 
@@ -924,21 +1072,28 @@ def _image_report(png, report):
                                    TextContent(type="text", text=json.dumps(report))], structured_content=report)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def plan_vehicle_repairs(design: str) -> RepairPlan:
-    """Diagnose faults and test suggested edits/wires/pipes without changing the draft.
-    Returns severity, affected IDs, explanations, concrete operations and manual-review reasons.
-    Use the returned revision, plan_id and available finding IDs with repair_vehicle."""
+async def plan_vehicle_repairs(design: Draft) -> RepairPlan:
+    """Diagnose a draft's faults and test suggested edits, wires and pipes without changing it.
+    Returns each finding's severity, affected ids, explanation, concrete operations, and whether
+    it can be repaired automatically or needs a design choice. Pass the returned revision,
+    plan_id and the ids of available findings to repair_vehicle. Read-only."""
     return await run_job("plan_vehicle_repairs", _read_design(design))
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def repair_vehicle(design: str, revision: str, plan_id: str, finding_ids: list[str],
-                         commit: bool = False) -> ChangeReport:
-    """Preview selected repairs with overlays and before/after preflight. commit=true applies
-    the whole batch as one undo step. Revision/plan guards reject stale suggestions and conflicting repairs."""
+async def repair_vehicle(design: Draft,
+                         revision: Annotated[str, Field(description="Revision returned by plan_vehicle_repairs.")],
+                         plan_id: Annotated[str, Field(description="plan_id returned by plan_vehicle_repairs.")],
+                         finding_ids: Annotated[list[str], Field(description=(
+                             "Ids of findings with repair_status=available to apply together."))],
+                         commit: Commit = False) -> ChangeReport:
+    """Apply chosen fixes from plan_vehicle_repairs to a draft; previews by default, with
+    overlays and a before/after preflight. commit=true applies the batch as one undo step;
+    rerun preflight_vehicle afterwards. Stale revisions or plans and conflicting repairs are
+    rejected. Manual findings need a design choice and are never applied here."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; plan_vehicle_repairs again")
@@ -950,24 +1105,36 @@ async def repair_vehicle(design: str, revision: str, plan_id: str, finding_ids: 
     return _image_report(png, report)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
 def list_vehicle_assemblies() -> dict[str, Any]:
-    """Reusable controls, required ID bindings and gate definitions. Place any required gates
-    using edit_parts, then bind queried IDs with apply_vehicle_assembly; geometry is not preset-specific."""
+    """List the reusable control assemblies (engine start and idle, clutch engagement,
+    brake/reverse, lighting) with the part ids each must be bound to and the logic gates it
+    expects. Place any required gates with edit_parts, then bind the queried ids with
+    apply_vehicle_assembly. Geometry is not preset-specific. Read-only."""
     from swhull.assemblies import CATALOGUE  # noqa: PLC0415
     return {"assemblies": CATALOGUE, "workflow": "query -> place gates if needed -> bind -> preview -> commit -> preflight -> game test"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def apply_vehicle_assembly(design: str, assembly: Literal["engine_start_idle", "clutch_engagement", "brake_reverse", "lighting"],
-                                 bindings: AssemblyBindings, revision: str, options: AssemblyOptions | None = None,
-                                 commit: bool = False) -> AssemblyReport:
-    """Configure/wire reusable controls using explicit current part IDs. Existing target drivers
-    are replaced atomically. Clutch needs its own gate, separate from the idle throttle gate.
-    Starter is manual/hold; idle is open-loop, and reverse must be selected while stopped.
-    Preview includes diagnostics. commit=true creates one undo step; tune behavior in game."""
+async def apply_vehicle_assembly(design: Draft,
+                                 assembly: Annotated[Literal["engine_start_idle", "clutch_engagement",
+                                                             "brake_reverse", "lighting"], Field(description=(
+                                     "Assembly to wire; list_vehicle_assemblies explains each."))],
+                                 bindings: Annotated[AssemblyBindings, Field(description=(
+                                     "Current part ids from query_connections: driver seat, and the engine, "
+                                     "gates, clutch, gearbox, wheels, lights or battery the assembly needs."))],
+                                 revision: Revision,
+                                 options: Annotated[AssemblyOptions | None, Field(description=(
+                                     "Idle throttle, clutch deadband and hotkeys; defaults suit most builds."))] = None,
+                                 commit: Commit = False) -> AssemblyReport:
+    """Configure and wire a reusable control set-up (starter and idle, clutch, brake/reverse or
+    lights) using explicit current part ids, instead of wiring each link with edit_connections.
+    Existing drivers of the target inputs are replaced atomically. Clutch needs its own gate,
+    separate from the idle throttle gate. Starter is manual/hold; idle is open-loop, and reverse
+    must be selected while stopped. Previews by default with diagnostics; commit=true creates one
+    undo step. Tune behaviour in game."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
@@ -980,12 +1147,16 @@ async def apply_vehicle_assembly(design: str, assembly: Literal["engine_start_id
     return _image_report(png, report)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preview_vehicle_diagnostics(design: str, yaw: float = 35, pitch: float = 25,
-                                      layer: Literal["all", "components", "structure"] = "components") -> DiagnosticReport:
-    """Show red fault parts, amber blocked exits and blue wheel/steering arrows over geometry.
-    Repair and assembly previews additionally show proposed green wires/pipes. Uses draft block coordinates."""
+async def preview_vehicle_diagnostics(design: Draft, yaw: Yaw = 35, pitch: Pitch = 25,
+                                      layer: Annotated[Literal["all", "components", "structure"], Field(description=(
+                                          '"components" (default) hides bodywork; "all" or "structure".'))]
+                                      = "components") -> DiagnosticReport:
+    """Render a draft with its preflight faults drawn over it: red faulty parts, amber blocked
+    exits, blue wheel and steering arrows. Returns the image and the preflight report. Use it to
+    see where preflight_vehicle's findings are; open_in_viewer(design=..., diagnostics=true)
+    gives the player an interactive version. Coordinates are draft blocks. Read-only."""
     png, report = await run_job("diagnostic_preview", _read_design(design), design, yaw, pitch, layer)
     return _image_report(png, report)
 
@@ -1008,11 +1179,16 @@ def _write_validation(report):
         temporary.unlink(missing_ok=True)
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def prepare_vehicle_validation(name: str, design: str, overwrite: bool = False) -> ValidationRun:
-    """Export a separate test vehicle and create a seven-check in-game checklist tied to its
-    exact XML SHA-256 and draft revision. Starts pending; topology never counts as game evidence."""
+async def prepare_vehicle_validation(name: NewVehicleName, design: Draft,
+                                     overwrite: Overwrite = False) -> ValidationRun:
+    """Export a draft as a separate test vehicle in the game folder and open a validation run:
+    a seven-check in-game checklist tied to the file's exact SHA-256 and the draft revision.
+    Use it when a draft is ready for the player to test; record their results with
+    record_vehicle_validation and review them with get_vehicle_validation. Refuses vehicles this
+    tool did not write and replaces its own only with overwrite=true. Checks start pending;
+    connected geometry never counts as game evidence."""
     record = _read_design(design)
     target, stamp = _save_target(name, record, overwrite)
     xml, report = await run_job("prepare_validation", record, design, name, str(target))
@@ -1029,10 +1205,13 @@ async def prepare_vehicle_validation(name: str, design: str, overwrite: bool = F
     return report
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def get_vehicle_validation(run_id: str) -> dict[str, Any]:
-    """Read game-test evidence and report whether the export bytes and draft revision still match."""
+def get_vehicle_validation(run_id: Annotated[str, Field(description=(
+        "24-character run id returned by prepare_vehicle_validation."))]) -> dict[str, Any]:
+    """Read a validation run: the checklist with any recorded results and evidence, plus
+    export_matches and draft_matches, which say whether the exported file and the draft are
+    still the ones tested. Read-only; fails when the run id is unknown."""
     from swhull.validation import sha  # noqa: PLC0415
     path = _validation_path(run_id)
     if not path.is_file():
@@ -1044,12 +1223,21 @@ def get_vehicle_validation(run_id: str) -> dict[str, Any]:
             _revision(_read_design(report["design"])) == report["revision"]}
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-def record_vehicle_validation(run_id: str, export_sha256: str, observations: list[Observation],
-                              game_version: str, tester: str) -> ValidationRun:
-    """Record human-observed pass/fail/skipped results with evidence and measurements.
-    Refuses a changed export or mismatched hash. All seven checks need pass evidence for a passed run."""
+def record_vehicle_validation(run_id: Annotated[str, Field(description=(
+                                  "Run id from prepare_vehicle_validation."))],
+                              export_sha256: Annotated[str, Field(description=(
+                                  "export_sha256 from the run; must still match the file on disk."))],
+                              observations: Annotated[list[Observation], Field(description=(
+                                  "One entry per checklist check the player did: result pass, fail or "
+                                  "skipped, with evidence and measurements."))],
+                              game_version: Annotated[str, Field(description="Stormworks version tested on.")],
+                              tester: Annotated[str, Field(description="Who did the test.")]) -> ValidationRun:
+    """Record what the player observed in game for a validation run. Only human observations
+    belong here, never preflight output. Each observation replaces any earlier result for the
+    same check. Refuses a changed export, a mismatched hash or a different game version. The run
+    passes only when all seven checks pass with evidence."""
     from swhull.validation import record_results, sha  # noqa: PLC0415
     with DESIGN_LOCK:
         current = get_vehicle_validation(run_id)
@@ -1063,18 +1251,20 @@ def record_vehicle_validation(run_id: str, export_sha256: str, observations: lis
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 25,
-                          zoom: float = 1, focus: list[float] | None = None, layer: str = "all",
-                          door_state: Literal["closed", "open"] = "closed",
-                          renderer: Renderer | None = None) -> list:
-    """Preview a draft using installed meshes. yaw/pitch/zoom/focus gives a close-up.
-    layer=all/components/structure; components hides bodywork to inspect seats/tanks/powertrain.
-    Paint and wheel neutral poses are approximate; the image is not an in-game screenshot.
-    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
-    is the fastest, unlit look with block outlines for counting blocks.
-    """
+async def preview_vehicle(design: Draft,
+                          yaw: Annotated[float | None, Field(description=(
+                              "Camera heading in degrees (0 = side, 90 = front); default is a 3/4 view."))] = None,
+                          pitch: Pitch = 25, zoom: Zoom = 1, focus: Focus = None, layer: Layer = "all",
+                          door_state: Annotated[Literal["closed", "open"], Field(description=(
+                              "Show manual doors closed or open."))] = "closed",
+                          renderer: RendererChoice = None) -> list:
+    """Render a draft (imported, land or edited hull) with installed component meshes and
+    return the image plus notes. yaw/pitch/zoom/focus give a close-up; layer=components hides
+    bodywork to inspect seats, tanks and powertrain. Hull specs use preview_hull and vehicles in
+    the game folder use preview_game_vehicle. Paint and wheel poses are approximate; the image
+    is not an in-game screenshot. Read-only."""
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must contain three fractions")
     png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus, layer,
@@ -1082,10 +1272,14 @@ async def preview_vehicle(design: str, yaw: float | None = None, pitch: float = 
     return [Image(data=png, format="png"), note]
 
 
-@mcp.tool()
+@mcp.tool(annotations=EDIT)
 @_user_errors
-async def save_vehicle(name: str, design: str, overwrite: bool = False) -> str:
-    """Save any draft. Imported originals are never overwritten, even with overwrite=true."""
+async def save_vehicle(name: NewVehicleName, design: Draft, overwrite: Overwrite = False) -> str:
+    """Write a stored draft into the Stormworks vehicles folder as <name>.xml with its Load-menu
+    thumbnail. Use it for drafts edited part by part (imports, land vehicles, edited hulls);
+    save_hull is the shortcut for a hull spec. Refuses a name used by a vehicle this tool did
+    not write and the imported original, even with overwrite=true; replaces its own earlier
+    save only with overwrite=true. Returns the file path, part count and notes."""
     record = _read_design(design)
     target, stamp = _save_target(name, record, overwrite)
     xml, count, note = await run_job("export_draft", record)
@@ -1099,22 +1293,30 @@ async def save_vehicle(name: str, design: str, overwrite: bool = False) -> str:
     return f"Saved {count} parts to {target}\n{note}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def check_seal(design: str, seeds: list[Any] | None = None, door_state: str = "closed") -> list:
-    """Trace finished geometry from interior to outside: sealed, leaking or indeterminate.
-    Generated drafts choose room/hull seeds automatically. Imported drafts require seeds:
-    [[x,y,z],...] or [{name,position:[x,y,z]}], in integer blocks in their original body frame.
-    door_state=closed/open models supported doors. Returns connected compartments and a
-    highlighted escape path. Unsupported nearby sealing geometry prevents a confident pass."""
+async def check_seal(design: Draft,
+                     seeds: Annotated[list[Any] | None, Field(description=(
+                         "Interior start points in integer blocks: [[x,y,z],...] or [{name, position:[x,y,z]}]. "
+                         "Required for imported drafts (original body frame); generated drafts choose their own."))]
+                     = None,
+                     door_state: DoorState = "closed") -> list:
+    """Test whether a draft is watertight by tracing from interior points to the outside:
+    sealed, leaking or indeterminate per compartment. Returns an image with any escape path
+    highlighted and a report of connected compartments. Use it after edits that touch the hull
+    or doors. Unsupported sealing geometry nearby prevents a confident pass. Read-only."""
     png, report = await run_job("seal_draft", _read_design(design), seeds, door_state, design)
     return [Image(data=png, format="png"), report]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-def list_game_vehicles(search: str = "") -> list[str]:
-    """Vehicles in the player's Stormworks vehicles folder, optionally filtered by a substring."""
+def list_game_vehicles(search: Annotated[str, Field(description=(
+        "Case-insensitive text in the vehicle name; empty lists all."))] = "") -> list[str]:
+    """List the vehicle names in the player's Stormworks vehicles folder, sorted. Pass a name to
+    preview_game_vehicle, inspect_view, analyze_vehicle or import_vehicle. Drafts stored on this
+    server are listed by list_designs. Read-only; fails when the folder is missing (set
+    SW_VEHICLES_DIR)."""
     d = Path(vehicles_dir())
     if not d.is_dir():
         raise ValueError(f"vehicles folder not found: {d} (set SW_VEHICLES_DIR)")
@@ -1122,44 +1324,36 @@ def list_game_vehicles(search: str = "") -> list[str]:
     return [n for n in names if search.lower() in n.lower()]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def preview_game_vehicle(name: str, source: str = "vehicles", body_id: str | None = None,
-                               renderer: Renderer | None = None) -> list:
-    """Render any vehicle from the player's vehicles folder, e.g. to study their existing boats.
-
-    Uses installed component meshes, with reported footprint fallbacks. source=workshop
-    reads an installed numeric item ID. For articulated vehicles choose body_id; by default
-    show the largest body alone, without pretending unrelated local frames line up.
-    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
-    is the fastest, unlit look with block outlines for counting blocks.
-    """
+async def preview_game_vehicle(name: VehicleName, source: Source = "vehicles", body_id: BodyId = None,
+                               renderer: RendererChoice = None) -> list:
+    """Render a vehicle from the player's vehicles folder or an installed Workshop item and
+    return the image plus a size and part summary, e.g. to study the player's existing boats.
+    Uses installed component meshes, reporting any footprint fallbacks. Articulated vehicles show
+    the largest body alone unless body_id is given. inspect_view points a camera at one detail;
+    drafts use preview_vehicle. Read-only."""
     png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id, renderer)
     return [Image(data=png, format="png"), text]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 @_user_errors
-async def inspect_view(name: str | None = None, spec: dict[str, Any] | None = None,
-                       preset: str | None = None, yaw: float = 35.0, pitch: float = 25.0,
-                       zoom: float = 1.0, focus: list[float] | None = None, design: str | None = None,
-                       patch: list[dict[str, Any]] | None = None, highlight: str | None = None,
-                       spec_path: str | None = None, source: str = "vehicles", body_id: str | None = None,
-                       renderer: Renderer | None = None) -> list:
-    """Render one large view of a hull design or saved vehicle from any angle, like a
-    camera you can point. Use it to check details the fixed previews hide.
-
-    name: a vehicle in the player's vehicles folder, or pass spec/preset/design(+patch).
-    yaw: 0 = side view with bow to the right, 90 = from the bow, 180 = other side, 270 = stern.
-    pitch: degrees above (+) or below (-) the horizon; -30 shows the hull bottom.
-    zoom: 1 = whole vehicle, 2-6 = close-up. focus: [fx, fy, fz] fractions of the bounding
-    box to centre on (x across, y up, z stern to bow), e.g. [0.5, 0.3, 0.9] = low on the bow.
-    highlight: a superstructure box name (designs only): painted magenta and labelled, and
-    its position is reported in spec units and as game-metre heights above the keel. Views at pitch 0 or +-90 get metre rulers in spec units
-    (z from the transom, y from the keel, x from the centreline).
-    renderer: "auto" (default) lights the scene like the game, on the GPU when available; "flat"
-    is the fastest, unlit look with block outlines for counting blocks.
-    """
+async def inspect_view(name: Annotated[str | None, Field(description=(
+                           "Saved vehicle to view; omit to build spec/preset/design instead."))] = None,
+                       spec: Spec = None, preset: Preset = None,
+                       yaw: Yaw = 35.0, pitch: Pitch = 25.0, zoom: Zoom = 1.0, focus: Focus = None,
+                       design: Design = None, patch: Patch = None,
+                       highlight: Annotated[str | None, Field(description=(
+                           "Superstructure box name to paint magenta, label and report the position of "
+                           "(designs only)."))] = None,
+                       spec_path: SpecPath = None, source: Source = "vehicles", body_id: BodyId = None,
+                       renderer: RendererChoice = None) -> list:
+    """Render one large view of a hull design or saved vehicle from any angle, like a camera
+    you can point, to check details the fixed previews hide. Returns the image and a caption;
+    with highlight, the box's position in spec units and as game-metre heights above the keel.
+    Views at pitch 0 or +-90 get metre rulers in spec units (z from the transom, y from the keel,
+    x from the centreline). Use preview_hull for the standard set of views. Read-only."""
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must be [fx, fy, fz]")
     zoom = max(0.2, min(zoom, 12.0))
@@ -1189,19 +1383,22 @@ def _viewer_page(xml, name, geometry=None):
     return path
 
 
-@mcp.tool()
+@mcp.tool(annotations=VIEWER)
 @_user_errors
-async def open_in_viewer(name: str | None = None, spec: dict[str, Any] | None = None,
-                         preset: str | None = None, design: str | None = None,
-                         patch: list[dict[str, Any]] | None = None, spec_path: str | None = None,
-                         source: str = "vehicles", body_id: str | None = None,
-                         diagnostics: bool = False) -> str:
-    """Open a vehicle in the interactive 3D viewer in the player's web browser.
-
-    name: saved vehicle or installed numeric workshop item (source=workshop). design supports
-    hull/land/imported drafts. Uses installed component meshes, with explicit fallbacks.
-    For articulated references choose body_id; otherwise shows the largest body alone.
-    """
+async def open_in_viewer(name: Annotated[str | None, Field(description=(
+                             "Saved vehicle, or numeric Workshop item with source=workshop."))] = None,
+                         spec: Spec = None, preset: Preset = None,
+                         design: Annotated[str | None, Field(description=(
+                             "Stored hull, land or imported draft to show."))] = None,
+                         patch: Patch = None, spec_path: SpecPath = None,
+                         source: Source = "vehicles", body_id: BodyId = None,
+                         diagnostics: Annotated[bool, Field(description=(
+                             "Overlay preflight faults and steering arrows; needs design alone."))] = False) -> str:
+    """Open a vehicle or design in the interactive 3D viewer in the player's web browser so
+    they can orbit and inspect it themselves. You cannot see that window: use inspect_view or
+    the preview tools to look yourself. Writes one temporary HTML page, replaced on each call,
+    and changes nothing else. Uses installed component meshes with explicit fallbacks;
+    articulated vehicles show the largest body alone unless body_id is given."""
     if diagnostics:
         if design is None or any(v is not None for v in (name, spec, preset, patch, spec_path, body_id)) or source != "vehicles":
             raise ValueError("diagnostics requires only a stored design")

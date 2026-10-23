@@ -39,6 +39,19 @@ def test_tools_registered():
             "preflight_vehicle", "study_references", "score_vehicle"} <= names
 
 
+def test_every_tool_documents_its_behaviour_and_parameters():
+    """Graded by the Glama tool-definition review (TDQS): agents read only these definitions."""
+    for tool in server.mcp._tool_manager.list_tools():
+        hints = tool.annotations
+        assert hints is not None and hints.read_only_hint is not None, tool.name
+        assert hints.destructive_hint is not None and hints.open_world_hint is False, tool.name
+        assert len(tool.description) >= 150, tool.name
+        for name, schema in tool.parameters["properties"].items():
+            assert schema.get("description"), f"{tool.name}.{name} has no description"
+        if hints.read_only_hint:
+            assert "Read-only" in tool.description or "Nothing is written" in tool.description, tool.name
+
+
 def test_choices_are_exposed_in_tool_schemas():
     tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
     assert "analysis" in tools["complaint"].parameters["properties"]["category"]["enum"]

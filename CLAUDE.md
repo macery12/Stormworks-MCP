@@ -40,6 +40,10 @@ verified.
   into `ToolError` so the model sees the message. Any tool that builds or renders must be
   `async` and go through `jobs.run_job`: a build in a sync tool runs in a thread that cannot be
   stopped, and on big ships it outlived the client's timeout and stalled every later call.
+  Every tool declares MCP annotations and describes every parameter (shared ones live in
+  `swhull/tool_params.py`); its docstring opens with a verb, names the sibling to use instead
+  where two could be confused, and says what it writes and returns. Glama grades these
+  definitions (TDQS); `npx mcp-tdqs lint --command "uv run server.py"` checks them without a key.
 - `swhull/`: `hull` (shape, boxes, scale), `build` (spec resolution, patches, colours, summary),
   `smooth` (skin + wedge fit), `habits` (veteran finishing: box chamfers, ballast, railings),
   `interior`, `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries`
