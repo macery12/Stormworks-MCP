@@ -30,7 +30,8 @@ DEFAULT_SPEC = {
     "interior_units": "game",
     "bow": {"entry": 0.35, "fullness": 1.6, "stem_width": 0.0, "rake": 0.8,
             "rake_curve": 2.0, "flare": 0.15, "deadrise": 30.0, "bulb": None},
-    "stern": {"run": 0.12, "transom_width": 0.85, "fullness": 2.0, "keel_rise": 0.0},
+    "stern": {"run": 0.12, "transom_width": 0.85, "fullness": 2.0, "keel_rise": 0.0,
+              "flat_bottom": 0.0},
     "sheer": {"bow": 0.5, "stern": 0.1},
     "section": {"deadrise": 14.0, "bilge_radius": 0.3, "flare": 0.1, "keel_width": 0.25},
     "colors": {"bottom": "A52A2A", "stripe": "1A1A1A", "topsides": "F0F0F0",
@@ -45,6 +46,8 @@ DEFAULT_SPEC = {
     "fitout": None,
 }
 
+PAD_BLEND = 0.2     # share of the length over which a flat planing pad eases into the V
+PAD_CHAMFER = 1.0   # voxels: the pad's bottom corners are cut at 45 degrees, as builders do
 LIMITS = {"length": (1.0, 120.0), "beam": (0.5, 40.0), "depth": (0.25, 20.0)}
 SHAPES = ("box", "cylinder", "dome", "sphere", "lattice")
 PIVOTS = ("base", "back", "front", "aft", "fore", "centre")
@@ -215,6 +218,10 @@ def validate(spec):
         if cap is not None and not (isinstance(cap, dict) and _num(cap.get("height", 0.5))
                                     and re.fullmatch(r"[0-9A-Fa-f]{6}", str(cap.get("color", "1A1A1A")))):
             problems.append(f"superstructure[{i}].cap must be {{height (m), color (hex)}}")
+    flat = (spec.get("stern") or {}).get("flat_bottom", 0.0)
+    if not _num(flat) or not 0.0 <= flat <= 0.6:
+        problems.append("stern.flat_bottom must be a fraction of the length in [0, 0.6] "
+                        f"(0.2-0.35 for a planing speedboat; got {flat!r})")
     if spec.get("deck") not in ("closed", "open"):
         problems.append('deck must be "closed" or "open"')
     if spec.get("hulls") not in (1, 2, 3):
@@ -402,6 +409,18 @@ class HullForm:
             B *= tw + (1 - tw) * (1 - t ** p) ** (1 / p)
         return B
 
+    def pad(self, s):
+        """1 where the bottom keeps its V, 0 on the flat planing pad aft (`stern.flat_bottom`,
+        a fraction of the length from the transom), easing between over a fifth of the length.
+        Speedboat builders flatten the bottom aft: a flat run planes and does not dig in."""
+        flat = self.stern.get("flat_bottom") or 0.0
+        if flat <= 0 or s >= flat + PAD_BLEND:
+            return 1.0
+        if s <= flat:
+            return 0.0
+        t = (s - flat) / PAD_BLEND
+        return t * t * (3 - 2 * t)
+
     def deck(self, s):
         up = max(0.0, (s - 0.5) / 0.5) ** 2 * self.sheer["bow"]
         aft = max(0.0, (0.5 - s) / 0.5) ** 2 * self.sheer["stern"]
@@ -413,21 +432,29 @@ class HullForm:
         if t > 0:
             k += self.bow["rake"] * VOX * t ** max(0.5, self.bow["rake_curve"])
         r = self.stern["run"]
-        if r > 0 and s < r and self.stern["keel_rise"]:
+        # a planing pad stays level to the transom: keel rise would lift its trailing edge
+        if r > 0 and s < r and self.stern["keel_rise"] and not self.stern.get("flat_bottom"):
             k += self.stern["keel_rise"] * VOX * ((r - s) / r) ** 2
         return min(k, self.deck(s) - 1.5)
 
     def half_width(self, s, h, H, B):
         """Half-width of the section at height h above the keel (h in [0, H])."""
         t = min(1.0, self.bow_t(s))
-        dr = math.radians(self.sec["deadrise"] + (self.bow["deadrise"] - self.sec["deadrise"]) * t)
+        pad = self.pad(s)
+        dr = math.radians((self.sec["deadrise"] + (self.bow["deadrise"] - self.sec["deadrise"]) * t) * pad)
         flare = self.sec["flare"] + self.bow["flare"] * t
         Bc = max(0.0, B * (1 - flare))
         kw = min(Bc, self.sec["keel_width"] * VOX / 2)
         hc = 0.0 if dr < math.radians(0.5) else min((Bc - kw) * math.tan(dr), H * 0.9)
         side_slope = (B - Bc) / max(H - hc, 1e-6)
 
+        cut = PAD_CHAMFER * (1 - pad)
+
         def raw(y):
+            w = shape(y)
+            return min(w, max(0.0, Bc - cut + y)) if cut and y >= 0 else w
+
+        def shape(y):
             if y < 0:
                 return max(0.0, kw + (Bc - kw) * y / hc) if hc > 0 else 0.0
             if y < hc:

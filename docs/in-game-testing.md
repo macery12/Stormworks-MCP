@@ -30,6 +30,7 @@ with recorded player observations. Generated exhibits remain pending until check
 | Open-deck fixture supports | Minimal supports to explicit walking floors are reported and confined to hull volume; automated attachment checks pass. Inspect cabin, arch and bollard bases and walking clearance in game |
 | Veteran box finishing (1x1 chamfer columns, roof bevel, pyramid caps) | Approved from renders 2026-10-20; not yet loaded in game |
 | Symmetric skins and the three-wide stem nose | From the player's hand fix of "Slim Speedboat" (2026-10-21); rendered and tested, not yet loaded in game. Save the Slim Speedboat design again and check the nose from below and both sides: no holes, no one-wide stub, port and starboard alike |
+| Flat planing pad (`stern.flat_bottom`) | Rendered and tested; not yet run in game. Save a `runabout` and check it planes level at speed without the bow digging in, against the same hull with `flat_bottom: 0` |
 | Load-menu thumbnails | Drawn in the game's own layout (512 x 512, chevron backdrop); not yet seen in the Load menu |
 | Ballast (`ballast: "auto"`) and the flotation estimate | Not yet checked: save `patrol_boat` with wedge smoothing, compare where the water meets the hull with the estimated 1.4 m draft (paint ends at 1.0 m), and check it floats level |
 | Railings (`railings: "auto"`) | Written in the format the reference ships save (`bc`/`ac` paint, mirrored diagonal corners as `t`); not yet loaded in game. Check they attach, the transom diagonal corners meet, and the trawler's sheer-step incline lines up |

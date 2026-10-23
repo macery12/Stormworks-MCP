@@ -248,7 +248,8 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `stern.run` | fraction of length over which the stern narrows | 0 (square) to 0.35 (double-ender) |
 | `stern.transom_width` | transom width as fraction of beam (0 = canoe/pointed stern) | 0.5-1 |
 | `stern.fullness` | plan shape of the stern taper (like bow.fullness) | 2 |
-| `stern.keel_rise` | keel lift toward the stern, m | 0-0.5 |
+| `stern.keel_rise` | keel lift toward the stern, m (ignored with `flat_bottom`) | 0-0.5 |
+| `stern.flat_bottom` | fraction of the length from the transom with a flat, level planing pad (no V; corners chamfered); eases into the V over a further 0.2 | 0.25-0.35 speedboat, else 0 |
 | `sheer.bow` / `sheer.stern` | deck-line rise at bow/stern, m | bow 0.2-1.2 |
 | `section.deadrise` | V-angle of the bottom amidships, degrees (0 = flat) | planing 16-24, workboat 8-14, barge 0 |
 | `section.bilge_radius` | roundness where bottom meets side, m (0 = hard chine) | 0 speedboat, 0.3-1.2 round bilge |
@@ -516,7 +517,7 @@ plumbing and in-game confirmation of actual capacity and contents remain player 
 
 | type | L/B | deadrise | bow | stern | character |
 |---|---|---|---|---|---|
-| runabout / speedboat | 2.8 | 16-22 (bow 40+) | fine, raked, flared | wide transom | low, open cockpit |
+| runabout / speedboat | 2.8 | 16-22 (bow 40+), `stern.flat_bottom` 0.3 | fine, raked, flared | wide transom, flat planing pad | low, open cockpit |
 | fishing trawler | 3.2 | 10-14, round bilge | high sheer, flared | transom or cruiser | wheelhouse forward, work deck aft |
 | tug | 2.3-2.6 | 6-10, big round bilge | bluff, round | rounded, narrow | tall wheelhouse amidships |
 | motor yacht | 3.5-4 | 14-18 | fine, strongly raked | wide transom | long stepped superstructure |

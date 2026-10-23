@@ -6,11 +6,11 @@ sizes that fit common Stormworks workbenches.
 
 PRESETS = {
     "runabout": {
-        "about": "Small planing speedboat: deep-V bow, flat-ish run aft, wide square transom, open cockpit.",
+        "about": "Small planing speedboat: deep-V bow, flat planing pad aft, wide square transom, open cockpit.",
         "spec": {
             "length": 7.0, "beam": 2.5, "depth": 1.2, "deck": "open",
             "bow": {"entry": 0.42, "fullness": 1.5, "rake": 0.55, "rake_curve": 1.6, "flare": 0.2, "deadrise": 42},
-            "stern": {"run": 0.04, "transom_width": 0.92},
+            "stern": {"run": 0.04, "transom_width": 0.92, "flat_bottom": 0.3},
             "sheer": {"bow": 0.3, "stern": 0.0},
             "section": {"deadrise": 18, "bilge_radius": 0.1, "flare": 0.12, "keel_width": 0.25},
             "colors": {"bottom": "1E3A5F", "stripe": "F2B705", "topsides": "F0F0F0", "deck": "D8CBB0"},
