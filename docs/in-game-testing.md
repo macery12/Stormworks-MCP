@@ -14,6 +14,21 @@ The [advanced testing suite](advanced-testing.md) adds body-aware saved-vehicle 
 all-definition rotation checks, both rudder mounting models, and numbered calibration exhibits
 with recorded player observations. Generated exhibits remain pending until checked in game.
 
+## Whole-vehicle check
+
+The owner loaded **Coastal Patrol 17 v1**, a 15 m open-helm boat built from a fresh spec with
+`fitout.stage=powertrain`, a medium diesel, one shaft, a Coast Guard livery, ballast, railings
+and mooring anchors. The exported XML had SHA-256
+`81d97498949f44f7f8e806a9cb826d80b4cd63426d7b3839f08602c621d76ee7`. Before the game
+run, automated checks reported zero missing control, electric or fluid paths, a sealed hull
+under the geometric seal model and a successful XML round trip (2,449 components).
+
+The owner reported that the boat looked good, drove and turned, and had good fuel and cooling
+behavior. They made one minor manual block adjustment and did not request a generator change.
+The exact adjusted block and game-save XML were not recorded, so this is evidence for the
+player-adjusted boat, not an exact-version pass for the original export. No speed, endurance,
+temperature or draft values were reported. Twin shafts and reverse were not part of this boat.
+
 ## Engine telemetry
 
 The first in-game runs were captured on 2026-10-24 in

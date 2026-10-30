@@ -7,17 +7,17 @@ provenance. There is no installer or locally supplied binary input.
 ## Publish a version
 
 1. Update `pyproject.toml` and `swhull/_version.py` to the same `MAJOR.MINOR.PATCH` version.
-   Run `uv lock` and include the lockfile. Version 0.1.0 is already set.
+   Run `uv lock` and include the lockfile.
 2. Commit the reviewed implementation, tests and workflows. Keep your release-description
    draft separate if you do not want it committed.
 3. Push that commit, then create and push its tag:
 
    ```powershell
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 
-   `v0.1` is also accepted for version `0.1.0`. A version mismatch fails packaging.
+   `v0.2` is also accepted for version `0.2.0`. A version mismatch fails packaging.
 4. Watch **Actions > Tagged release**. After successful checks, open the draft under
    **Releases**, paste the release description and publish it.
 
@@ -69,7 +69,7 @@ reproducible binary identity.
 From the folder containing the downloaded executable:
 
 ```powershell
-Get-FileHash .\stormworks-mcp-0.1.0-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\stormworks-mcp-0.2.0-windows-x64.exe -Algorithm SHA256
 gh attestation verify .\stormworks-mcp-0.1.0-windows-x64.exe --repo macery12/Stormworks-MCP
 ```
 
@@ -85,7 +85,7 @@ uv sync --locked --group build
 uv run --group build python tools/build_windows.py
 uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
-uv run python tools/release_assets.py --tag v0.1.0 --commit local
+uv run python tools/release_assets.py --tag v0.2.0 --commit local
 ```
 
 Python packages are resolved by `uv.lock`. GitHub actions are pinned to commits and maintained

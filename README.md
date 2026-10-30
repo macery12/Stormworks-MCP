@@ -116,7 +116,7 @@ You need Windows 10 or 11 (x64), Stormworks installed through Steam, and Claude 
 ChatGPT / Codex Windows app on the same PC. The download includes Python and every dependency; you
 do not need to install Python, uv or Git.
 
-1. Download `stormworks-mcp-0.1.0-windows-x64.exe` from
+1. Download `stormworks-mcp-0.2.0-windows-x64.exe` from
    [Releases](https://github.com/macery12/Stormworks-MCP/releases).
 2. Move it to a permanent folder and double-click it. There is no installer.
 3. Close your AI client. In the app, open **MCP > Set up Claude Desktop** or
@@ -284,20 +284,21 @@ unknown component geometry reports the result as indeterminate.
 
 ## Status and limitations
 
-This is an early release (0.1). The server writes files without running the game, so the game is the
+This is an early release (0.2). The server writes files without running the game, so the game is the
 only real test. [In-game testing](docs/in-game-testing.md) tracks the status of every feature.
 
 - **Verified in game:** vehicles load centred in the workbench, blocks-only hulls float, and Wedge
   1x1/1x2/1x4, Pyramid and Inverse Pyramid rotate correctly in all 40 tested orientations.
+  A player-tested 15 m patrol boat drove and steered, with working fuel and cooling after one minor
+  manual block adjustment; see the [test record](docs/in-game-testing.md#whole-vehicle-check).
 - **Player-tested, with a fix awaiting a check:** the connected Humvee's controls, engine and
   steering work, but W drove it backward because the gearbox's off ratio was reverse. The
   replacement cube gearbox has not been checked in game yet.
-- **Not yet verified in game:** both smoothing modes and the larger Pyramid sizes; interiors, doors
-  and hatches; placed components and block-built tanks; seal checks; round and angled shapes,
-  bulbous bows, skegs and paint; and operating the utility buggy and utility 4x4.
-- **Placed parts are not a working system.** The boat fit-out stages and the utility buggy place
-  engines, tanks, propellers and rudders without connecting them. Add pipes and wires with the
-  connection tools, then test in game.
+- **Not yet verified in game:** the larger Pyramid sizes; interiors, doors and hatches;
+  block-built tanks; many shape and paint options; and operating the utility buggy and utility 4x4.
+- **Placed parts still need a systems check.** The boat powertrain stage routes its pipes and
+  shaft but needs control and electric wiring. Other fit-out stages and the utility buggy need
+  their systems completed with the connection tools, then tested in game.
 - **Nothing is simulated.** Preflight checks that paths and links exist; it does not simulate
   physics, fluid flow, engine load or driving. Control logic comes from the connected 4x4 presets
   and the four control assemblies.
@@ -361,7 +362,7 @@ uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
 ```
 
-Tagging `v0.1.0` (or `v0.1`) runs the tests, builds and tests the executable, and uploads it to a
+Tagging `v0.2.0` runs the tests, builds and tests the executable, and uploads it to a
 draft GitHub release with checksums and signed build provenance; see
 [releasing and verification](docs/releases.md). Changes must pass lint and tests. Geometry changes
 also need a rendered review and a specific in-game check, as described in [CLAUDE.md](CLAUDE.md).
