@@ -46,6 +46,16 @@ def test_unknown_definition_cannot_pass(monkeypatch):
     assert check([*box(), Placed(p, (2, 2, 2))], [[1, 1, 1]])["status"] == "indeterminate"
 
 
+def test_generated_mooring_anchor_seals_deck_without_game_definitions(monkeypatch):
+    from swhull.habits import CLEAT, RAILS  # noqa: PLC0415
+    monkeypatch.setattr(definitions, "metadata", lambda _d: None)
+    hull = [p for p in box() if p.origin != (2, 4, 2)]
+    anchor = Placed(CLEAT, (2, 4, 2))
+    railing = Placed(RAILS["end"], (3, 5, 2))
+    assert check([*hull, anchor, railing], [[2, 2, 2]])["status"] == "sealed"
+    assert check([*hull, railing], [[2, 2, 2]])["status"] == "leaking"
+
+
 def test_partial_component_sealing_surfaces_are_not_footprint_blocks(monkeypatch):
     p = Piece("partial_part", 6, 0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
     monkeypatch.setattr(definitions, "metadata", lambda _d: {"voxels": [], "sealing_surfaces": [

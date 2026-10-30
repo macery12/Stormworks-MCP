@@ -135,6 +135,15 @@ class Geometry:
                 continue
             data = definitions.metadata(p.piece.d)
             if data is None:
+                # The builder knows these installed shapes without reading game files. A Rope
+                # Anchor replaces a full deck block with a sealed base; railings stand above
+                # the deck and do not seal a compartment. Keep other missing definitions
+                # indeterminate.
+                if p.piece.d == "rope_hook":
+                    self.solid.add(p.origin)
+                    continue
+                if p.piece.d.startswith("railing_segment_") or p.piece.d == "railing_extension_angle":
+                    continue
                 self.global_unknown.add(p.piece.d)
                 continue
             voxels = {tuple(v["position"]): v for v in data["voxels"]}
