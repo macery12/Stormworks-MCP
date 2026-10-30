@@ -121,8 +121,50 @@ def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="
     return png, describe(record, parts, info) + "\n" + _mesh_note(shown)
 
 
-def edit_draft(record, operations, title):
+def change_summary(record, proposed):
+    """What a batch changed, for compact tool replies: parts added/removed/changed (with the ids
+    later calls need), wires added/removed, and the build's warnings. Raises like preview_draft
+    when the batch leaves a dangling generated connection."""
+    from .networks import wires  # noqa: PLC0415
+    before, _ = materialize(record)
+    after, info = materialize(proposed)
+    old, new = {p.uid: p for p in before}, {p.uid: p for p in after}
+
+    def rows(parts):
+        pipes, out = {}, []
+        for p in parts:
+            if p.piece.d.startswith("trans_") and p.uid.count(":") >= 2:
+                key = p.uid.rsplit(":", 1)[0]
+                pipes.setdefault(key, [p.name, 0])[1] += 1
+            else:
+                out.append(f"{p.uid} {p.piece.d}" + (f" '{p.name}'" if p.name else "") + f" at {list(p.origin)}")
+        return out + [f"{key} '{name}': {n} pipe pieces" for key, (name, n) in pipes.items()]
+
+    added = rows([p for uid, p in new.items() if uid not in old])
+    removed = rows([p for uid, p in old.items() if uid not in new])
+    changed = rows([p for uid, p in new.items() if uid in old and (p.origin, p.Q, p.color, p.settings)
+                    != (old[uid].origin, old[uid].Q, old[uid].color, old[uid].settings)])
+    links_before = {link["link_id"] for link in wires(record, before)}
+    links_after = wires(proposed, after)
+    links_added = [f"{link['link_id']}: {link.get('from')} -> {link.get('to')}" for link in links_after
+                   if link["link_id"] not in links_before]
+    links_removed = sorted(links_before - {link["link_id"] for link in links_after})
+    lines = [f"Parts: {len(added)} added, {len(removed)} removed, {len(changed)} changed. "
+             f"Wires: {len(links_added)} added, {len(links_removed)} removed."]
+    for title, items in (("Added", added), ("Removed", removed), ("Changed", changed),
+                         ("Wires added", links_added), ("Wires removed", links_removed)):
+        if items:
+            lines.append(f"{title}: " + "; ".join(items[:30]) + (f"; and {len(items) - 30} more" if len(items) > 30 else ""))
+    warnings = (info or {}).get("warnings", [])
+    lines += [f"! {w}" for w in warnings[:20]]
+    lines.append("preview=true adds the image and the full build notes.")
+    return "\n".join(lines)
+
+
+def edit_draft(record, operations, title, preview=False):
     proposed = edited(record, operations)
+    if not preview:
+        return proposed, None, change_summary(record, proposed)
     png, text = preview_draft(proposed, title)
     return proposed, png, text
 
@@ -225,29 +267,34 @@ def query_connections(record, offset, limit):
     return {**query(record, parts, offset, limit), "revision": revision(record)}
 
 
-def edit_connections(record, operations, title):
+def edit_connections(record, operations, title, preview=False):
     from .networks import edited as connection_edit  # noqa: PLC0415
     parts, _ = materialize(record)
     proposed = connection_edit(record, operations, parts)
+    if not preview:
+        return proposed, None, change_summary(record, proposed)
     png, note = preview_draft(proposed, title)
     return proposed, png, note
 
 
-def route_connections(record, operations, title):
+def route_connections(record, operations, title, preview=False):
     import copy  # noqa: PLC0415
     if not isinstance(operations, list) or not operations or len(operations) > 100:
         raise ValueError("routes must be a nonempty list of at most 100 objects")
     proposed = copy.deepcopy(record)
     proposed.pop("history", None)
     proposed.setdefault("route_edits", []).extend(copy.deepcopy(operations))
+    if not preview:
+        return proposed, None, change_summary(record, proposed)
     png, note = preview_draft(proposed, title)
     return proposed, png, note
 
 
-def preflight_vehicle(record):
-    from .networks import preflight  # noqa: PLC0415
+def preflight_vehicle(record, detail=False):
+    from .networks import compact, preflight  # noqa: PLC0415
     parts, _ = materialize(record)
-    return {**preflight(record, parts), "revision": revision(record)}
+    report = preflight(record, parts)
+    return {**(report if detail else compact(report)), "revision": revision(record)}
 
 
 def plan_vehicle_repairs(record):
@@ -263,11 +310,14 @@ def repair_vehicle(record, plan_id, finding_ids, title):
     return proposed, png, report
 
 
-def assemble_vehicle(record, assembly, bindings, options, title):
+def assemble_vehicle(record, assembly, bindings, options, title, show=False, detail=False):
     from .assemblies import assemble  # noqa: PLC0415
     from .diagnostic_view import preview  # noqa: PLC0415
+    from .networks import compact  # noqa: PLC0415
     proposed, report = assemble(record, assembly, bindings, options)
-    png, _ = preview(record, title, proposed)
+    if not detail:
+        report["preflight"] = compact(report["preflight"])
+    png = preview(record, title, proposed)[0] if show else None
     return proposed, png, report
 
 

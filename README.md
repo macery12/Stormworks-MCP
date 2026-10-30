@@ -330,7 +330,7 @@ string means unpainted, and the game's axes are left-handed.
 | Guide | Read it to |
 | --- | --- |
 | [Building walkthrough](docs/building.md) | Make a first build, keep units straight, edit exactly and diagnose a result. |
-| [Staged builder](docs/staged-builder.md) | Build in stages, edit parts, import vehicles, and add components, access, seals and tanks. |
+| [Staged builder](docs/staged-builder.md) | Build in stages, edit parts, import vehicles, and add components, access, propulsion, engine rooms, seals and tanks. |
 | [Land vehicles](docs/land-vehicles.md) | Use the land presets, the chassis spec, parts, connections and preflight. |
 | [Diagnose, repair and verify](docs/vehicle-repair.md) | Repair faults, apply control assemblies and record in-game tests. |
 | [Hull smoothing](docs/hull-smoothing.md) | Choose slope pieces and check hull depth. |

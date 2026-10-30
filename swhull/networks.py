@@ -15,6 +15,7 @@ from .pieces import add, apply
 from .routing import compatible
 
 SIGNALS = frozenset((0, 1, 5, 6, 7))
+PROPELLERS = frozenset(("propeller", "large_propeller", "giga_prop_small"))
 TYPE_NAMES = {0: "on/off", 1: "number", 2: "mechanical power (physical pipe)",
               3: "fluid (physical pipe)", 4: "electric", 5: "composite", 6: "video", 7: "audio"}
 
@@ -330,6 +331,8 @@ def preflight(record, parts):
     def check(p, system, ok, detail):
         checks.append({"part_id": p.uid, "system": system, "status": "connected" if ok else "missing", "detail": detail})
 
+    wheeled = any(road_wheel(p.piece.d) and "spare" not in p.name.lower() for p in parts)
+    # Driven wheels need a clutch and gearbox; propellers and carried spare wheels do not.
     directed, electric = defaultdict(set), defaultdict(set)
     for link in links:
         if "from" not in link:
@@ -358,20 +361,25 @@ def preflight(record, parts):
             if required:
                 check(p, "control", key in targets, n["label"])
         if p.piece.d in PREBUILT_ENGINES:
+            # A boat's engine drives its propeller directly; a fluid port is a valid intake or outlet.
+            driven = {q.piece.d for q in parts if road_wheel(q.piece.d) or q.piece.d in PROPELLERS}
             for label, system, target_defs in (
-                ("RPS", "drivetrain", {p.piece.d for p in parts if road_wheel(p.piece.d)}),
-                ("Fuel", "fuel", {p.piece.d for p in parts if p.piece.d.startswith("fluid_tank_")}),
-                ("Air", "air", {"air_filter"}), ("Exhaust", "exhaust", {"fluid_exhaust"}),
-                ("In Coolant", "cooling return", {p.piece.d for p in parts if p.piece.d.startswith("fluid_radiator")}),
-                ("Out Coolant", "cooling supply", {p.piece.d for p in parts if p.piece.d.startswith("fluid_radiator")})):
+                ("RPS", "drivetrain", driven),
+                ("Fuel", "fuel", {q.piece.d for q in parts if q.piece.d.startswith("fluid_tank_")}),
+                ("Air", "air", {"air_filter", "water_inlet"}), ("Exhaust", "exhaust", {"fluid_exhaust", "water_inlet"}),
+                ("In Coolant", "cooling return", {q.piece.d for q in parts if q.piece.d.startswith("fluid_radiator")}),
+                ("Out Coolant", "cooling supply", {q.piece.d for q in parts if q.piece.d.startswith("fluid_radiator")})):
                 reachable = _reachable(graph, starts(p, label, 2 if label == "RPS" else 3))
                 reached = {by_id[k[0]].piece.d for k in reachable if k[0] != p.uid}
-                check(p, system, bool(reached & target_defs), sorted(reached))
+                ok = bool(reached & target_defs)
+                check(p, system, ok, sorted(reached) if ok else {
+                    "port": label, "expected_one_of": sorted(target_defs) or ["(none in this draft)"],
+                    "reaches": sorted(reached) or ["nothing: the port is open"]})
             rps = _reachable(graph, starts(p, "RPS", 2))
             for wheel in parts:
                 if road_wheel(wheel.piece.d) and "spare" not in wheel.name.lower():
                     check(wheel, "drivetrain", bool(set(starts(wheel, "RPS", 2)) & rps), "engine path through clutch/gearbox is conditional")
-            for label, family in (("clutch", {"torque_clutch"}), ("gearbox", GEARBOXES)):
+            for label, family in (("clutch", {"torque_clutch"}), ("gearbox", GEARBOXES)) if wheeled else ():
                 check(p, "drivetrain control parts", any(by_id[k[0]].piece.d in family for k in rps), label)
                 cut = {k for k in graph if by_id[k[0]].piece.d in family}
                 without = defaultdict(set, {k: neighbours - cut for k, neighbours in graph.items() if k not in cut})
@@ -431,3 +439,18 @@ def preflight(record, parts):
     from .repairs import findings  # noqa: PLC0415
     report["findings"] = findings(report, parts, links)
     return report
+
+
+def compact(report):
+    """A preflight report with each fault once: only missing checks, findings without their
+    repair operations (plan_vehicle_repairs has those), and only invalid configuration rows."""
+    return {**report,
+            "checks": [c for c in report["checks"] if c["status"] != "connected"],
+            "findings": [{**f, "suggested_operations": {}} for f in report["findings"]],
+            "configuration_checks": [c for c in report["configuration_checks"] if c.get("status") == "invalid"],
+            "gearbox_configuration_checks": [c for c in report["gearbox_configuration_checks"]
+                                             if c.get("status") == "invalid" or c["off"]["direction"] == "reverse"],
+            "wheel_direction_checks": [c for c in report["wheel_direction_checks"]
+                                       if c["forward_dot"] != 1 or c["up_dot"] != 1
+                                       or c["steering_status"] == "opposes arrows"],
+            "verification": report["verification"] + " Compact: detail=true lists every check and repair operation."}

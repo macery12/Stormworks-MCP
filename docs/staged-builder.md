@@ -34,7 +34,8 @@ For new parts, `rotation` also accepts an effective mirrored matrix, or use a pr
 rotation with `mirror` (local bitmask: 1=x, 2=y, 4=z). `query_parts` returns both forms and
 scalar settings. New prebuilt engines explicitly default to `max_force_scale=1` (100%).
 
-Inspect the preview, then repeat with **commit=true** and the original revision.
+Pass **preview=true** with **commit=false** to inspect the image, then repeat with
+**commit=true** and the original revision.
 **undo_edits(design, revision)** restores the previous batch (ten retained steps).
 Stale identifiers/revisions, collisions, and failed operations do not change the draft.
 
@@ -55,7 +56,8 @@ Without game definitions, catalogue search still provides the built-in building 
 
 ## Core parts and propulsion
 
-An optional **fitout** object has a **stage**: structure, core, access, propulsion, or tanks.
+An optional **fitout** object has a **stage**: structure, core, access, propulsion, tanks or
+powertrain.
 Use **{"fitout": {"stage": "core"}}** for one helm/seat and one battery.
 The control goes in a bridge when possible, with a compact-seat fallback. Batteries are tried
 largest to smallest using installed footprints, mounting contact and a supported 0.75 m
@@ -80,9 +82,34 @@ color, scalar settings, room, bay (two corners in metres), mirror_x, count, and 
 An automatic count finds distinct mounted positions; explicit repeated positions need a step.
 Explicit invalid placements fail; automatic choices explain why they were skipped.
 
-The propulsion stage requests a small propeller and rudder. Propeller thrust axes face
-forward, mirrored twins use the game's mirror convention, and moving parts reserve clearance.
-These are placements: shafts, pipes, electrical connections and controls remain user work.
+The propulsion stage sets a small propeller and rudder into the hull, the way a player fixed a
+generated speedboat in game: the propeller hub replaces a transom block with only its blades
+aft, and the rudder's mounting plate replaces the bottom row flush with the transom, never past
+it. `fitout.engines: 2` gives twin shaft lines (a catamaran needs 2, one per hull). An explicit
+`fitout.propeller` or `fitout.rudder` position, definition, orientation, rotation, bay or room
+uses the general placement search instead; its thrust axes face forward and moving parts reserve
+clearance. The powertrain stage and `engines: 2` require automatic propeller/rudder placement;
+for a custom location use the propulsion stage and route the engine room manually.
+
+The powertrain stage adds a running engine room per shaft line: a prebuilt diesel low inside the
+hull (in the engine room when there is one), the radiator by its coolant ports, a medium diesel
+tank by its fuel port, a fluid port (`water_inlet`) flush in the deck for air and a fluid exhaust
+per exhaust port out of the transom above the propeller. `fitout.engine_size` picks small
+(`engine`, 20 kW), medium (`aircraft_engine`, the game's Medium Engine, 60 kW) or large
+(`engine_diesel`, 200 kW); auto picks the smallest that meets a power-per-mass target for the hull
+type and fits (provisional pending tests on the same hull). The target treats a hull as
+planing only when `stern.flat_bottom` is set; other hulls use the displacement target. The
+medium tank is a starter fuel supply; in-game engine tests exhausted it during the medium and
+large long throttle sweeps. Allow more fuel for operational endurance. Every pipe is routed
+inside the hull and colour-coded by contents (ISO 14726:
+fuel brown, cooling water blue, sea water green, exhaust black, air maroon, oil orange; shafts
+orange); pipes through bulkheads and the transom are enclosed and keep the hull colour. Wire the
+throttle, starter and battery afterwards with `apply_vehicle_assembly` (engine_start_idle; a
+list of engine ids for twins). A
+design that already has engines keeps them and gets only the propellers and rudders.
+
+Builds warn (`!`) when a hand-placed engine sits above the deck or outside the hull, or a
+propeller or rudder hangs behind the transom.
 
 Use `orientation` constraints instead of a rotation matrix to specify mounting and functional
 axes independently. Both standard and Fin Rudder placements require contact at the intended

@@ -34,9 +34,9 @@ from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyRepo
                                  ConnectionBatch, DiagnosticReport, EditBatch, PreflightReport,
                                  ReferenceVehicle, RepairPlan, RouteBatch, Selection, plain)
 from swhull.study import ranges as reference_ranges
-from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, DoorState, Draft,
-                                Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName, Overwrite,
-                                Patch, Pitch, Preset, RendererChoice, Revision, Source, Spec, SpecPath,
+from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, Detail, DoorState,
+                                Draft, Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName, Overwrite,
+                                Patch, Pitch, Preset, Preview, RendererChoice, Revision, Source, Spec, SpecPath,
                                 VehicleName, Yaw, Zoom)
 from swhull.validation import Observation, ValidationRun
 
@@ -127,9 +127,15 @@ plus `patch` (JSON-Patch ops). The player loads the saved vehicle from a workben
 Before designing, ask the player which bench size they will build at (S, M, L, XL, XXL or MAX;
 `list_workbenches` gives sizes) and set `bench` in the spec; the summary checks the fit.
 Build in stages and stop/save wherever the player prefers: hull -> structure -> core ->
-access -> propulsion parts -> custom tanks. Geometry is plain blocks unless wedges are requested.
+access -> propulsion -> tanks -> powertrain. Use smoothing="wedges_v2" for hulls; plain blocks
+(the default) look stepped in game, so use them only when the player asks for blocks.
 Optional fitout.stage places real game-sized batteries and a helm/seat; access adds complete
-manual doors and requested hatch/ladder assemblies; propulsion adds propellers/rudders.
+manual doors and requested hatch/ladder assemblies; propulsion sets the propeller hub into the
+transom and the rudder into the bottom; powertrain adds a small diesel low inside the hull with
+radiator, fuel tank, deck air intake and transom exhaust, all piped (fitout.engines 1 or 2;
+fitout.engine_size auto/small/medium/large; aircraft_engine is the game's Medium Engine, a diesel).
+Edit tools reply compactly with what changed; pass preview=true for images.
+Never put an engine on the deck or hang a propeller/rudder behind the transom; builds warn.
 Named components/tanks remain in game metres when the hull is scaled. Report every automatic
 choice and skipped placement. Never carve a hatch without its complete fitted assembly.
 For exact edits use query_parts -> edit_parts preview -> edit_parts commit with the same revision;
@@ -498,14 +504,19 @@ def store_design(name: Annotated[str, Field(description=(
     preview_hull(design="Iowa", patch=[...]) to try a change and
     store_design("Iowa", design="Iowa", patch=[...]) to keep it. Replaces any stored design
     of that name; save_hull(name, design=name) writes the vehicle when ready.
-    Stored designs are plain JSON files that every call re-reads, so editing one on disk takes
-    effect at once. Returns the stored file's path."""
+    design=X copies all of draft X: its spec, the parts added with edit_parts, and its wires and
+    pipes (a patch that removes a part they use makes later calls ask you to reconnect it).
+    Undo history is not copied. Stored designs are plain JSON files that every call re-reads,
+    so editing one on disk takes effect at once. Returns the stored file's path."""
     full = _spec(spec, preset, design, patch, spec_path)
     path = _design_path(name)
     with DESIGN_LOCK:
         previous = _read_design(name) if path.is_file() else {}
+        source = _read_design(design) if design else {}
+        # Wires and pipes live beside the spec; a copy without them strands hand-placed parts.
+        carried = {k: source[k] for k in ("connection_edits", "route_edits") if source.get(k)}
         _atomic_design(name, {"preset": preset, "vehicle": previous.get("vehicle", False),
-                              "spec": full, "generation": previous.get("generation", 0) + 1})
+                              "spec": full, "generation": previous.get("generation", 0) + 1, **carried})
     boxes = len(full.get("superstructure") or [])
     return (f"Stored design '{name}' ({full['length']} m, {boxes} superstructure entries) at "
             f"{path}. Use design=\"{name}\" with patch=[...] in any tool; edits to that file "
@@ -890,27 +901,32 @@ async def query_parts(design: Draft,
 async def edit_parts(design: Draft,
                      operations: Annotated[EditBatch, Field(description=(
                          "1-100 operations applied in order as one atomic batch; see the description."))],
-                     revision: Revision, commit: Commit = False) -> list:
-    """Add, remove, move, rotate, paint or copy parts in a draft as one atomic batch; previews
-    by default. Pass the revision from query_parts.
+                     revision: Revision, commit: Commit = False, preview: Preview = False) -> list:
+    """Add, remove, move, rotate, paint or copy parts in a draft as one atomic batch. Pass the
+    revision from query_parts.
     Ops: add(part/parts), fill(bounds,color), remove/replace/move/rotate/paint/copy/mirror/repeat.
     Selection ops need select={ids/bounds/name/definition}. move/copy/repeat use delta in blocks;
     repeat count is additional copies; rotate uses a local-to-world matrix or r string and pivot;
     mirror uses axis and plane. replace needs part; paint needs color. Added parts use definition,
     position in blocks, rotation, optional mirror (1=x, 2=y, 4=z), color, name and scalar settings.
     Placement rotation accepts an effective mirrored matrix; use that or proper rotation plus
-    mirror. Prebuilt engines default to max_force_scale=1 (100%). Returns a preview image, notes
-    and the new revision; commit=true keeps one undo step (undo_edits). Wires and pipes use
-    edit_connections and route_connections."""
+    mirror. Prebuilt engines default to max_force_scale=1 (100%). Returns what changed (added
+    parts with their new ids, such as edit:0:0, next to the names you gave), warnings and the new
+    revision; preview=true adds the image and full notes. commit=true keeps one undo step
+    (undo_edits). Wires and pipes use edit_connections and route_connections."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_parts again before editing")
-    proposed, png, note = await run_job("edit_draft", record, plain(operations, EditBatch), design)
+    proposed, png, note = await run_job("edit_draft", record, plain(operations, EditBatch), design, preview)
     if commit:
         proposed = _commit_record(design, proposed, revision)
-    return [Image(data=png, format="png"), note,
+    return [*_maybe_image(png), note,
             {"committed": commit, "revision": _revision(proposed),
              "base_revision": revision, "operations": len(operations)}]
+
+
+def _maybe_image(png):
+    return [Image(data=png, format="png")] if png else []
 
 
 @mcp.tool(annotations=EDIT)
@@ -952,21 +968,23 @@ async def query_connections(design: Draft, offset: Offset = 0, limit: Limit(200,
 async def edit_connections(design: Draft,
                            operations: Annotated[ConnectionBatch, Field(description=(
                                "1-100 connect/disconnect operations applied as one atomic batch."))],
-                           revision: Revision, commit: Commit = False) -> list:
-    """Add or remove typed control and electrical wires in a draft; previews by default. Uses
-    the query_connections revision.
+                           revision: Revision, commit: Commit = False, preview: Preview = False) -> list:
+    """Add or remove typed control and electrical wires in a draft. Uses the
+    query_connections revision.
     Ops: {op:'connect',from:{part_id,port},to:{part_id,port}} or {op:'disconnect',link_id}.
     Signal outputs connect to inputs; electricity is bidirectional. One driver per signal input.
     Pipes and shafts use route_connections; whole starter, clutch, brake or light set-ups use
-    apply_vehicle_assembly. Original XML and settings stay lossless. Returns a preview image,
-    notes and the new revision; commit=true keeps one undo step."""
+    apply_vehicle_assembly. Original XML and settings stay lossless. Returns the wires added and
+    removed, warnings and the new revision; preview=true adds the image and full notes.
+    commit=true keeps one undo step."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
-    proposed, png, note = await run_job("edit_connections", record, plain(operations, ConnectionBatch), design)
+    proposed, png, note = await run_job("edit_connections", record, plain(operations, ConnectionBatch), design,
+                                        preview)
     if commit:
         proposed = _commit_record(design, proposed, revision)
-    return [Image(data=png, format="png"), note,
+    return [*_maybe_image(png), note,
             {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
 
 
@@ -975,40 +993,45 @@ async def edit_connections(design: Draft,
 async def route_connections(design: Draft,
                             routes: Annotated[RouteBatch, Field(description=(
                                 "1-100 routes to add or {op:'remove',route_id} entries; see the description."))],
-                            revision: Revision, commit: Commit = False) -> list:
+                            revision: Revision, commit: Commit = False, preview: Preview = False) -> list:
     """Lay physical pipes between transmission faces in a draft, preserving access and
-    structure; previews by default. Wires use edit_connections instead.
+    structure. Wires use edit_connections instead.
     Each route: {from:{part_id,surface_index},to:{part_id,surface_index},bounds?:[[lo],[hi]],
-    waypoints?:[[x,y,z],...],name?:str,pipe_style?:auto|exposed|enclosed,through_blocks?:[part_id,...]}.
-    Bounds/waypoints use integer blocks. Routes minimize length, then bends. Default auto uses
-    enclosed pipes for explicitly selected through_blocks; other cells use exposed pipes.
+    waypoints?:[[x,y,z],...],name?:str,pipe_style?:auto|exposed|enclosed,through_blocks?:[part_id,...],
+    color?:RRGGBB}. Bounds/waypoints use integer blocks. Routes minimize length, then bends. Default
+    auto uses enclosed pipes for explicitly selected through_blocks; other cells use exposed pipes.
     through_blocks replaces only selected unconfigured/unlinked 01_block parts, retaining paint.
+    Exposed pipes are colour-coded by contents (ISO 14726: fuel brown, cooling/fresh water blue,
+    sea water green, exhaust black, air maroon, oil orange; shafts orange); color overrides it.
+    Enclosed pipes keep the colour of the hull around them.
     All selected blocks must lie on the route (use waypoints if needed); removal restores them.
     Other structure and access are preserved; routes never join unrelated pipe networks.
     Clutch/gearbox ports may use several routes; create an explicit T-piece for a branch.
     Remove an added route with {op:'remove',route_id} from query_connections, then reroute.
-    Returns a preview image, notes and the new revision; commit=true keeps one undo step."""
+    Returns the pipes added per route, warnings and the new revision; preview=true adds the image
+    and full notes. commit=true keeps one undo step."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
-    proposed, png, note = await run_job("route_connections", record, plain(routes, RouteBatch), design)
+    proposed, png, note = await run_job("route_connections", record, plain(routes, RouteBatch), design, preview)
     if commit:
         proposed = _commit_record(design, proposed, revision)
-    return [Image(data=png, format="png"), note,
+    return [*_maybe_image(png), note,
             {"committed": commit, "revision": _revision(proposed), "base_revision": revision}]
 
 
 @mcp.tool(annotations=READ)
 @_user_errors
-async def preflight_vehicle(design: Draft) -> PreflightReport:
+async def preflight_vehicle(design: Draft, detail: Detail = False) -> PreflightReport:
     """Check that a draft's systems are connected: engine fuel/air/exhaust/radiator paths,
-    driveline, electrical power and controls. Reports configuration_checks (explicit engine
-    power), gearbox_configuration_checks (saved off/on ratio indices, including reverse-off
-    warnings), wheel_direction_checks (drive arrows and steering signs for supported paths) and
-    blocked transmission exits; unknown logic stays unknown. Run it after wiring or routing and
-    before saving; plan_vehicle_repairs turns its findings into fixes. Read-only; connected
+    driveline (to wheels, or straight to a propeller on boats: no clutch or gearbox needed),
+    electrical power and controls. By default lists only the faults, each once; detail=true adds
+    every passing check, configuration_checks (explicit engine power),
+    gearbox_configuration_checks, wheel_direction_checks and repair operations. A missing check's
+    detail names what it expected and what the port does reach. Run it after wiring or routing
+    and before saving; plan_vehicle_repairs turns its findings into fixes. Read-only; connected
     geometry still needs testing in game."""
-    return await run_job("preflight_vehicle", _read_design(design))
+    return await run_job("preflight_vehicle", _read_design(design), detail)
 
 
 def _image_report(png, report):
@@ -1072,22 +1095,28 @@ async def apply_vehicle_assembly(design: Draft,
                                  revision: Revision,
                                  options: Annotated[AssemblyOptions | None, Field(description=(
                                      "Idle throttle, clutch deadband and hotkeys; defaults suit most builds."))] = None,
-                                 commit: Commit = False) -> AssemblyReport:
+                                 commit: Commit = False, preview: Preview = False,
+                                 detail: Detail = False) -> AssemblyReport:
     """Configure and wire a reusable control set-up (starter and idle, clutch, brake/reverse or
     lights) using explicit current part ids, instead of wiring each link with edit_connections.
     Existing drivers of the target inputs are replaced atomically. Clutch needs its own gate,
     separate from the idle throttle gate. Starter is manual/hold; idle is open-loop, and reverse
-    must be selected while stopped. Previews by default with diagnostics; commit=true creates one
+    must be selected while stopped. engine_start_idle takes one engine id or a list (twins share
+    the throttle gate and starter). Returns the operations and a compact preflight
+    (detail=true for all of it, preview=true for the diagnostic image); commit=true creates one
     undo step. Tune behaviour in game."""
     record = _read_design(design)
     if _revision(record) != revision:
         raise ValueError("stale revision; query_connections again")
     proposed, png, report = await run_job("assemble_vehicle", record, assembly, plain(bindings, AssemblyBindings),
-                                        plain(options, AssemblyOptions) if options is not None else None, design)
+                                        plain(options, AssemblyOptions) if options is not None else None, design,
+                                        preview, detail)
     if commit:
         proposed = _commit_record(design, proposed, revision)
     report.update(committed=commit, revision=_revision(proposed), base_revision=revision)
     report["preflight"]["revision"] = report["revision"]
+    if png is None:
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(report))], structured_content=report)
     return _image_report(png, report)
 
 

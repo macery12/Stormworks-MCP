@@ -51,6 +51,12 @@ Revision = Annotated[str, _d(
 Commit = Annotated[bool, _d(
     "false (default) previews without changing the draft; true applies it as one undo step.")]
 Offset = Annotated[int, _d("Rows to skip, for paging; use next_offset from the previous page.", ge=0)]
+Preview = Annotated[bool, _d(
+    "true also returns the rendered preview image and the full build notes; false (default) returns "
+    "a compact list of what changed, warnings and the new revision.")]
+Detail = Annotated[bool, _d(
+    "true lists every check and each finding's repair operations; false (default) lists only "
+    "faults, each once.")]
 
 VehicleName = Annotated[str, _d(
     "Vehicle file name without .xml in the player's vehicles folder (see list_game_vehicles); "

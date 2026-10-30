@@ -82,6 +82,11 @@ def read_components(path):
     yield from components_from_text(text)
 
 
+def hex6(value):
+    """The game drops leading zeros when it saves a colour: bc="E232" is 00E232."""
+    return value.zfill(6).upper() if re.fullmatch(r"[0-9A-Fa-f]{1,6}", value or "") else None
+
+
 def components_from_text(text):
     """Geometry view only; use editing.VehicleDocument for lossless rewriting."""
     for m in _COMP.finditer(text):
@@ -97,12 +102,12 @@ def components_from_text(text):
         if tm:
             Q = with_mirror(Q, int(tm.group(1)))
         colour = DEFAULT_COLOR
-        scm = re.search(r'\bsc="\d+,([0-9A-Fa-f]{6})', o_attrs)
-        bcm = re.search(r'\bbc="([0-9A-Fa-f]{6})', o_attrs)
+        scm = re.search(r'\bsc="\d+,([0-9A-Fa-f]{1,6})[,"]', o_attrs)
+        bcm = re.search(r'\bbc="([0-9A-Fa-f]{1,6})"', o_attrs)
         if scm:
-            colour = scm.group(1)
+            colour = hex6(scm.group(1))
         elif bcm:
-            colour = bcm.group(1)
+            colour = hex6(bcm.group(1))
         yield d, origin, Q, colour
 
 
@@ -177,14 +182,12 @@ def placed_from_text(text, body_id=None):
             raise ValueError("mirror flags must be 0..7")
         Q = with_mirror(Q, flip)
         colours = o.get("sc", "").split(",")[1:]
-        colour = next((c for c in colours if re.fullmatch(r"[0-9a-fA-F]{6}", c)), o.get("bc", DEFAULT_COLOR))
-        if not re.fullmatch(r"[0-9a-fA-F]{6}", colour):
-            colour = DEFAULT_COLOR
+        colour = next((hex6(c) for c in colours if hex6(c)), hex6(o.get("bc", "")) or DEFAULT_COLOR)
         piece = BY_NAME.get(d) or definitions.load(d)
         if piece is None:
             other[d] = other.get(d, 0) + 1
             piece = Piece(d, BLOCK.surfaces, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
-        faces = tuple(c.upper() if re.fullmatch(r"[0-9a-fA-F]{6}", c) else colour for c in colours)
+        faces = tuple(hex6(c) or colour for c in colours)
         out.append(Placed(piece, origin, Q, colour, name=o.get("custom_name", ""),
                           settings={k: v for k, v in o.attrib.items() if k not in ("r", "sc")},
                           faces=faces if len(faces) == piece.surfaces and len(set(faces)) > 1 else ()))

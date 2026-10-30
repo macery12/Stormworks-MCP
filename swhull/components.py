@@ -15,7 +15,8 @@ from .vehicle import component_xml
 
 BATTERIES = {"small": "battery_small", "medium": "battery_medium", "large": "battery_large"}
 PROPELLERS = {"small": "propeller", "large": "large_propeller", "giant": "giga_prop_small"}
-STAGES = ("structure", "core", "access", "propulsion", "tanks")
+STAGES = ("structure", "core", "access", "propulsion", "tanks", "powertrain")
+MANUAL = ("position", "definition", "orientation", "rotation", "bay", "room")
 
 
 @lru_cache(maxsize=1024)
@@ -57,6 +58,29 @@ def mounting_contacts(p, owner, local_normal=None):
 def mounted(p, owner):
     normal = (0, -1, 0) if p.piece.d in RUDDERS else None
     return bool(mounting_contacts(p, owner, normal))
+
+
+def mount_help(p, owner):
+    """Which of a part's mount faces touch nothing solid, and the fill that would support them."""
+    normal = (0, -1, 0) if p.piece.d in RUDDERS else None
+    faces = sorted(full_faces(p.piece.d, p.Q, attachment=True))
+    if normal is not None:
+        faces = [(c, d) for c, d in faces if d == apply(p.Q, normal)]
+    if not faces:
+        return "its definition declares no mount faces"
+    rows, empty = [], []
+    for cell, direction in faces:
+        neighbour = add(add(p.origin, cell), direction)
+        other = owner.get(neighbour)
+        what = "empty" if other is None else f"{other.piece.d} without a full face there"
+        rows.append(f"{list(add(p.origin, cell))} facing {list(direction)} -> {list(neighbour)} {what}")
+        if other is None:
+            empty.append(neighbour)
+    below = [v for v in empty if any(add(add(p.origin, c), d) == v and d == (0, -1, 0) for c, d in faces)]
+    fix = (f" Support it with a block under a mount point, e.g. edit_parts fill bounds [{list(below[0])}, "
+           f"{list(below[0])}] (the medium engine needs one under its three-block foot)." if below else
+           " Move it against a full block face, or add one next to a mount face.")
+    return f"mount faces: {'; '.join(rows[:6])}" + (f"; and {len(rows) - 6} more" if len(rows) > 6 else "") + "." + fix
 
 
 def _supported(cells, owner):
@@ -170,7 +194,7 @@ def validate_placement(p, cfg, owner, reserved=frozenset()):
         raise ValueError(f"component '{p.name}' footprint collides with structure or reserved access; "
                          f"obstructions={_obstructions(cells, owner, reserved)}")
     if not mounted(p, owner):
-        raise ValueError(f"component '{p.name}' has no verified mounting contact")
+        raise ValueError(f"component '{p.name}' has no verified mounting contact: {mount_help(p, owner)}")
     land = cfg.get("vehicle_kind") == "land"
     clearance = _land_access(p, owner, reserved) if land else _clearance(p, cfg)
     access_owner = _access_owner(owner) if land and p.piece.d.startswith("seat") else owner
@@ -321,6 +345,16 @@ def validate_config(spec):
         raise ValueError(f"fitout.stage must be one of {', '.join(STAGES)}")
     if fitout and any(not isinstance(fitout.get(k, {}), dict) for k in ("control", "battery", "propeller", "rudder")):
         raise ValueError("fitout overrides must be objects")
+    if fitout and fitout.get("engines", 1) not in (1, 2):
+        raise ValueError("fitout.engines must be 1 or 2 (twin shaft lines)")
+    if fitout and fitout.get("engine_size", "auto") not in ("auto", "small", "medium", "large"):
+        raise ValueError("fitout.engine_size must be auto, small, medium or large")
+    if fitout and any(k in fitout.get(name, {}) for name in ("propeller", "rudder") for k in MANUAL):
+        if fitout.get("stage") == "powertrain":
+            raise ValueError("fitout.stage=powertrain requires automatic propeller/rudder placement; "
+                             "use stage=propulsion and route a custom engine room manually")
+        if fitout.get("engines", 1) == 2:
+            raise ValueError("fitout.engines=2 requires automatic propeller/rudder placement")
 
 
 def place(parts, info, spec):
@@ -332,11 +366,14 @@ def place(parts, info, spec):
     cfgs = copy.deepcopy(spec.get("components", []))
     fitout = spec.get("fitout") or {}
     stage = STAGES.index(fitout.get("stage", "structure"))
+    manual = any(k in fitout.get(name, {}) for name in ("propeller", "rudder") for k in MANUAL)
     bridge = any(r.kind == "bridge" for r in info["interior"].rooms)
     if stage >= STAGES.index("core"):
         defaults = [{"name": "control", "kind": "helm" if bridge else "seat", **fitout.get("control", {})},
                     {"name": "battery", "kind": "battery", **fitout.get("battery", {})}]
-        if stage >= STAGES.index("propulsion"):
+        # Automatic propellers/rudders are set into the hull (powertrain.install); explicit
+        # placements keep the general search.
+        if stage >= STAGES.index("propulsion") and manual:
             defaults += [{"name": "propeller", "kind": "propeller", "size": "small", **fitout.get("propeller", {})},
                          {"name": "rudder", "kind": "rudder", **fitout.get("rudder", {})}]
         for cfg in defaults:
@@ -356,7 +393,20 @@ def place(parts, info, spec):
     cfgs = expanded
     validate_config({"components": cfgs})
     cfgs.sort(key=lambda cfg: cfg.get("kind") not in ("helm", "seat"))
-    for cfg in cfgs:
+    inset = stage >= STAGES.index("propulsion") and not manual
+    for cfg in [*cfgs, None]:
+        if inset and (cfg is None or cfg.get("kind") not in ("helm", "seat")):
+            # After the occupants' access is reserved, before batteries take the engine bay.
+            inset = False
+            from .powertrain import LayoutError, install  # noqa: PLC0415
+            try:
+                reserved = install(parts, info, reserved, fitout, report)
+            except LayoutError as exc:
+                what = "powertrain" if fitout.get("stage") == "powertrain" else "propeller/rudder"
+                info["warnings"].append(f"{what} skipped: {exc}")
+            owner = owners(parts)
+        if cfg is None:
+            break
         automatic = "position" not in cfg and not cfg.get("definition")
         installed = False
         failure = "definitions missing or no fitting mounted location with access clearance"

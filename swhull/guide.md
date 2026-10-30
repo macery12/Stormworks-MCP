@@ -50,12 +50,60 @@ stops. Keep workbench and component-limit warnings visible even when a preview i
 
 ### Stages, exact edits and imported copies
 
-Set **fitout.stage** to structure, core, access, propulsion or tanks. Stages are optional:
-the original hull APIs remain usable without components. Core selects one control position
-and the largest battery fitting its bay after access space is reserved. Access fits manual
-door frames and requested complete hatch/ladder assemblies; propulsion requests a real small
-propeller and rudder. Tanks require explicit named enclosures. Inspect every reported choice
-and skipped placement; save_hull or save_vehicle can save any complete stage.
+Set **fitout.stage** to structure, core, access, propulsion, tanks or powertrain. Stages are
+optional: the original hull APIs remain usable without components. Core selects one control
+position and the largest battery fitting its bay after access space is reserved. Access fits
+manual door frames and requested complete hatch/ladder assemblies; propulsion sets a real small
+propeller and rudder into the hull; powertrain adds the engine room. Tanks require explicit
+named enclosures. Inspect every reported choice and skipped placement; save_hull or save_vehicle
+can save any complete stage.
+
+### Propulsion and the engine room
+
+Copied from a player's in-game fix of a generated speedboat:
+
+- **propulsion**: the propeller hub replaces a transom block, with only the blades one block
+  aft and the blade sweep above the bottom row. The rudder's mounting plate replaces the bottom
+  row flush with the transom (a little forward, or hung just under a V bottom, when needed),
+  never past it. `fitout.engines: 2` makes twin shaft lines; a catamaran needs 2, one per hull.
+  The propeller's shaft port is kept clear of ballast.
+- **powertrain**: everything above plus, per shaft line, a prebuilt diesel low inside the hull
+  below the deck (in the engine room when there is one), facing its shaft aft where it can; the
+  radiator by its coolant ports; a medium diesel tank by its fuel port; a fluid port
+  (`water_inlet`, the game's "Fluid Port") flush in the deck as the air intake (it reads better
+  than an air filter); and one fluid exhaust per exhaust port, pointing aft out of the transom
+  just above the propeller. Every pipe is routed inside the hull, through bulkheads and the
+  transom as enclosed pipes when needed, and the shaft drives the propeller directly (no clutch
+  or gearbox). Twins mirror the visible parts. Wire the throttle, starter and battery afterwards
+  with `apply_vehicle_assembly` engine_start_idle (pass both engine ids as a list for twins). A
+  design that already has engines (an engine room's `engine`, or an engine component) keeps them
+  and gets only the propellers and rudders: plumb those with route_connections.
+- **Engine size**: `fitout.engine_size` auto (default), small, medium or large. The three
+  prebuilt diesels are `engine` (Small Engine, 20 kW, 3x3x3 blocks), `aircraft_engine` (the
+  game's Medium Engine, 60 kW, 3x4x7; the id says aircraft but it is the same diesel family) and
+  `engine_diesel` (Large Engine, 200 kW, 5x8x11). Auto weighs the boat at its painted waterline
+  and picks the smallest engine that meets a power target (20 kW per 1,000 mass when
+  `stern.flat_bottom` is set, otherwise 8 kW per 1,000 mass), stepping up when the smaller
+  one does not fit and warning when even
+  the biggest that fits is short. These targets are provisional: the October 2026 engine runs
+  measured speed and fuel use on different hulls, not shaft power or performance on the same hull.
+  See `docs/in-game-testing.md` for the readings and follow-up runs.
+  The medium engine stands on a three-block foot; the layout adds engine bed blocks under it.
+- Hand placements are checked: an engine above the deck or outside the hull, a propeller hanging
+  more than its blades behind the transom, or a rudder past the transom get a warning. A part with
+  no mount contact is refused with its mount faces and a fill that would support it.
+
+**Replies.** edit_parts, edit_connections, route_connections and apply_vehicle_assembly
+return a compact list of what changed (new part ids next to the names you gave), warnings and
+the revision; pass preview=true for the image and full notes. preflight_vehicle lists each fault
+once; detail=true lists every check. store_design(name, design=X) copies all of X: spec,
+edit_parts parts, wires and pipes.
+
+**Pipe colours.** Exposed pipes are painted by what they carry (ISO 14726 main colours): fuel
+brown 7A4A23, fresh and cooling water blue 1F5FBF, sea water green 2E8B3A, exhaust black 141414,
+air maroon 7A1F2B, oil orange FF7F27, steam silver C0C0C0; drive shafts orange FF7F27. Pipes
+inside blocks (enclosed) keep the hull colour around them. route_connections does the same and
+takes `color` to override.
 
 **components** holds named requests addressed by patches such as **/components/house battery/size**:
 
@@ -104,7 +152,7 @@ For a single block or region: **query_parts(design, select)** returns stable ids
 and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
 mirror, repeat and configure batches. Configure edits supported non-geometric engine,
 gearbox, tank and small-function settings while preserving imported XML and connections.
-Preview with commit=false, inspect, then repeat with commit=true
+Preview with preview=true and commit=false, inspect, then repeat with commit=true
 and the original revision. Failed batches do not change the draft; **undo_edits** retains ten
 steps. Query/edit coordinates are **integer blocks**, in the uncentred build frame (or the
 original imported body frame). A partial multi-voxel region selection fails; select the whole
@@ -225,7 +273,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `beam` | max width at deck, m (for multihulls: each hull's width) | L/B 2.3 (tug) to 5+ (patrol, catamaran hulls 7-10) |
 | `depth` | keel to deck at midship, m | 0.6 (dinghy) to 4 |
 | `deck` | `"closed"` (sealed, floats reliably) or `"open"` (cockpit/well deck) | |
-| `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 when smoothing is requested; inspect the result |
+| `smoothing` | `"blocks"` (default), `"wedges"` (original catalogue fit), or `"wedges_v2"` (continuous boundary angle/position measurement, protected floors, comparison guard) | use V2 for hulls (blocks look stepped in game) unless the player asks for blocks; inspect the result |
 | `ballast` | `"auto"` (default) or `"none"` | weight blocks low in the hull to level the trim, reach the painted waterline and keep it stable; the summary gives the flotation estimate |
 | `railings` | `"auto"` (default) or `"none"` | 1 m railings along the straight edges of open decks; see "Railings" |
 | `mooring` | `"auto"` (default) or `"none"` | Rope Anchors set into the deck edge in pairs; see "Railings" |
@@ -418,7 +466,8 @@ only shows on thin fins and on the inboard end of a sheer ramp under a marking.
 
 For precise local edits, use query_parts followed by edit_parts, passing its revision.
 Those coordinates are integer blocks in the uncentred build frame. Batched operations include
-fills, copies, mirrors, arrays, moves and paint. commit=false previews; commit=true persists.
+fills, copies, mirrors, arrays, moves and paint. preview=true adds the image;
+commit=true persists.
 Use undo_edits to revert a batch. import_vehicle supports safe copies of existing single-body
 version-3 vehicles; use preview_vehicle and save_vehicle for those drafts.
 
@@ -467,7 +516,8 @@ assemblies. Check the result with `preview_interior` and **check_seal**.
   Unfinished access requests are reported; they never create bare holes.
 - **Engines.** `engine`: small (0.75 x 0.75 x 0.75 m), medium (0.75 x 1.0 x 1.75 m), or large
   (1.25 W x 2.0 H x 2.75 L m). `engine_count` places several side by side. If one does not fit,
-  the report says so instead of placing it.
+  the report says so instead of placing it. These are not plumbed; for a running small diesel,
+  leave `engine` out and use fitout.stage powertrain, which uses the engine room.
 - **Room types** only set floor colour: engine, machinery, fuel, quarters, cabin, galley, mess,
   bridge, storage, cargo, corridor, medical, workshop.
 

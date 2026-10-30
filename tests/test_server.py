@@ -173,6 +173,20 @@ def test_store_design_and_patch(dirs):
         call(server.preview_hull, design="missing")
 
 
+def test_copying_a_design_keeps_its_wires_and_pipes(dirs):
+    server.store_design("wired", preset="rowboat")
+    record = server._read_design("wired")
+    record["connection_edits"] = [{"op": "connect", "from": {"part_id": "a", "port": "0"},
+                                   "to": {"part_id": "b", "port": "1"}}]
+    record["route_edits"] = [{"from": {"part_id": "a", "surface_index": 1}, "to": {"part_id": "b", "surface_index": 2}}]
+    server._atomic_design("wired", record)
+    server.store_design("wired copy", design="wired", patch=[{"op": "replace", "path": "/length", "value": 5}])
+    server.store_design("wired", design="wired")
+    for name in ("wired copy", "wired"):
+        copy = server._read_design(name)
+        assert copy["connection_edits"] == record["connection_edits"] and copy["route_edits"] == record["route_edits"]
+
+
 def test_draft_does_not_unlock_foreign_vehicle(dirs):
     vehicles, _ = dirs
     (vehicles / "theirs.xml").write_text("<vehicle/>", encoding="utf-8")
@@ -217,10 +231,13 @@ def test_edit_preview_commit_undo_and_stale_revision(dirs):
     query = call(server.query_parts, "editable", limit=1)
     change = [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "123456"}]
     before = server.load_design("editable")
-    _, _, report = call(server.edit_parts, "editable", change, query["revision"])
+    note, report = call(server.edit_parts, "editable", change, query["revision"])
+    assert "Parts: 0 added, 0 removed, 1 changed" in note and "preview=true" in note
+    image, _, _ = call(server.edit_parts, "editable", change, query["revision"], preview=True)
+    assert image.data[:4] == b"\x89PNG"
     assert not report["committed"]
     assert server.load_design("editable") == before
-    _, _, report = call(server.edit_parts, "editable", change, query["revision"], commit=True)
+    report = call(server.edit_parts, "editable", change, query["revision"], commit=True)[-1]
     assert report["committed"]
     with pytest.raises(ToolError, match="stale"):
         call(server.edit_parts, "editable", change, query["revision"], commit=True)
@@ -256,7 +273,7 @@ def test_imported_newlines_and_undo_preserve_source_bytes(dirs):
     (vehicles / "original.xml").write_bytes(source)
     call(server.import_vehicle, "original", "draft")
     q = call(server.query_parts, "draft")
-    _, _, report = call(server.edit_parts, "draft",
+    *_, report = call(server.edit_parts, "draft",
                         [{"op": "paint", "select": {"ids": [q["parts"][0]["id"]]}, "color": "123456"}],
                         q["revision"], commit=True)
     record = server._read_design("draft")
@@ -290,7 +307,7 @@ def test_edited_tank_can_preview_but_cannot_save_until_undo(dirs):
     server.store_design("tank draft", preset="barge",
                         spec={"tanks": [{"name": "fuel", "position": [-1, .25, 3], "size": [2, 1.5, 2]}]})
     q = call(server.query_parts, "tank draft", select={"bounds": [[-4, 3, 15], [-4, 3, 15]]})
-    _, _, report = call(server.edit_parts, "tank draft",
+    *_, report = call(server.edit_parts, "tank draft",
                         [{"op": "remove", "select": {"ids": [q["parts"][0]["id"]]}}],
                         q["revision"], commit=True)
     image, _ = call(server.preview_vehicle, "tank draft")

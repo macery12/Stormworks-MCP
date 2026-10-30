@@ -90,7 +90,7 @@ def _steering(parts, links, row):
 def _physical(parts, report, p, system):
     """Join open boundaries of the two intended circuits; never select a foreign circuit."""
     labels = {"fuel": ("Fuel", "fluid_tank_", "Stored Fluid"),
-              "air": ("Air", "air_filter", "Fluid"), "exhaust": ("Exhaust", "fluid_exhaust", "Fluid")}
+              "air": ("Air", ("air_filter", "water_inlet"), "Fluid"), "exhaust": ("Exhaust", "fluid_exhaust", "Fluid")}
     if system not in labels:
         return operations()
     label, family, destination = labels[system]

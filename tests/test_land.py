@@ -475,7 +475,7 @@ def test_land_tools_create_edit_analyze_and_save_a_draft(land_definitions, tmp_p
     query = call(server.query_parts, "road draft", select={"name": "driver"})
     assert query["revision"] == created["revision"]
     operations = [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "123456"}]
-    _, _, committed = call(server.edit_parts, "road draft", operations, query["revision"], commit=True)
+    committed = call(server.edit_parts, "road draft", operations, query["revision"], commit=True)[-1]
     assert committed["committed"]
     report = call(server.analyze_land_vehicle, design="road draft")
     assert report["evidence_level"] == "draft_geometry" and report["counts"]["wheels"] == 4

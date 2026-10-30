@@ -184,6 +184,11 @@ def test_assemblies_work_on_explicit_bindings(humvee):
                                                               "throttle_gate": mapped[ids["throttle limiter"]]}, {"idle_throttle": .12})
     assert idle_report["operations"]["edits"][0]["settings"]["property_text"] == "max(0.12,min(1,x))"
     assert not preflight(idle, materialize(idle)[0])["findings"]
+    listed, listed_report = assemble(proposed, "engine_start_idle", {"driver": mapped[ids["driver"]],
+                                                                    "engine": [mapped[ids["diesel engine"]]],
+                                                                    "throttle_gate": mapped[ids["throttle limiter"]]},
+                                     {"idle_throttle": .12})
+    assert listed_report["operations"] == idle_report["operations"]
     with pytest.raises(ValueError, match="another subsystem"):
         assemble(humvee, "engine_start_idle", {"driver": ids["driver"], "engine": ids["diesel engine"],
                                               "throttle_gate": ids["throttle limiter"]})
@@ -193,8 +198,10 @@ def test_assemblies_work_on_explicit_bindings(humvee):
                                           "lights": [ids[name] for name in ids if "headlight" in name or "tail light" in name]})):
         current, _ = assemble(humvee, assembly, roles)
         assert not preflight(current, materialize(current)[0])["findings"]
-    with pytest.raises(ValueError, match="distinct"):
+    with pytest.raises(ValueError, match="more than one role"):
         assemble(humvee, "engine_start_idle", {"driver": ids["driver"], "engine": ids["driver"], "throttle_gate": ids["throttle limiter"]})
+    with pytest.raises(ValueError, match="no part with id edit:9:9"):
+        assemble(humvee, "engine_start_idle", {"driver": ids["driver"], "engine": "edit:9:9", "throttle_gate": ids["throttle limiter"]})
 
 
 def test_validation_requires_all_seven_observations_and_keeps_pending_evidence():

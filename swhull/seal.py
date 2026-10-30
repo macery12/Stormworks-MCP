@@ -139,12 +139,17 @@ class Geometry:
                 continue
             voxels = {tuple(v["position"]): v for v in data["voxels"]}
             dynamic = {v for v, cfg in voxels.items() if cfg["flags"] & 4}
-            unsupported = not coverage(p.piece.d)["supported"]
-            if dynamic and p.piece.d not in MANUAL_DOORS:
-                unsupported = True
-            if unsupported:
+            moving_only = dynamic and p.piece.d not in MANUAL_DOORS and not coverage(p.piece.d)["unsupported_shapes"]
+            if moving_only:
+                # Only the moving cells are unknown (a rudder's blade); fixed cells keep their
+                # declared seals (its base plate seals on every face, and the player's boat with
+                # the plate set into its bottom floats).
+                self.unknown.update({add(p.origin, apply(p.Q, v)): p.piece.d for v in dynamic})
+            elif not coverage(p.piece.d)["supported"]:
                 self.unknown.update({v: p.piece.d for v in p.voxels()})
             for surface in data["sealing_surfaces"]:
+                if moving_only and tuple(surface["position"]) in dynamic:
+                    continue
                 if p.piece.d.startswith("window") and surface["shape"] == 6 and _diagonal_normal(surface):
                     cell = add(p.origin, apply(p.Q, surface["position"]))
                     normal = apply(p.Q, _diagonal_normal(surface))
@@ -265,19 +270,41 @@ def _split_check(geometry, parsed, lo, hi, allowed, max_cells, door_state):
             "verification": "geometric validation; confirm game compartment behavior in Stormworks"}
 
 
+MAX_HULL_SEEDS = 12
+
+
 def auto_seeds(parts, info):
-    occupied = {v for p in parts for v in p.voxels()}
-    seeds = []
+    """One seed per room, plus one per enclosed space in the hull outside the rooms (engine bay,
+    lazarette, the hull below a deck), lowest cell first."""
+    from .powertrain import _flood  # noqa: PLC0415
+    owner = {v: p for p in parts for v in p.voxels()}
+    occupied = set(owner)
+    seeds, rooms = [], set()
     for room in info["interior"].rooms:
+        rooms |= room.air
         candidates = room.air - occupied
         if candidates:
             centre = room.centre()
             v = min(candidates, key=lambda v: (sum((v[i] - centre[i]) ** 2 for i in range(3)), v))
             seeds.append({"name": room.name, "position": v})
-    if not seeds:
-        candidates = {v for v, tag in info["region"].items() if tag == "hull"} - occupied
-        if candidates:
-            seeds.append({"name": "hull", "position": min(candidates, key=lambda v: (v[1], v[2], v[0]))})
+    # The hull region also marks cells outside a wedge skin; the flood from outside removes them.
+    water = _flood(owner).cells if owner else set()
+    free = {v for v, tag in info["region"].items() if tag == "hull"} - occupied - rooms - water
+    spaces = 0
+    while free and spaces < MAX_HULL_SEEDS:
+        start = min(free, key=lambda v: (v[1], v[2], v[0]))
+        queue, seen = deque([start]), {start}
+        while queue:
+            v = queue.popleft()
+            for d in DIRS:
+                n = add(v, d)
+                if n in free and n not in seen:
+                    seen.add(n)
+                    queue.append(n)
+        free -= seen
+        if len(seen) >= 4:  # skip one-cell pockets between parts
+            spaces += 1
+            seeds.append({"name": "hull" if spaces == 1 and not free else f"hull space {spaces}", "position": start})
     return seeds
 
 
@@ -362,7 +389,8 @@ def check(parts, seeds, door_state="closed", max_cells=MAX_CELLS, containment=No
                     path.append(position(n))
                     n = int(parents[n])
                 path.reverse()
-            group = {"status": "indeterminate" if unknown else "leaking" if path else "sealed",
+            # A traced way out is a leak whatever unknown parts the air also touches.
+            group = {"status": "leaking" if path else "indeterminate" if unknown else "sealed",
                      "unknown_geometry": sorted(unknown), "escape_path": path,
                      "escape_path_start": seed["name"], "reachable_air_cells": air, "connected": []}
             groups.append(group)

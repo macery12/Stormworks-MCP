@@ -161,7 +161,7 @@ These are family filters. Use `search_parts` for the permitted catalogue, then
 `get_part_definition` to inspect the exact installed part. No game definitions or personal
 vehicle XML belong in the repository.
 
-New placement only offers prebuilt engines: `engine` (small), `aircraft_engine` (medium),
+New placement only offers prebuilt engines: `engine` (small), `aircraft_engine` (the game's Medium Engine, a diesel despite the id),
 `engine_diesel` (large). Modular engines are disabled. Standalone cube gearboxes are allowed
 despite their `modular_engine_gearbox_` IDs; use `modular_engine_gearbox_1x1` for compact road
 vehicles. Deprecated `torque_gearbox`/`torque_gearbox_2` remain readable in references but are
@@ -349,7 +349,8 @@ For a branch, place a real T-piece
 and route to its free faces. Blocked exits report the cell and obstructing part ID. Routes
 can be removed with `{op:"remove",route_id:"route:0"}` using IDs from the query, then rerouted.
 
-Both editing tools default to preview. Use `commit=true` with the same revision to persist;
+Editing tools return a compact change list by default; pass `preview=true` to include the image.
+Use `commit=true` with the same revision to persist;
 `undo_edits` restores the previous part, wiring or routing batch. Stale revisions fail before
 writing. Export preserves imported originals and resolves new links in the centred export frame.
 

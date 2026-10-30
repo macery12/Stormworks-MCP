@@ -23,9 +23,15 @@ These were each found by loading generated files in Stormworks; tests guard them
 - **The game's axes are left-handed.** The renderers negate x for display; keep that when
   adding views.
 - Never cut the hull skin below the main deck (doors and hatches in `interior.py` check this).
+  A propeller hub or rudder plate may replace the blocks it sits in; nothing is left open.
 - **A symmetric hull gets a mirror-image skin**, and a sharp stem ends on a three-wide nose
   (wedge, block, wedge), never a one-wide stub (from the player's hand fix of "Slim
   Speedboat"; `tests/test_symmetry.py`).
+- **Engines go inside the hull below the deck; propellers and rudders stay inside the hull's
+  outline** (hub in the transom with only the blades aft, rudder plate in the bottom row, never
+  past the transom). Air comes in through a deck fluid port, exhaust leaves through the transom
+  above the propeller. Exposed pipes are colour-coded by contents; pipes inside blocks keep the
+  hull colour (from the player's fix of "Mini Speedboat"; `tests/test_powertrain.py`).
 
 ## Testing reality
 
@@ -46,8 +52,11 @@ verified.
   definitions (TDQS); `npx mcp-tdqs lint --command "uv run server.py"` checks them without a key.
 - `swhull/`: `hull` (shape, boxes, scale), `build` (spec resolution, patches, colours, summary),
   `smooth` (skin + wedge fit), `habits` (veteran finishing: box chamfers, ballast, railings),
-  `interior`, `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries`
-  (named paint schemes), `jobs` (heavy tool work in a child process the server kills on cancel or
+  `interior`, `powertrain` (inset propellers/rudders, engine room layout, engine size),
+  `pipe_colours`, `telemetry` (in-game engine logger microcontroller; tools/engine_test_boats.py,
+  tools/telemetry_logger.py),
+  `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries` (named paint
+  schemes), `jobs` (heavy tool work in a child process the server kills on cancel or
   timeout), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays,
   flat painting), `raster` (lit rendering: GPU or CPU rasterizing, one shared NumPy lighting
   pass), `definitions` (game install detection).

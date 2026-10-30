@@ -13,7 +13,8 @@ def restriction(d):
     if d in LEGACY_GEARBOXES:
         return "Deprecated gearbox placement is disabled. Choose modular_engine_gearbox_1x1 (Gearbox 1x1)."
     if d.startswith("modular_engine"):
-        return "Modular engines are disabled. Choose engine (small), aircraft_engine (medium) or engine_diesel (large)."
+        return ("Modular engines are disabled. Choose engine (Small Engine), aircraft_engine (the game's Medium "
+                "Engine; a diesel despite the id) or engine_diesel (Large Engine).")
     if (d.startswith(("engine", "jet_")) or d == "aircraft_engine") and d not in PREBUILT_ENGINES:
         return "Only prebuilt diesel engines are supported: engine, aircraft_engine, engine_diesel."
     if d.startswith(("heat_exchanger", "heatsink", "heat_sink", "fluid_heat", "coolant", "radiator")):

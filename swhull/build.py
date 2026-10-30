@@ -349,12 +349,9 @@ def _flotation_lines(report):
         out.append(f"Ballast: {report['blocks']} weight blocks on the bottom skin to "
                    f"{' and '.join(report['reasons'])}, as experienced builders do. Set ballast: "
                    "\"none\" to leave them out.")
-    if report["shortfall"]:
-        out.append(f"Ballast {report['shortfall']}.")
     after = report["after"]
     if after is None:
-        return out + ["! Estimated to sink: the parts weigh more than the hull can float. Lighten the "
-                      "superstructure or add hull volume, then check in game."]
+        return out
 
     def height(state):
         return (state["plane"] - report["bottom"]) / VOX if state else None
@@ -367,9 +364,31 @@ def _flotation_lines(report):
                f"{after['end'] / VOX:+.2f} m (+ bow down); GM {after['gm'] / VOX:.2f} m on a "
                f"{after['beam'] / VOX:.2f} m waterline beam. Estimated from the reference ships; "
                "check it floats level in game.")
-    if height(after) > paint + 0.25:
-        out.append(f"! Sits about {height(after) - paint:.2f} m below its painted waterline: lighten the "
-                   "superstructure, add hull volume, or raise colors.waterline to match.")
+    return out
+
+
+def ballast_warnings(report):
+    """Flotation problems as build warnings, so compact tool replies show them too."""
+    from .habits import STABILITY  # noqa: PLC0415
+    if not report:
+        return []
+    out = [f"ballast {report['shortfall']}"] if report["shortfall"] else []
+    after = report["after"]
+    if after is None:
+        return out + ["estimated to sink: the parts weigh more than the hull can float. Lighten the "
+                      "superstructure or add hull volume, then check in game"]
+    draft = (after["plane"] - report["bottom"]) / VOX
+    paint = (report["waterline"] - report["bottom"]) / VOX
+    if draft > paint + 0.25:
+        out.append(f"sits about {draft - paint:.2f} m below its painted waterline: lighten the superstructure, "
+                   "add hull volume, or raise colors.waterline to match")
+    gm, beam = after["gm"] / VOX, after["beam"] / VOX
+    if gm < 0:
+        out.append(f"unstable: metacentric height {gm:.2f} m is negative, so it will roll over. Widen the beam, "
+                   "lower or lighten the superstructure, or make the hull shallower")
+    elif gm < STABILITY * beam:
+        out.append(f"low stability margin: metacentric height {gm:.2f} m is under {STABILITY:.0%} of the "
+                   f"{beam:.2f} m waterline beam; it may roll heavily")
     return out
 
 
@@ -381,7 +400,7 @@ def build(spec):
     from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
     base = {k: v for k, v in spec.items()
             if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings", "mooring")}
-    if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks"):
+    if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks", "powertrain"):
         interior = merge({}, base.get("interior") or {})
         interior["door_parts"] = True
         for h in interior.get("hatches", []):
@@ -419,6 +438,7 @@ def build(spec):
         placed = apply_edits(placed, spec["edits"], reserved=info["interior"].reserved)
     if spec.get("tanks"):
         verify_tanks(placed, info)
+    info["warnings"] += propulsion_warnings(placed, info["region"]) + ballast_warnings(info["ballast"])
     before = placed[0].origin
     centre(placed)
     info["shift"] = tuple(before[i] - placed[0].origin[i] for i in range(3))
@@ -426,6 +446,30 @@ def build(spec):
         info["warnings"] = [w for w in info["warnings"] if not w.startswith(("loose part", "... and"))]
         info["warnings"] += _loose_parts(placed, info["region"], info["shape"], info["shift"])
     return placed, info
+
+
+def propulsion_warnings(placed, region):
+    """Flag hand-placed machinery the player had to move in game (Mini Speedboat, 2026-10): an
+    engine on the deck, a propeller or rudder hanging behind the transom."""
+    from .part_policy import PREBUILT_ENGINES  # noqa: PLC0415
+    hull = [p.origin for p in placed if p.piece.d in BY_NAME and region.get(p.origin) == "hull"]
+    if not hull:
+        return []
+    stern = min(v[2] for v in hull)
+    out = []
+    for p in placed:
+        cells = p.voxels()
+        label = p.name or p.piece.d
+        if p.piece.d in PREBUILT_ENGINES and any(region.get(v) != "hull" for v in cells):
+            out.append(f"engine '{label}' sits above the deck or outside the hull: put engines inside the hull "
+                       "below the main deck (fitout.stage powertrain lays one out with its pipes)")
+        elif p.piece.d in ("propeller", "large_propeller", "giga_prop_small") and min(v[2] for v in cells) < stern - 1:
+            out.append(f"propeller '{label}' hangs {stern - 1 - min(v[2] for v in cells)} block(s) behind the "
+                       "transom: set its hub into the transom with only the blades aft (fitout.stage propulsion does)")
+        elif p.piece.d in ("rudder", "rudder_surface") and min(v[2] for v in cells) < stern:
+            out.append(f"rudder '{label}' reaches {stern - min(v[2] for v in cells)} block(s) behind the transom: "
+                       "set it under the hull, flush with or forward of the transom (fitout.stage propulsion does)")
+    return out
 
 
 def _loose_parts(placed, region, shape, shift):

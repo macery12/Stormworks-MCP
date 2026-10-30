@@ -4,9 +4,10 @@ import heapq
 from itertools import count
 
 from . import definitions
+from .pipe_colours import COLOURS, colour as pipe_colour
 from .connections import transmission_ports
-from .editing import bounds, identify, vector
-from .pieces import DIRS, Placed, add, apply, neg, sub
+from .editing import bounds, color as color_value, identify, vector
+from .pieces import BY_NAME, DIRS, Placed, add, apply, neg, sub
 
 PIPE_DEFINITIONS = ("trans_straight", "trans_angle", "trans_t", "trans_corner", "trans_cross",
                     "trans_t_corner", "trans_cross_corner", "trans_omni")
@@ -114,12 +115,22 @@ def pipe_piece(directions, style="exposed"):
     raise ValueError(f"no installed {style} pipe matches directions {sorted(directions)}")
 
 
+def _body_colour(parts, cell):
+    """Enclosed pipes take the colour of the structure around them."""
+    near = {add(cell, d) for d in DIRS}
+    found = [p.color for p in parts if p.piece.d in BY_NAME and p.origin in near]
+    return min(set(found), key=lambda c: (-found.count(c), c)) if found else None
+
+
 def route(parts, start, end, *, extent=None, waypoints=None, reserved=frozenset(), prefix="route", name="pipe route",
-          pipe_style="auto", through_blocks=None, enclosed_cells=frozenset()):
-    """Route exact ports; only explicitly selected plain blocks can become enclosed pipes."""
+          pipe_style="auto", through_blocks=None, enclosed_cells=frozenset(), color=None, copy_parts=True):
+    """Route exact ports; only explicitly selected plain blocks can become enclosed pipes.
+    Exposed pipes are colour-coded by contents (pipe_colours) unless color is given;
+    enclosed pipes keep the colour of the block they replace or the structure around them.
+    copy_parts=False skips the defensive copy for callers whose parts already have IDs."""
     if pipe_style not in ("auto", "exposed", "enclosed"):
         raise ValueError("pipe_style must be auto, exposed or enclosed")
-    parts = identify(copy.deepcopy(parts))
+    parts = identify(copy.deepcopy(parts)) if copy_parts else list(parts)
     a, b = face(parts, start), face(parts, end)
     if a["part_id"] == b["part_id"] and a["surface_index"] == b["surface_index"]:
         raise ValueError("route endpoints must differ")
@@ -169,12 +180,18 @@ def route(parts, start, end, *, extent=None, waypoints=None, reserved=frozenset(
     if unused:
         raise ValueError(f"route does not use selected wall blocks at {sorted(unused)}; add waypoints through them")
     result, added = [p for p in parts if p.uid not in through_blocks], []
+    contents = color or pipe_colour(parts, a, b)
     for i, v in enumerate(cells):
         before = sub(cells[i - 1], v) if i else neg(a["normal"])
         after = sub(cells[i + 1], v) if i + 1 < len(cells) else neg(b["normal"])
         style = "enclosed" if v in replacements or pipe_style == "enclosed" or pipe_style == "auto" and v in enclosed_cells else "exposed"
         piece, q = pipe_piece((before, after), style)
-        paint = replacements[v].color if v in replacements else "687681"
+        if v in replacements:
+            paint = replacements[v].color
+        elif style == "enclosed":
+            paint = _body_colour(parts, v) or contents
+        else:
+            paint = contents
         p = Placed(piece, v, q, paint, f"{prefix}:{i}", name)
         added.append(p)
     result.extend(added)
@@ -216,8 +233,10 @@ def tree(parts, endpoints, *, extent, reserved=frozenset(), prefix="driveline", 
                 directions[v].add(sub(path[j + 1], v))
     added = []
     for i, v in enumerate(sorted(cells)):
-        piece, q = pipe_piece(directions[v], "enclosed" if v in enclosed_cells else "exposed")
-        added.append(Placed(piece, v, q, "687681", f"{prefix}:{i}", "wheel driveshaft"))
+        enclosed = v in enclosed_cells
+        piece, q = pipe_piece(directions[v], "enclosed" if enclosed else "exposed")
+        paint = (_body_colour(parts, v) if enclosed else None) or COLOURS["shaft"]
+        added.append(Placed(piece, v, q, paint, f"{prefix}:{i}", "wheel driveshaft"))
     return [*parts, *added]
 
 
@@ -247,13 +266,16 @@ def apply_routes(record, parts, info=None):
                 reserved.update(validate_placement(p, {"vehicle_kind": "land"},
                                                   {v: q for v, q in owner.items() if q is not p}))
     for route_id, op in active.items():
-        if (not isinstance(op, dict) or set(op) - {"op", "from", "to", "bounds", "waypoints", "name", "pipe_style", "through_blocks"}
+        if (not isinstance(op, dict) or set(op) - {"op", "from", "to", "bounds", "waypoints", "name", "pipe_style",
+                                                   "through_blocks", "color"}
                 or op.get("op", "route") != "route"):
-            raise ValueError("route needs from/to face endpoints and optional bounds, waypoints, name, pipe_style, through_blocks")
+            raise ValueError("route needs from/to face endpoints and optional bounds, waypoints, name, pipe_style, "
+                             "through_blocks, color")
         parts, _ = route(parts, op.get("from"), op.get("to"), extent=op.get("bounds"),
                          waypoints=op.get("waypoints"), reserved=reserved, prefix=route_id,
                          name=op.get("name", route_id), pipe_style=op.get("pipe_style", "auto"),
-                         through_blocks=op.get("through_blocks"))
+                         through_blocks=op.get("through_blocks"),
+                         color=color_value(op["color"]) if op.get("color") else None)
     owner = owners(parts)
     for p in parts:
         if p.uid.startswith("route:") and p.piece.d not in BY_NAME:

@@ -138,6 +138,7 @@ class Route(Request):
     name: str = "pipe route"
     pipe_style: Literal["auto", "exposed", "enclosed"] = "auto"
     through_blocks: Annotated[list[str], Field(max_length=100)] | None = None
+    color: Hex | None = None
 
 
 class RemoveRoute(Request):
@@ -219,7 +220,7 @@ class AssemblyReport(TypedDict):
 
 class AssemblyBindings(Request):
     driver: str
-    engine: str | None = None
+    engine: str | list[str] | None = None
     throttle_gate: str | None = None
     clutch_gate: str | None = None
     clutch: str | None = None

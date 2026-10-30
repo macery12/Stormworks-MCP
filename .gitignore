@@ -182,6 +182,7 @@ cython_debug/
 # --- Stormworks Hull MCP ---
 # smoke-test and calibration output
 out/
+telemetry/
 # generated vehicles and previews should never be committed from a local run
 *.local.*
 # editor / OS

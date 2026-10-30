@@ -14,6 +14,72 @@ The [advanced testing suite](advanced-testing.md) adds body-aware saved-vehicle 
 all-definition rotation checks, both rudder mounting models, and numbered calibration exhibits
 with recorded player observations. Generated exhibits remain pending until checked in game.
 
+## Engine telemetry
+
+The first in-game runs were captured on 2026-10-24 in
+[small](data/engine-telemetry/small.csv), [medium](data/engine-telemetry/medium.csv) and
+[large](data/engine-telemetry/large.csv) CSVs. Each boat has a different hull, so their speeds
+and fuel rates cannot establish which engine is best for the same boat. Fuel is the game's
+tank-content reading. Values below
+are averages over the last 10 seconds of the last sustained throttle step; the fuel rate is
+the change in tank content per second over that window.
+The [capture record](data/engine-telemetry/README.md) lists the XML hashes found in the game
+folder after the runs and the limits of that evidence.
+
+| Engine | Last sustained throttle | RPS | Speed | Fuel/second | Temperature | Outcome |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Small | 100% | 19.91 | 16.29 m/s | 0.514 | 73.2 | Finished all steps with about 79 fuel left |
+| Medium | 70% | 19.77 | 11.07 m/s | 1.441 | 73.2 | Lost speed and RPS at 80% when fuel fell below 2; stopped at 90% |
+| Large | 40% | 19.81 | 6.76 m/s | 2.886 | 71.6 | Ran out of fuel early in the 50% step |
+
+The medium and large engines reached about 20 RPS before fuel starvation. Their temperatures
+were near 72-73 at those points. The fuel reading can retain a small unusable remainder, so an
+early stop is treated as fuel exhaustion. These observations do not measure shaft power, and
+the `powertrain.py` power-per-mass targets remain provisional.
+
+Two fresh-tank follow-ups ran in game on 2026-10-30 and both reached `phase=done`:
+
+| Run | Sustained throttle | RPS | Speed | Fuel/second | Temperature | Fuel at end of powered step |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [medium_s8](data/engine-telemetry/medium_s8.csv) | 80% for 30 s | 19.79 | 11.13 m/s | 0.918 | 56.3 | 130.59 |
+| [large_s5](data/engine-telemetry/large_s5.csv) | 50% for 30 s | 19.88 | 6.72 m/s | 2.522 | 57.0 | 92.42 |
+
+The readings are from the final 10 seconds of each powered step. Speed and RPS match the
+earlier runs before fuel starvation, confirming that the engines and telemetry controllers
+continued to work with enough fuel. These short runs started cold; their temperatures and fuel
+rates are not directly comparable with the warmer end of the long sweeps.
+
+On the small test hull, 70% throttle held 15.97 m/s while using 0.344 fuel/second; 100% held
+16.29 m/s while using 0.514 fuel/second. This is a measured speed plateau for that boat, not
+a general throttle setting for other hulls. The medium boat similarly held about 11.07 m/s at
+60-70% throttle, with about 1.44 fuel/second at both settings.
+
+Further high-throttle points are optional. To generate separate full-tank boats for them:
+
+```powershell
+uv run tools/engine_test_boats.py out --size medium --single-step 9 --single-step 10 --hold-seconds 30
+uv run tools/engine_test_boats.py out --size large --single-step 6 --single-step 7 --single-step 8 --single-step 9 --single-step 10 --hold-seconds 30
+uv run tools/telemetry_logger.py telemetry
+```
+
+Each new boat is named `engine test medium_s9` (and so on) and writes its own CSV such as
+`telemetry/medium_s9.csv`. Spawn each on open water with the logger running; wait for
+`phase=done` before loading the next. A 30-second single step should leave enough fuel for
+the reading, but if a boat still runs out, shorten that step and record the achieved duration.
+
+To generate the original full sweeps again:
+
+1. `uv run tools/engine_test_boats.py out` writes `engine test small/medium/large.xml` (and
+   thumbnails). Copy them to the game's vehicles folder.
+2. `uv run tools/telemetry_logger.py telemetry` and leave it running.
+3. Spawn a boat on open water, away from land. Its microcontroller starts the engine, holds each
+   throttle step from 10% to 100% for 40 s and stops (`phase=done`), about 7 minutes. The logger
+   prints a line a second and appends `telemetry/<size>.csv`: throttle, RPS, speed (m/s),
+   temperature and fuel left.
+4. Inspect the CSVs for a completed `phase=done` and compare sustained readings. Only compare
+   engine efficiency after testing different engines on the same hull with the same propeller
+   and load.
+
 ## What has been verified
 
 | Feature | Status |
@@ -48,6 +114,11 @@ with recorded player observations. Generated exhibits remain pending until check
 | `facing: "aft"` parts | Not yet verified in game |
 | Precise edits and imported copies | Automated transactional/byte-preservation tests pass; check a copy in game |
 | Batteries, helm/seat, propellers/rudders | Installed definitions and mounting/clearance checked; not yet verified in game |
+| Inset propeller and rudder (`propulsion`) | From the player's fix of a generated Mini Speedboat (2026-10-23): hub in the transom, blades aft; rudder plate in the bottom row, flush with the transom. Generated engine test boats loaded and propelled themselves in game on 2026-10-24 and 2026-10-30. Rudder direction and compartment sealing remain unchecked |
+| Engine room (`powertrain`) | Same source: engine low inside the hull facing aft, radiator behind, tank ahead, deck fluid-port intake, exhaust out of the transom above the propeller, every pipe routed. Small, medium and large generated engine test boats started, cooled and drove in game. Check a normal speedboat's controls and sustained operation; for twins (`engines: 2`) check both shafts turn the right way |
+| Pipe colours | ISO 14726 main colours on exposed pipes, hull colour on enclosed ones, as the player painted theirs; not yet loaded in game |
+| Medium and large engines in the powertrain | Laid out from the game's definitions (the medium one on engine beds, both with two exhaust outlets), rendered and run in game in the test boats. One medium tank exhausted during the long sweeps; it is a starter supply, not a demonstrated voyage tank. Engine size targets (kW per 1,000 mass) remain provisional because the boats have different hulls and shaft power was not measured |
+| Engine telemetry kit | Ran in game on 2026-10-24 and 2026-10-30. Small completed the full sweep; medium and large exhausted their fuel in the long sweeps, then completed fresh-tank 80% and 50% steps respectively. See "Engine telemetry" above |
 | Complete manual hatch/ladder and sliding doors | Real-definition calibrations render and pass geometry checks; not yet verified in game |
 | Seal diagnostics | Automated blocks, wedge junctions, doors and unknown-geometry tests pass; game behavior unverified |
 | Block-built fluid tanks | Marker settings read from saves, enclosed pipe orientation read from definitions, geometry checked; contents/flow/capacity unverified in game |

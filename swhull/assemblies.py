@@ -7,7 +7,7 @@ from .tool_schemas import AssemblyBindings, AssemblyOptions, plain
 
 CATALOGUE = {
     "engine_start_idle": {"roles": ["driver", "engine", "throttle_gate"],
-                          "description": "Hold the starter hotkey; W sets throttle above a configurable idle floor.",
+                          "description": "Hold the starter hotkey; W sets throttle above a configurable idle floor. engine may be a list: twins share the gate and starter.",
                           "definitions": {"throttle_gate": "gate_function_small"}},
     "clutch_engagement": {"roles": ["driver", "clutch", "clutch_gate"],
                           "description": "Disengage at rest; progressively engage as positive W input exceeds the deadband.",
@@ -34,12 +34,17 @@ def assemble(record, assembly, bindings, options=None):
             raise ValueError(f"assembly {assembly} requires {role}")
     used = [uid for role in CATALOGUE[assembly]["roles"] for uid in
             (roles[role] if isinstance(roles[role], list) else [roles[role]])]
-    if len(used) != len(set(used)) or any(uid not in by_id for uid in used):
-        raise ValueError("assembly bindings must use distinct current part IDs")
+    unknown = sorted({uid for uid in used if uid not in by_id})
+    if unknown:
+        raise ValueError(f"no part with id {', '.join(unknown)} in this draft; query_connections lists current ids")
+    repeated = sorted({uid for uid in used if used.count(uid) > 1})
+    if repeated:
+        raise ValueError(f"each role needs its own part, but {', '.join(repeated)} is bound to more than one role")
+    engines = roles["engine"] if isinstance(roles.get("engine"), list) else [roles["engine"]] if roles.get("engine") else []
     if not by_id[roles["driver"]].piece.d.startswith("seat"):
         raise ValueError("driver must be a control seat")
-    if assembly == "engine_start_idle" and by_id[roles["engine"]].piece.d not in PREBUILT_ENGINES:
-        raise ValueError("engine must be a prebuilt diesel")
+    if assembly == "engine_start_idle" and any(by_id[uid].piece.d not in PREBUILT_ENGINES for uid in engines):
+        raise ValueError("every engine must be a prebuilt diesel (small, medium or large)")
     if assembly == "clutch_engagement" and by_id[roles["clutch"]].piece.d != "torque_clutch":
         raise ValueError("clutch must be torque_clutch")
     for role, definition in CATALOGUE[assembly]["definitions"].items():
@@ -62,7 +67,8 @@ def assemble(record, assembly, bindings, options=None):
         output = port(role, "f(x)", 1, 0)
         target_role = "engine" if role == "throttle_gate" else "clutch"
         consumers = [link["to"]["part_id"] for link in links if link.get("from") == _ref(output) and "to" in link]
-        if any(uid != roles[target_role] for uid in consumers):
+        allowed = engines if target_role == "engine" else [roles[target_role]]
+        if any(uid not in allowed for uid in consumers):
             raise ValueError(f"{role} also drives another subsystem; bind a separate gate before changing its expression")
         batch["edits"].append({"op": "configure", "select": {"ids": [roles[role]]},
                                "settings": {"property_text": expression}})
@@ -71,8 +77,12 @@ def assemble(record, assembly, bindings, options=None):
 
     if assembly == "engine_start_idle":
         value = opts["idle_throttle"]
-        connect(gate("throttle_gate", f"max({value:g},min(1,x))"), port("engine", "Throttle", 1, 1))
-        connect(port("driver", f"Hotkey {opts['starter_hotkey']}", 0, 0), port("engine", "Starter", 0, 1))
+        # Twins share one throttle gate and starter hotkey.
+        throttle = gate("throttle_gate", f"max({value:g},min(1,x))")
+        starter = port("driver", f"Hotkey {opts['starter_hotkey']}", 0, 0)
+        for uid in engines:
+            connect(throttle, port("engine", "Throttle", 1, 1, uid))
+            connect(starter, port("engine", "Starter", 0, 1, uid))
     elif assembly == "clutch_engagement":
         d = opts["clutch_deadband"]
         connect(gate("clutch_gate", f"max(0,min(1,(x-{d:g})/{1-d:g}))"), port("clutch", "Clutch Pressure", 1, 1))
