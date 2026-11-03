@@ -110,9 +110,17 @@ def add_client(client, path=None, *, entry=None, replace=False):
             raise ValueError("Config changed during setup; close the client and try again")
         if original is not None:
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-            backup = path.with_name(f"{path.name}.{stamp}.bak")
-            with backup.open("xb") as file:
-                file.write(original)
+            # Windows clocks can return the same microsecond twice; never reuse a backup name.
+            for attempt in range(1000):
+                backup = path.with_name(f"{path.name}.{stamp}{f'-{attempt}' if attempt else ''}.bak")
+                try:
+                    with backup.open("xb") as file:
+                        file.write(original)
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise ValueError("Could not create a unique backup of the config; clean up old .bak files")
         os.replace(temporary, path)
     finally:
         if temporary is not None:

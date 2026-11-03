@@ -110,3 +110,18 @@ def test_concurrent_client_change_is_preserved(tmp_path, monkeypatch):
         client_config.add_client("claude", path, entry=ENTRY)
     assert json.loads(path.read_text()) == {"new": True}
     assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_backups_never_collide_when_the_clock_repeats(tmp_path, monkeypatch):
+    """Two replacements within one Windows clock tick used to reuse a backup name and fail."""
+    class Frozen:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime  # noqa: PLC0415
+            return datetime(2026, 11, 1, 22, 11, 9, 105130, tzinfo=tz)
+
+    monkeypatch.setattr(client_config, "datetime", Frozen)
+    path = tmp_path / "config.json"
+    client_config.add_client("claude", path, entry=ENTRY)
+    backups = {client_config.add_client("claude", path, entry=ENTRY, replace=True)[1] for _ in range(3)}
+    assert len(backups) == 3 and all(b.is_file() for b in backups)
