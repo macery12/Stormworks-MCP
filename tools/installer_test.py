@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import winreg
 from pathlib import Path
 
@@ -69,8 +70,11 @@ def main():
         entry = claude["mcpServers"]["stormworks"]
         if Path(entry["command"]).resolve() != exe.resolve() or entry["args"] != ["--connect"]:
             raise SystemExit(f"Claude Desktop entry does not run the installed EXE: {entry}")
-        if str(exe) not in (clients / "codex" / "config.toml").read_text(encoding="utf-8").replace("\\\\", "\\"):
-            raise SystemExit("the Codex entry does not run the installed EXE")
+        codex = tomllib.loads((clients / "codex" / "config.toml").read_text(encoding="utf-8"))
+        command = codex["mcp_servers"]["stormworks"]["command"]
+        # Compare resolved paths: a runner's temp folder can be a short (8.3) path.
+        if Path(command).resolve() != exe.resolve():
+            raise SystemExit(f"the Codex entry does not run the installed EXE: {command}")
         shortcut = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Stormworks MCP.lnk"
         if not shortcut.is_file():
             raise SystemExit(f"no Start menu shortcut at {shortcut}")
