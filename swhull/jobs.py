@@ -14,6 +14,7 @@ import os
 import threading
 import time
 import traceback
+from pathlib import Path
 
 from .build import build, summary
 from .render import VEHICLE_RULER, design_ruler, render_interior, render_png, render_thumbnail, render_view
@@ -183,6 +184,9 @@ def change_summary(record, proposed):
                          ("Wires added", links_added), ("Wires removed", links_removed)):
         if items:
             lines.append(f"{title}: " + "; ".join(items[:30]) + (f"; and {len(items) - 30} more" if len(items) > 30 else ""))
+    if any(p.piece.d == "water_spawner" for uid, p in new.items() if uid not in old):
+        for t in tank_list(after):
+            lines.append(f"Tank '{t['name']}': {t['litres']} L of {t['fluid']}, saved fill {t['saved_fill']:.0%}.")
     warnings = (info or {}).get("warnings", [])
     lines += [f"! {w}" for w in warnings[:20]]
     lines.append("preview=true adds the image and the full build notes.")
@@ -203,6 +207,28 @@ def import_draft(xml, source):
     document = VehicleDocument.parse(xml)
     return ({"kind": "imported", "source": source, "source_xml": xml, "edits": [],
              "vehicle": False, "generation": 0}, len(document.parts), len(document.bodies))
+
+
+def tank_list(parts):
+    """Every tank of a vehicle (block-built with a Fluid Spawner, and premade) with its litres."""
+    from .physics import Model, grouped  # noqa: PLC0415
+    try:
+        tanks = Model(grouped(parts)).tanks
+    except ValueError:
+        return []
+    return [{k: t[k] for k in ("name", "kind", "body_id", "litres", "fluid", "saved_fill")} for t in tanks]
+
+
+TANK_SCAN_LIMIT = 60000
+
+
+def import_tanks(xml):
+    """Tanks of an imported vehicle, or None when it is too big to measure on import."""
+    from .editing import VehicleDocument  # noqa: PLC0415
+    parts = VehicleDocument.parse(xml).parts
+    if not any(p.piece.d == "water_spawner" or p.piece.d.startswith("fluid_tank_") for p in parts):
+        return []
+    return tank_list(parts) if len(parts) <= TANK_SCAN_LIMIT else None
 
 
 def analyze_reference(path, search, offset, limit, section="parts"):
@@ -469,6 +495,114 @@ def _highlight(placed, info, box_name, scale):
     return [(point, box_name)], note
 
 
+def list_prefabs(name=None):
+    from . import prefabs  # noqa: PLC0415
+    from .vehicle import vehicles_dir  # noqa: PLC0415
+    if name:
+        record = prefabs.read(name)
+        if record is None:
+            raise ValueError(f"no prefab named '{name}' (see list_prefabs)")
+        records = [record]
+    else:
+        records = prefabs.all_records()
+    rows = []
+    for record in records:
+        path = os.path.join(vehicles_dir(), f"{record['file']}.xml")
+        try:
+            text = Path(path).read_text(encoding="utf-8-sig") if os.path.isfile(path) else None
+            rows.append(prefabs.describe(record, text, detail=bool(name)))
+        except (OSError, ValueError) as exc:
+            rows.append({"name": record["name"], "file": record["file"], "status": f"unreadable: {exc}"})
+    return {"prefabs": rows, "folder": str(prefabs.prefabs_dir())}
+
+
+def create_prefab(name, file, text, old, rename, box, follow, source):
+    """(side record, new vehicle XML or None, description). A box cuts a new vehicle file."""
+    from . import prefabs  # noqa: PLC0415
+    if box is None:
+        record = prefabs.make_record(name, file, text, old, rename)
+        return record, None, prefabs.describe(record, text)
+    xml, report = prefabs.cut(text, box, follow)
+    record = prefabs.make_record(name, name, xml, old, rename,
+                                 cut_from={"vehicle": source, "bounds": box, "follow": list(follow)})
+    return record, xml, {**prefabs.describe(record, xml), "cut": report}
+
+
+def paste_prefab(record, op, title, preview=False, names=None):
+    """Place a prefab in a draft: the proposed record, optional image, notes, and a report of
+    the placed parts, loose groups and connection points by draft part ID."""
+    from collections import Counter  # noqa: PLC0415
+    from . import prefabs  # noqa: PLC0415
+    from .connections import transmission_ports  # noqa: PLC0415
+    from .networks import ports  # noqa: PLC0415
+    from .pieces import DIRS, add  # noqa: PLC0415
+    proposed = edited(record, [op])
+    before, _ = materialize(record)
+    after, _ = materialize(proposed)
+    old = {p.uid for p in before}
+    new = [p for p in after if p.uid not in old]
+    kept = {p.uid for p in after}
+    replaced = sum(uid not in kept for uid in old)
+    key = new[0].uid.rsplit(":", 1)[0]
+    by_index = {int(p.uid.rsplit(":", 1)[1]): p for p in new if p.uid.rsplit(":", 1)[0] == key}
+    # Loose groups: pasted parts joined face to face, none of them touching the rest of the draft.
+    mine = {v: p.uid for p in new for v in p.voxels()}
+    rest = {v for p in after if p.uid not in mine.values() for v in p.voxels()}
+    group = {p.uid: p.uid for p in new}
+
+    def find(u):
+        while group[u] != u:
+            group[u] = group[group[u]]
+            u = group[u]
+        return u
+
+    for p in new:
+        for v in p.voxels():
+            for d in DIRS:
+                other = mine.get(add(v, d))
+                if other and other != p.uid:
+                    group[find(p.uid)] = find(other)
+    members, touches = {}, set()
+    for p in new:
+        members.setdefault(find(p.uid), []).append(p)
+        if any(add(v, d) in rest for v in p.voxels() for d in DIRS):
+            touches.add(find(p.uid))
+    loose = [{"parts": len(ps), "first_part_id": ps[0].uid,
+              "definitions": dict(Counter(p.piece.d for p in ps).most_common(4))}
+             for root, ps in members.items() if root not in touches]
+    rows = []
+    for row in prefabs.points(op["xml"]):
+        p = by_index.get(row["part"])
+        if p is None:
+            continue
+        out = {"name": (names or {}).get(row["key"], row["name"]), "kind": row["kind"], "label": row["label"],
+               "definition": row["definition"], "part_id": p.uid}
+        if row["kind"] == "wire":
+            n = next((n for n in ports(p) if str(n["index"]) == str(row["port"])), None)
+            out.update(port=row["port"], type=row["type"], direction=row["direction"],
+                       position=n["position"] if n else None)
+        else:
+            f = next((f for f in transmission_ports(p) if f["surface_index"] == row["face"]), None)
+            out.update(surface_index=row["face"], position=f["position"] if f else None,
+                       facing=f["normal"] if f else None)
+        rows.append(out)
+    main = before[0].body if before and before[0].body else "1"
+    prefab_bodies = {}
+    for p in new:
+        prefab_bodies.setdefault(p.body or main, 0)
+        prefab_bodies[p.body or main] += 1
+    note = change_summary(record, proposed) if not preview else None
+    png = None
+    if preview:
+        png, note = preview_draft(proposed, title)
+    if loose:
+        note += f"\n! {len(loose)} group(s) of pasted parts touch nothing else in the draft; move the prefab against the vehicle"
+    report = {"prefab": op.get("prefab", ""), "parts": len(new), "replaced": replaced,
+              "bodies": {b: f"{n} part(s)" for b, n in prefab_bodies.items()},
+              "attached": not loose, "loose_groups": loose, "points": rows}
+    return proposed, png, note, report
+
+
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
                                 export_draft, seal_draft, analyze_reference, hull_analysis,
@@ -476,7 +610,7 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
                                 prepare_validation, diagnostic_geometry, physics,
-                                thumbnail)}
+                                list_prefabs, create_prefab, paste_prefab, import_tanks, thumbnail)}
 
 
 def _watch_parent():

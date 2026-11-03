@@ -11,7 +11,6 @@ GEARBOXES = CURRENT_GEARBOXES | LEGACY_GEARBOXES
 
 # Prefix -> the system preflight cannot check yet.
 _UNCHECKED = (
-    ("modular_engine", "modular engine"),
     ("jet_engine", "jet engine"),
     (("steam_", "turbine"), "steam power"),
     (("solid_rocket", "liquid_rocket", "rcs_thruster"), "rocket"),

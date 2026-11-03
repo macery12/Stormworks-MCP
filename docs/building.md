@@ -66,8 +66,13 @@ adds/removes typed signal/electric links; `route_connections` adds/removes actua
 Use enclosed pipes in bodywork and `through_blocks` for explicitly selected wall crossings.
 Both use the draft revision and support preview, commit and undo. `preflight_vehicle` checks
 required subsystem paths. See [the land vehicle guide](land-vehicles.md#connections-and-subsystem-preflight)
-for endpoint formats, examples and topology limits. Preflight checks prebuilt diesel engines;
-it lists modular and jet engines as unchecked.
+for endpoint formats, examples and topology limits. Preflight checks prebuilt diesel engines
+and modular engines; it lists jet engines as unchecked.
+
+Reuse a finished piece with `create_prefab` (a whole vehicle, or a box cut out of one) and
+`paste_prefab`; the pasted parts keep their wires and microcontrollers. Make a tank with the
+`edit_parts` operation `{op:"tank", seed:[x,y,z]}` (a closed space) or `bounds` (a new box).
+[The start guide](start.md#prefabs) has the details.
 
 ## Diagnose a result
 

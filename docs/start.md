@@ -22,6 +22,7 @@ checks, never requirements.
    surfaces and ports, and `get_part_orientation` solves the rotation for a mounting direction.
 4. **Edit.** `query_parts` gives ids and the revision. Then `edit_parts` previews a batch, and
    `edit_parts(..., commit=true, revision=...)` applies it as one undo step (`undo_edits`).
+   Reuse finished pieces as prefabs (see "Prefabs" below): `paste_prefab` places one.
 5. **Connect.** `query_connections` lists ports. `edit_connections` adds wires,
    `route_connections` lays pipes and shafts, and `apply_vehicle_assembly` wires a whole
    starter, clutch, brake or light set-up.
@@ -60,8 +61,44 @@ Useful settings and controls:
 
 Preflight follows wires and physical pipes for prebuilt engines (fuel, air, exhaust, cooling),
 drivelines to wheels or propellers, electric power, gearbox ratios and wheel directions.
-Modular engines, jet engines, rockets, steam power and heat exchangers are placed normally but
-listed under `unchecked`, because preflight does not model them yet.
+
+Modular engines are checked through the couplings the game joins them with: cylinders on the
+crankshaft, each cylinder's manifolds reaching an air, a fuel and an exhaust manifold, a starter
+on a drive belt, a clutch on the crankshaft line and what its shaft reaches, throttle, starter
+and clutch wires, the air intake and exhaust outlet, and a fuel line into a tank holding diesel
+(block-built tanks count). An engine without a coolant manifold is noted: it is not liquid
+cooled. `modular_engines` in the report summarises each engine.
+
+Jet engines, rockets, steam power and heat exchangers are placed normally but listed under
+`unchecked`, because preflight does not model them yet.
+
+## Prefabs
+
+Any saved vehicle can be a prefab, so a prefab can be loaded and tested in game on its own.
+
+- `create_prefab(name)` registers the vehicle called `name`. `create_prefab(name, vehicle,
+  bounds, follow)` cuts every part reaching into a box out of `vehicle` into a new vehicle file
+  `name` (the source is never changed). `follow=["pipes"]` also takes the pipe and shaft pieces
+  joined to the cut; `follow=["wires"]` takes the parts wired straight to it, such as its
+  microcontroller. Wires inside the cut are kept.
+- A prefab's connection points are its logic nodes with no wire and its open pipe and shaft
+  ends. They get names such as `throttle`, `fuel_line` or `rps_shaft`; `rename` changes them.
+  The names live in a side file in the server's data folder, with the file's hash, so a
+  changed vehicle file is noticed.
+- `paste_prefab(design, prefab, position, rotation?)` puts the prefab's lowest corner at
+  `position`. Parts are copied exactly, microcontrollers included, and the wires move with
+  them. Its main body joins the body it touches; its other bodies become new bodies. An
+  overlap is refused unless `replace=true`. The result lists the connection points as draft
+  part IDs with ports or surface indices, for `edit_connections` and `route_connections`,
+  and any pasted groups that touch nothing else (they would fall off in game).
+
+## Tanks
+
+`edit_parts` with `{op:"tank", seed:[x,y,z]}` turns the closed space around an empty cell into
+a tank: it adds a Fluid Spawner on its floor set to `fluid` (water, diesel or jet_fuel) and
+`fill` (0-1). `{op:"tank", bounds:[[lo],[hi]]}` first builds a box of blocks with those outer
+corners. Either way the tank must seal, and the reply gives its litres (one empty block holds
+15.625 L). `import_vehicle` lists every tank of the copied vehicle with its litres.
 
 ## Bodies (hinges, pivots, pistons)
 

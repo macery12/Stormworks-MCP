@@ -80,6 +80,5 @@ def test_preflight_lists_unchecked_systems_instead_of_faulting_them():
              Placed(fake("jet_engine_compressor"), (2, 0, 0)), Placed(fake("modular_engine_gearbox_1x1"), (3, 0, 0)),
              Placed(BLOCK, (4, 0, 0))]
     rows = unchecked_parts(parts)
-    assert [(r["definition"], r["system"]) for r in rows] == [
-        ("jet_engine_compressor", "jet engine"), ("modular_engine_crankshaft", "modular engine"),
-        ("modular_engine_piston_3x3", "modular engine")]
+    # Modular engines have their own checks (swhull/modular.py); jet engines are still unchecked.
+    assert [(r["definition"], r["system"]) for r in rows] == [("jet_engine_compressor", "jet engine")]

@@ -89,6 +89,19 @@ def _source_links(record, parts):
     return result
 
 
+def _paste_links(record, parts):
+    """Wires that came with prefabs placed by paste operations."""
+    edits = record.get("edits") if record.get("kind") == "imported" else (record.get("spec") or {}).get("edits")
+    rows = []
+    for i, op in enumerate(edits or []):
+        if isinstance(op, dict) and op.get("op") == "paste" and isinstance(op.get("xml"), str):
+            from .editing import rotation, vector  # noqa: PLC0415
+            from .prefabs import moved_wires, resolve  # noqa: PLC0415
+            found = moved_wires(op["xml"], vector(op.get("position")), rotation(op.get("rotation")))
+            rows.extend(resolve(parts, found, f"paste:{i}"))
+    return rows
+
+
 def template_wires(record, parts):
     if record.get("kind") != "land" or record["spec"].get("preset") not in ("utility_4x4", "humvee_4x4"):
         return []
@@ -130,7 +143,7 @@ def template_wires(record, parts):
 def wires(record, parts):
     identify(parts)
     base = copy.deepcopy(record["base_connections"]) if "base_connections" in record else template_wires(record, parts)
-    result = [*_source_links(record, parts), *base]
+    result = [*_source_links(record, parts), *_paste_links(record, parts), *base]
     for i, op in enumerate(record.get("connection_edits", [])):
         if op.get("op") == "connect":
             if set(op) != {"op", "from", "to"}:
@@ -174,7 +187,7 @@ def edited(record, operations, parts):
 
 def write_xml(xml, record, parts):
     links = wires(record, parts)
-    if not record.get("connection_edits") and not any(r["link_id"].startswith("template:") for r in links):
+    if not record.get("connection_edits") and not any(r["link_id"].startswith(("template:", "paste:")) for r in links):
         return xml
     match = re.search(r"<logic_node_links\b[^>]*(?:/>|>.*?</logic_node_links>)", xml, re.S)
     if match is None:
@@ -417,6 +430,19 @@ def preflight(record, parts):
             radiators = {k for k in graph if by_id[k[0]].piece.d.startswith("fluid_radiator")}
             without = defaultdict(set, {k: neighbours - radiators for k, neighbours in graph.items() if k not in radiators})
             check(p, "cooling isolation", not bool(outlet & _reachable(without, inlet)), "no pipe bypass around the radiator")
+    from . import modular  # noqa: PLC0415
+    tank_cache = []
+
+    def tank_cells():
+        if not tank_cache:
+            from .physics import Model, grouped  # noqa: PLC0415
+            tank_cache.append({v: t for t in Model(grouped(parts)).tanks for v in t["cells"]})
+        return tank_cache[0]
+
+    holder = {"checks": checks}
+    fluid_graph = modular.through_valves(graph, parts, transmission_ports) if modular.engines(parts)[0] else graph
+    engines = modular.check(parts, holder, links, graph, by_id, ports, starts,
+                            lambda keys: _reachable(fluid_graph, keys), tank_cells)
     owner = {v: p for p in parts for v in p.voxels()}
     pairs, open_faces = adjacency(parts, "draft")
     capped_unused, non_driven = [], []
@@ -442,8 +468,9 @@ def preflight(record, parts):
             "configuration_checks": configuration,
             "gearbox_configuration_checks": gearbox_checks,
             "wheel_direction_checks": wheel_checks,
+            "modular_engines": engines,
             "unchecked": unchecked_parts(parts),
-            "verification": "Topology, engine-power and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
+            "verification": "Topology, engine-power, modular-engine coupling and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
     from .repairs import findings  # noqa: PLC0415
     report["findings"] = findings(report, parts, links)
     return report

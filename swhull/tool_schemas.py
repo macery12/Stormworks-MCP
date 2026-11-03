@@ -102,7 +102,23 @@ class Configure(Selected):
     settings: dict[str, Scalar]
 
 
-EditOperation = Annotated[Add | Fill | Remove | Replace | Translate | Repeat | Rotate | Paint | Mirror | Configure,
+class Tank(Request):
+    op: Literal["tank"]
+    seed: Vector | None = None
+    bounds: Bounds | None = None
+    fluid: Literal["water", "diesel", "jet_fuel"] = "diesel"
+    fill: Annotated[float, Field(ge=0, le=1)] = 1
+    name: Annotated[str, Field(min_length=1, max_length=64)] = "tank"
+    color: Hex = "7A5C2E"
+
+    @model_validator(mode="after")
+    def seed_or_bounds(self):
+        if (self.seed is None) == (self.bounds is None):
+            raise ValueError("tank needs exactly one of seed or bounds")
+        return self
+
+
+EditOperation = Annotated[Add | Fill | Remove | Replace | Translate | Repeat | Rotate | Paint | Mirror | Configure | Tank,
                           Field(discriminator="op")]
 EditBatch = Annotated[list[EditOperation], Field(min_length=1, max_length=100)]
 
@@ -184,6 +200,7 @@ class PreflightReport(TypedDict):
     configuration_checks: list[dict[str, Any]]
     gearbox_configuration_checks: list[dict[str, Any]]
     wheel_direction_checks: list[dict[str, Any]]
+    modular_engines: NotRequired[list[dict[str, Any]]]
     unchecked: list[dict[str, Any]]
     style_checks: NotRequired[list[dict[str, Any]]]
     verification: str
@@ -307,3 +324,39 @@ class PhysicsReport(TypedDict):
 # operation fields are documented in the tool descriptions); plain() validates each batch
 # against these models before anything runs.
 Operations = Annotated[list[dict[str, Any]], Field(min_length=1, max_length=100)]
+
+
+class PrefabList(TypedDict):
+    """list_prefabs: registered prefabs; with a name, that prefab's connection points."""
+    prefabs: list[dict[str, Any]]
+    folder: str
+
+
+class PrefabInfo(TypedDict):
+    """create_prefab: the prefab as list_prefabs shows it, and what a cut kept."""
+    name: str
+    file: str
+    status: str
+    parts: int
+    bodies: int
+    size_blocks: list[int]
+    connection_points: int
+    points: list[dict[str, Any]]
+    notes: str
+    cut: NotRequired[dict[str, Any]]
+
+
+class PasteResult(TypedDict):
+    """paste_prefab: what was placed, whether it attaches, and its connection points as part IDs
+    in the draft (for edit_connections and route_connections)."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    prefab: str
+    parts: int
+    replaced: int
+    bodies: dict[str, str]
+    attached: bool
+    loose_groups: list[dict[str, Any]]
+    points: list[dict[str, Any]]
+    notes: str

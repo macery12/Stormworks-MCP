@@ -332,7 +332,11 @@ def _move_raw(p):
     vp = "<vp" + "".join(f' {k}="{v}"' for k, v in zip("xyz", p.origin) if v) + "/>"
     p.raw_xml = re.sub(r"<vp\b[^>]*/>", lambda _m: vp, p.raw_xml, count=1)
     if not re.search(r"<vp\b", p.raw_xml):
-        if "</o>" in p.raw_xml:
+        if "</microprocessor_definition>" in p.raw_xml:  # the game writes vp right after the logic
+            p.raw_xml = p.raw_xml.replace("</microprocessor_definition>", "</microprocessor_definition>" + vp, 1)
+        elif re.search(r"<o\b[^>]*?(?<!/)>", p.raw_xml):
+            p.raw_xml = re.sub(r"(<o\b[^>]*?(?<!/)>)", lambda m: m[1] + vp, p.raw_xml, count=1)
+        elif "</o>" in p.raw_xml:
             p.raw_xml = p.raw_xml.replace("</o>", vp + "</o>", 1)
         else:
             p.raw_xml = re.sub(r"<o\b([^>]*?)/>", lambda m: "<o" + m[1] + ">" + vp + "</o>",
@@ -380,6 +384,50 @@ def _body_choice(value, known, fresh=None):
     return str(value)
 
 
+PASTE_FIELDS = frozenset(("op", "xml", "position", "rotation", "replace", "body", "prefab"))
+
+
+def _paste(out, op, key, known, body_floor):
+    """Place a prefab (paste_prefab builds this operation). Its main body joins the body it is
+    placed against (or `body`); each of its other bodies becomes a new body."""
+    from . import bodies  # noqa: PLC0415
+    from .pieces import DIRS  # noqa: PLC0415
+    from .prefabs import placed  # noqa: PLC0415
+    if set(op) - PASTE_FIELDS or not isinstance(op.get("xml"), str):
+        raise ValueError("paste needs the prefab file text; use paste_prefab")
+    created, _, _ = placed(op["xml"], vector(op.get("position")), rotation(op.get("rotation")), key)
+    footprint = {v for p in created for v in p.voxels()}
+    hit = [p for p in out if any(v in footprint for v in p.voxels())]
+    if hit and not op.get("replace"):
+        raise ValueError(f"the prefab overlaps {len(hit)} part(s), first {hit[0].uid} ({hit[0].piece.d}) at "
+                         f"{list(hit[0].origin)}; move it, or set replace to remove those parts")
+    if any(p.protected for p in hit):
+        raise ValueError("the prefab would replace configured or wired parts; move it instead")
+    gone = {p.uid for p in hit}
+    out = [p for p in out if p.uid not in gone]
+    main = bodies.root(out)
+    prefab_main = created[0].body
+    target = _body_choice(op.get("body"), known, bodies.next_id(out, body_floor))
+    if target is None:
+        at = {v: p.body or main for p in out for v in p.voxels()}
+        touching = {at[add(v, d)] for p in created if p.body == prefab_main for v in p.voxels()
+                    for d in DIRS if add(v, d) in at}
+        if len(touching) > 1:
+            raise ValueError(f"the prefab touches bodies {', '.join(sorted(touching))}; give it a body")
+        target = touching.pop() if touching else main
+    counter = int(bodies.next_id(out, body_floor))
+    numbers = {prefab_main: target}
+    for p in created:
+        if p.body not in numbers:
+            if str(counter) == target:
+                counter += 1
+            numbers[p.body] = str(counter)
+            counter += 1
+    for p in created:
+        p.body = numbers[p.body]
+    return out + created, created
+
+
 def _collisions(parts):
     owner, pairs = {}, set()
     for p in parts:
@@ -408,6 +456,7 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
     geometric = any(op.get("op") not in ("paint", "configure") for op in operations)
     previous = _collisions(out) if geometric else set()
     broken = bodies.problems(out) if geometric else set()
+    pasted = set()
     for index, op in enumerate(operations):
         kind, key = op.get("op"), f"{prefix}:{index}"
         created, explicit = [], {}
@@ -490,14 +539,21 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
                     _move_raw(p)
                     out.append(p)
                     created.append(p)
+        elif kind == "paste":
+            out, created = _paste(out, op, key, known, body_floor)
+            pasted.update(p.uid for p in created)
+        elif kind == "tank":
+            from .tanks import custom  # noqa: PLC0415
+            created = custom(out, op, key)
         else:
             raise ValueError(f"unsupported edit operation {kind!r}")
-        if kind in ("add", "fill"):
+        if kind in ("add", "fill", "tank"):
             bodies.assign(out + created, created, explicit)
             out.extend(created)
         elif kind in ("copy", "repeat", "mirror"):
             bodies.assign(out, created)
-        out.extend(bodies.spawn_children(out, created, body_floor))
+        if kind != "paste":  # a prefab brings its own child halves
+            out.extend(bodies.spawn_children(out, created, body_floor))
         if not out:
             raise ValueError("an edit cannot remove every part")
         if kind not in ("paint", "configure"):
@@ -513,8 +569,9 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
     # Untouched configured imports remain in place; their game settings are not reinterpreted.
     from .components import owners, validate_placement  # noqa: PLC0415
     # A child half hangs on its parent half's joint, which bodies.problems already checked.
+    # Pasted prefab parts are mounted inside their prefab; paste_prefab reports loose ones.
     changed = [p for p in out if p.piece.d not in BY_NAME and p.piece.d not in bodies.CHILDREN
-               and original.get(p.uid) != (p.piece.d, p.origin, p.Q)]
+               and p.uid not in pasted and original.get(p.uid) != (p.piece.d, p.origin, p.Q)]
     owner = owners(out) if changed else {}
     for p in changed:
         without_self = {v: other for v, other in owner.items() if other is not p}

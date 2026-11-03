@@ -63,7 +63,8 @@ def test_cube_gearboxes_are_offered_and_only_the_deprecated_gearboxes_are_refuse
         with pytest.raises(ValueError, match="deprecated"):
             part({"definition": d, "position": [0, 0, 0]})
     assert allowed("engine") and allowed("modular_engine_cylinder") and allowed("jet_engine_compressor")
-    assert unchecked("modular_engine_cylinder") == "modular engine" and unchecked("engine") is None
+    assert unchecked("jet_engine_compressor") == "jet engine" and unchecked("modular_engine_cylinder") is None
+    assert unchecked("engine") is None
     assert all(unchecked(d) is None for d in CURRENT_GEARBOXES)
 
 

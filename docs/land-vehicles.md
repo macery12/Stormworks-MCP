@@ -162,9 +162,10 @@ every family). Use `get_part_definition` to inspect the exact installed part. No
 vehicle XML belong in the repository.
 
 Any installed part can be placed. The prebuilt engines are `engine` (small), `aircraft_engine`
-(the game's Medium Engine, a diesel despite the id) and `engine_diesel` (large). Modular engines,
-jet engines and heat exchangers can be placed too, but preflight lists them as `unchecked`
-because it does not model their systems yet. Use `modular_engine_gearbox_1x1` (or 3x3, 5x5) for
+(the game's Medium Engine, a diesel despite the id) and `engine_diesel` (large). Preflight also
+checks modular engines ([start guide](start.md#what-preflight-checks)). Jet engines and heat
+exchangers can be placed too, but preflight lists them as `unchecked` because it does not model
+their systems yet. Use `modular_engine_gearbox_1x1` (or 3x3, 5x5) for
 gearboxes: the game deprecated `torque_gearbox`/`torque_gearbox_2`, which remain readable in
 references but cannot be placed.
 

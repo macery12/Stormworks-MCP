@@ -87,8 +87,14 @@ def hex6(value):
     return value.zfill(6).upper() if re.fullmatch(r"[0-9A-Fa-f]{1,6}", value or "") else None
 
 
+_MC_DEFINITION = re.compile(r"<microprocessor_definition\b.*?</microprocessor_definition>", re.S)
+
+
 def components_from_text(text):
     """Geometry view only; use editing.VehicleDocument for lossless rewriting."""
+    # A microcontroller saves its logic before its position: skip the logic so its `vp` is read.
+    if "<microprocessor_definition" in text:
+        text = _MC_DEFINITION.sub("", text)
     for m in _COMP.finditer(text):
         dm = re.search(r'\bd="([^"]*)"', m.group(1))
         d = dm.group(1) if dm else "01_block"

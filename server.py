@@ -36,7 +36,8 @@ from swhull.land_presets import PRESETS as VEHICLE_PRESETS
 from swhull.style import RULE_SETS
 from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyReport, ChangeReport,
                                  ConnectionBatch, DiagnosticReport, DraftCreated, EditBatch, EditResult,
-                                 Operations, PhysicsReport, PreflightReport, PreviewResult, RepairPlan, RouteBatch, SealReport,
+                                 Operations, PasteResult, PhysicsReport, PreflightReport, PrefabInfo, PrefabList,
+                                 PreviewResult, RepairPlan, RouteBatch, SealReport,
                                  Selection, VehicleList, plain)
 from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, Detail, DoorState,
                                 Draft, EditRevision, Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName,
@@ -69,8 +70,10 @@ import_vehicle (a copy of any saved vehicle; the original is never changed) or t
 generator (preview_hull, store_design, save_hull). Find parts with search_parts(category=...),
 get_part_definition and get_part_orientation. Edit with query_parts then edit_parts: preview,
 look, then commit=true with the revision. Edits use integer blocks (0.25 m), x across, +y up,
-+z forward. Wire with edit_connections, lay pipes and shafts with route_connections, and use
-apply_vehicle_assembly for whole starter, clutch, brake or light set-ups. Check with
++z forward. Reuse a saved vehicle or a box cut out of one as a prefab (create_prefab,
+list_prefabs, paste_prefab). Wire with edit_connections, lay pipes and shafts with
+route_connections, and use apply_vehicle_assembly for whole starter, clutch, brake or light
+set-ups. Check with
 preflight_vehicle (parts it cannot check yet are listed as unchecked, never refused; style=[...]
 adds optional habit warnings), check_seal and analyze_physics (read-only estimates of mass,
 flotation, thrust and lift), look at preview_vehicle or inspect_view yourself, then save_vehicle
@@ -752,18 +755,26 @@ async def import_vehicle(name: VehicleName,
     query_parts/edit_parts, preview_vehicle, and save_vehicle under a different name; unchanged
     parts are written back byte for byte. Configured and wired parts are protected. Fails when
     the draft name exists or the vehicle uses an older data version. Returns the part and body
-    counts."""
+    counts and each tank with its litres, fluid and saved fill."""
     _check_name(design)
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
     path = _reference_path(name, source)
-    record, count, body_count = await run_job("import_draft", path.read_bytes().decode("utf-8"), name)
+    text = path.read_bytes().decode("utf-8")
+    record, count, body_count = await run_job("import_draft", text, name)
+    tanks = await run_job("import_tanks", text)
     with DESIGN_LOCK:
         if _design_path(design).exists():
             raise ValueError("draft already exists; choose a new design name")
         _atomic_design(design, record)
-    return (f"Imported {count} parts in {body_count} body(ies) into '{design}'. Source '{name}' remains "
+    note = (f"Imported {count} parts in {body_count} body(ies) into '{design}'. Source '{name}' remains "
             "untouched.")
+    if tanks is None:
+        note += " Tanks were not measured on a vehicle this big; analyze_physics lists them."
+    for t in tanks or ():
+        note += (f"\nTank '{t['name']}' ({t['kind']}, body {t['body_id']}): {t['litres']} L of {t['fluid']}, "
+                 f"saved fill {t['saved_fill']:.0%}.")
+    return note
 
 
 @mcp.tool(annotations=READ)
@@ -798,7 +809,10 @@ async def edit_parts(design: Draft,
     {op:"remove"|"paint"|"configure"|"replace"|"move"|"copy"|"repeat"|"rotate"|"mirror",
     select:{ids|name|definition|bounds|body}, ...} with paint color, configure settings, replace part,
     move/copy delta:[dx,dy,dz], repeat delta and count (extra copies), rotate rotation and pivot,
-    mirror axis (x/y/z) and plane. A part or fill may set body: an existing ID or "new";
+    mirror axis (x/y/z) and plane. {op:"tank", seed:[x,y,z] (an empty cell inside a closed
+    space) or bounds:[[lo],[hi]] (outer corners of a new box of blocks), fluid?: water|diesel|
+    jet_fuel, fill?: 0-1, name?} makes a block-built tank: it adds a Fluid Spawner set to that
+    fluid and fill, and is refused unless the tank seals. A part or fill may set body: an existing ID or "new";
     otherwise a new part joins the one body it touches (touching two needs a body). Placing a
     hinge, pivot or piston parent half (_a, base) adds its child half in a new body; an edit that
     splits such a pair is refused. select also takes body. Any installed part can be placed except
@@ -981,6 +995,133 @@ async def repair_vehicle(design: Draft,
     report.update(committed=commit, revision=_revision(proposed))
     report["after"]["revision"] = report["revision"]
     return _image_report(png, report)
+
+
+PrefabName = Annotated[str, Field(description=(
+    "Prefab name (see list_prefabs): letters, digits, spaces, _ - ( ), at most 64 characters."))]
+
+
+@mcp.tool(annotations=READ)
+@_user_errors
+async def list_prefabs(name: Annotated[str | None, Field(description=(
+        "One prefab to list with all its connection points; omit to list every prefab with "
+        "counts only."))] = None) -> PrefabList:
+    """List the registered prefabs (saved vehicles reused as parts of other vehicles): each
+    one's vehicle file, size in blocks, part, body, microcontroller and wire counts, and whether
+    the file changed since it was registered. With a name, also every connection point (logic
+    nodes with no wire, open pipe and shaft ends) with its name, kind and position. Register one
+    with create_prefab; place one in a draft with paste_prefab. Read-only."""
+    return await run_job("list_prefabs", name)
+
+
+@mcp.tool(annotations=EDIT)
+@_user_errors
+async def create_prefab(name: PrefabName,
+                        vehicle: Annotated[str | None, Field(description=(
+                            "Source vehicle file name without .xml in the vehicles folder. Omit to "
+                            "register the vehicle called `name` (or to rename points of an existing "
+                            "prefab)."))] = None,
+                        bounds: Annotated[list[list[int]] | None, Field(description=(
+                            "Inclusive box [[min_x,min_y,min_z],[max_x,max_y,max_z]] in blocks, in the "
+                            "source vehicle's own grid (import_vehicle then query_parts shows it). "
+                            "Every part reaching into it is cut out into a new vehicle file called "
+                            "`name`. Omit to use the whole file."))] = None,
+                        follow: Annotated[list[Literal["pipes", "wires"]] | None, Field(description=(
+                            "With bounds: 'pipes' also takes every pipe and shaft piece joined to the "
+                            "cut (stopping at the component at the far end); 'wires' also takes the "
+                            "parts wired directly to the cut, such as its microcontroller."))] = None,
+                        rename: Annotated[dict[str, str] | None, Field(description=(
+                            "Connection point renames {current name: new name}; names are 1-40 "
+                            "letters, digits, _ or -."))] = None,
+                        overwrite: Annotated[bool, Field(description=(
+                            "With bounds: replace this prefab's own earlier cut file. Other vehicle "
+                            "files are never replaced."))] = False) -> PrefabInfo:
+    """Register a saved vehicle as a prefab, or cut a box out of one into a new prefab vehicle
+    (whole parts, wires inside the cut kept, microcontrollers copied exactly, centred on the
+    workbench so it loads and tests in game on its own). Writes a side file in the server's data
+    folder naming the prefab's connection points; a cut also writes <name>.xml and its thumbnail
+    to the vehicles folder. The source vehicle is never changed. Use list_prefabs to see
+    prefabs and paste_prefab to place one in a draft. Returns the prefab and its connection
+    points."""
+    from swhull import prefabs  # noqa: PLC0415
+    _check_name(name)
+    old = prefabs.read(name)
+    if bounds is None:
+        file = vehicle or (old["file"] if old else name)
+        text = _vehicle_path(file).read_bytes().decode("utf-8-sig")
+        record, _, info = await run_job("create_prefab", name, file, text, old, rename, None, (), None)
+        with DESIGN_LOCK:
+            prefabs.write(record)
+        return {**info, "notes": f"Prefab '{name}' uses vehicle '{file}'; {info['connection_points']} "
+                                 "connection point(s). Place it with paste_prefab."}
+    if not vehicle:
+        raise ValueError("a cut needs the source vehicle")
+    if vehicle.casefold() == name.casefold():
+        raise ValueError("a cut is saved as a new vehicle; give the prefab a different name")
+    source = _vehicle_path(vehicle).read_bytes().decode("utf-8-sig")
+    target = Path(vehicles_dir()) / f"{name}.xml"
+    stamp = None
+    if target.exists():
+        if not (old and old.get("cut_from") and old.get("file") == name):
+            raise ValueError(f"a vehicle named '{name}' exists that this tool did not cut; choose another name")
+        if not overwrite:
+            raise ValueError("this prefab's cut file exists; pass overwrite=true to replace it")
+        stat = target.stat()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    record, xml, info = await run_job("create_prefab", name, name, source, old, rename, bounds,
+                                      tuple(follow or ()), vehicle)
+    thumbnail = await _thumbnail(xml)
+    with DESIGN_LOCK:
+        _write_vehicle(target, xml, stamp, thumbnail)
+        prefabs.write(record)
+    cut = info["cut"]
+    return {**info, "notes": (
+        f"Cut {cut['parts']} parts ({cut['in_box']} in the box, {cut['followed_pipes']} pipe pieces and "
+        f"{cut['followed_wires']} wired parts followed) with {cut['wires']} wires from '{vehicle}' into "
+        f"{target}. {info['connection_points']} connection point(s). Load it in game to test it alone, "
+        "or place it with paste_prefab.")}
+
+
+@mcp.tool(annotations=EDIT)
+@_user_errors
+async def paste_prefab(design: Draft,
+                       prefab: Annotated[str, Field(description=(
+                           "Prefab name from list_prefabs, or any vehicle file name in the vehicles "
+                           "folder."))],
+                       position: Annotated[list[int], Field(min_length=3, max_length=3, description=(
+                           "Where the prefab's lowest corner goes (after rotation), integer blocks in "
+                           "the draft frame (query_parts)."))],
+                       rotation: Annotated[str | None, Field(description=(
+                           "Grid rotation as an r string of nine integers, row-major (for example "
+                           "'0,0,1,0,1,0,-1,0,0' turns it a quarter about y); omit to keep the "
+                           "prefab's orientation."))] = None,
+                       replace: Annotated[bool, Field(description=(
+                           "Remove draft parts the prefab overlaps instead of refusing. Configured "
+                           "or wired parts are never removed."))] = False,
+                       body: Annotated[str | None, Field(description=(
+                           "Body for the prefab's main body: an existing body ID or \"new\"; omit to "
+                           "join the one body it touches."))] = None,
+                       revision: EditRevision = None, commit: Commit = False, preview: Preview = False
+                       ) -> PasteResult:
+    """Place a prefab in a draft: every part copied exactly (microcontrollers included) and its
+    wires moved with it; its other bodies become new bodies. Refused when it overlaps draft parts
+    unless replace=true. Returns the parts placed, groups that touch nothing else in the draft,
+    and the prefab's connection points as draft part IDs and ports or surface indices, ready for
+    edit_connections (wires) and route_connections (pipes and shafts). commit=true applies it as
+    one undo step (undo_edits); otherwise it is a preview. Use create_prefab to make prefabs."""
+    from swhull import prefabs  # noqa: PLC0415
+    record = _read_design(design)
+    _check_revision(record, revision, commit, "query_parts")
+    side = prefabs.read(prefab)
+    file = side["file"] if side else prefab
+    text = _vehicle_path(file).read_bytes().decode("utf-8-sig")
+    op = prefabs.paste_operation(text, position, rotation, replace, body, prefab)
+    proposed, png, note, report = await run_job("paste_prefab", record, op, design, preview,
+                                                (side or {}).get("names"))
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    return _result(png, {"committed": commit, "revision": _revision(proposed), "base_revision": revision,
+                         **report, "notes": note})
 
 
 @mcp.tool(annotations=READ)

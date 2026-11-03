@@ -429,7 +429,7 @@ def test_any_installed_part_can_be_placed_and_unchecked_systems_are_marked(land_
     from swhull.editing import part  # noqa: PLC0415
     rows = catalogue(search="modular")["parts"]
     assert [r["definition"] for r in rows] == ["modular_engine_flywheel"]
-    assert rows[0]["preflight"].startswith("unchecked: preflight does not model modular engine")
+    assert "preflight" not in rows[0]   # modular engines are checked now
     assert definitions.catalogue(search="modular")["parts"] == rows
     assert "preflight" not in catalogue(search="motor_small")["parts"][0]
     assert part({"definition": "modular_engine_flywheel", "position": [0, 0, 0]}).piece.d == "modular_engine_flywheel"
