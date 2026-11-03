@@ -26,7 +26,8 @@ checks, never requirements.
    `route_connections` lays pipes and shafts, and `apply_vehicle_assembly` wires a whole
    starter, clutch, brake or light set-up.
 6. **Check.** `preflight_vehicle` checks connected systems and lists parts it cannot check yet
-   as `unchecked`. `check_seal` tests watertightness. `preview_vehicle` and `inspect_view`
+   as `unchecked`. `check_seal` tests watertightness. `analyze_physics` estimates mass, centre of
+   mass, how it floats with tanks empty and full, thrust-to-weight and wing lift. `preview_vehicle` and `inspect_view`
    render the draft: look at the image yourself.
 7. **Save.** `save_vehicle(name, design)` writes a new file to the player's vehicles folder.
    `prepare_vehicle_validation` exports a test copy with an in-game checklist.
@@ -61,6 +62,17 @@ Preflight follows wires and physical pipes for prebuilt engines (fuel, air, exha
 drivelines to wheels or propellers, electric power, gearbox ratios and wheel directions.
 Modular engines, jet engines, rockets, steam power and heat exchangers are placed normally but
 listed under `unchecked`, because preflight does not model them yet.
+
+## Physics estimates
+
+`analyze_physics` works on any draft or saved vehicle, including multi-body ones at their editor pose.
+It uses the base game's constants (gravity 10, water density 1000, air density 1.225) and never
+changes them. Floating weight is `mass x (10 + 10 x ramp)` kg, where the ramp grows from 0 at
+mass 2,000 to 1 at mass 25,000. Sealed air and solid material both displace water; slope pieces
+count by their exact shape. A sealed pocket with a Fluid Spawner is a tank, and tank fluid weighs
+0.1 mass per litre. Lift counts wing and control-surface parts only: the game also lifts block
+surfaces, so block-built wings are not included. The report lists every provisional value; treat
+the numbers as estimates until they are checked in game.
 
 ## Style rule sets (optional)
 

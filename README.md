@@ -255,6 +255,7 @@ one it did create needs `overwrite=true`.
 | Faults and repairs | `preflight_vehicle`, `plan_vehicle_repairs`, `repair_vehicle`, `preview_vehicle_diagnostics`, `check_seal` | [Vehicle repair](docs/vehicle-repair.md) |
 | In-game test records | `prepare_vehicle_validation`, `record_vehicle_validation`, `get_vehicle_validation`, `get_calibration_observations` | [In-game testing](docs/in-game-testing.md) |
 | Part catalogue | `search_parts` (with a family filter), `get_part_definition`, `get_part_orientation` | [Start](docs/start.md) |
+| Physics estimates | `analyze_physics` | [Start](docs/start.md) |
 | Inspection and analysis | `inspect_view`, `open_in_viewer`, `list_game_vehicles`, `preview_game_vehicle`, `analyze_vehicle`, `analyze_hull`, `suggest_hull_blocks` | [Hull smoothing](docs/hull-smoothing.md) |
 
 ## Configuration
@@ -388,6 +389,7 @@ and [surface design plan](docs/surface-design-plan.md).
 | [swhull/jobs.py](swhull/jobs.py), [cache.py](swhull/cache.py) | Killable worker processes; shared geometry cache |
 | [swhull/setup_gui.py](swhull/setup_gui.py), [desktop_runtime.py](swhull/desktop_runtime.py) | Desktop window and shared server |
 | [docs/start.md](docs/start.md), [swhull/guide.md](swhull/guide.md) | Guides served by `get_guide` (any vehicle; hull generator) |
+| [swhull/physics.py](swhull/physics.py), [game_constants.py](swhull/game_constants.py) | Read-only physics estimates and the base-game constants they use |
 | [swhull/style.py](swhull/style.py) | Optional style rule sets checked by `preflight_vehicle(style=...)` |
 | [viewer/](viewer) | Standalone 3D viewer |
 | [tools/](tools) | Smoke, client, package and desktop tests; in-game calibration vehicles |

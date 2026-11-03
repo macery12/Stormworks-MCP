@@ -285,6 +285,21 @@ class VehicleList(TypedDict):
     limitations: NotRequired[list[str]]
 
 
+class PhysicsReport(TypedDict):
+    """analyze_physics: masses, volumes, tanks, flotation per loading, lift and thrust."""
+    frame: str
+    mass: dict[str, Any]
+    volume: dict[str, Any]
+    tanks: list[dict[str, Any]]
+    flotation: dict[str, dict[str, Any]]
+    lift: dict[str, Any] | None
+    thrust: dict[str, Any] | None
+    constants: dict[str, float]
+    provisional: dict[str, str]
+    verification: str
+    notes: str
+
+
 # Batches reach the tools as plain JSON objects so their input schemas stay shallow (the
 # operation fields are documented in the tool descriptions); plain() validates each batch
 # against these models before anything runs.

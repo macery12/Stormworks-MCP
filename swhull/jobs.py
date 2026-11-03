@@ -347,6 +347,22 @@ def diagnostic_geometry(record):
     return xml, {**geometry(xml), "diagnostics": overlay(record, parts)}
 
 
+def physics(path, record, title, tank_fill=None, airspeed=None, lift_coefficient=1.0):
+    from .physics import analyze, notes, picture  # noqa: PLC0415
+    from .vehicle import bodies_from_text  # noqa: PLC0415
+    if path is not None:
+        with open(path, encoding="utf-8-sig") as f:
+            bodies = bodies_from_text(f.read())
+    else:
+        parts, _ = materialize(record)
+        bodies = [("1", parts)]
+    model, report = analyze(bodies, tank_fill, airspeed, lift_coefficient)
+    png = picture(model, report, title)
+    for row in report["flotation"].values():
+        row.pop("waterline", None)
+    return png, {**report, "notes": notes(title, report)}
+
+
 def hull_analysis(full, path, body_id, stations, x):
     from pathlib import Path  # noqa: PLC0415
     from .hull_analysis import design_depths, reference_structure, structural_report  # noqa: PLC0415
@@ -430,7 +446,7 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 parts_catalogue, land_library, land_layout, land_draft, viewer_geometry,
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
-                                prepare_validation, diagnostic_geometry,
+                                prepare_validation, diagnostic_geometry, physics,
                                 thumbnail)}
 
 

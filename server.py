@@ -36,7 +36,7 @@ from swhull.land_presets import PRESETS as VEHICLE_PRESETS
 from swhull.style import RULE_SETS
 from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyReport, ChangeReport,
                                  ConnectionBatch, DiagnosticReport, DraftCreated, EditBatch, EditResult,
-                                 Operations, PreflightReport, PreviewResult, RepairPlan, RouteBatch, SealReport,
+                                 Operations, PhysicsReport, PreflightReport, PreviewResult, RepairPlan, RouteBatch, SealReport,
                                  Selection, VehicleList, plain)
 from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, Detail, DoorState,
                                 Draft, EditRevision, Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName,
@@ -72,8 +72,9 @@ look, then commit=true with the revision. Edits use integer blocks (0.25 m), x a
 +z forward. Wire with edit_connections, lay pipes and shafts with route_connections, and use
 apply_vehicle_assembly for whole starter, clutch, brake or light set-ups. Check with
 preflight_vehicle (parts it cannot check yet are listed as unchecked, never refused; style=[...]
-adds optional habit warnings) and check_seal, look at preview_vehicle or inspect_view yourself,
-then save_vehicle under a new name. Ask for the workbench size (list_workbenches) when size
+adds optional habit warnings), check_seal and analyze_physics (read-only estimates of mass,
+flotation, thrust and lift), look at preview_vehicle or inspect_view yourself, then save_vehicle
+under a new name. Ask for the workbench size (list_workbenches) when size
 matters. Report every automatic choice and skipped placement. Only the game proves a vehicle
 works: prepare_vehicle_validation exports a test copy with a checklist, and
 record_vehicle_validation stores what the player saw."""
@@ -704,6 +705,40 @@ async def analyze_hull(name: Annotated[str | None, Field(description=(
     if body_id is not None:
         raise ValueError("body_id applies only to a saved vehicle name")
     return await run_job("hull_analysis", _spec(spec, preset, design, patch), None, None, stations, x)
+
+
+@mcp.tool(annotations=READ)
+@_user_errors
+async def analyze_physics(name: OptionalVehicleName = None,
+                          design: Annotated[str | None, Field(description=(
+                              "Stored draft or hull design to analyse instead of a saved vehicle (see list_designs)."))]
+                          = None,
+                          source: Source = "vehicles",
+                          tank_fill: Annotated[dict[str, float] | None, Field(description=(
+                              'Fill fraction 0-1 per tank name from a previous report, e.g. {"custom tank 1": 0.5}; '
+                              "adds a custom loading beside empty, full and as-saved."))] = None,
+                          airspeed: Annotated[float | None, Field(description=(
+                              "Airspeed in m/s for the lift estimate; omit to report only the speed where lift "
+                              "equals weight."), ge=0)] = None,
+                          lift_coefficient: Annotated[float, Field(description=(
+                              "Lift coefficient for the wing estimate; 1 by default."), gt=0, le=5)] = 1.0
+                          ) -> PhysicsReport:
+    """Estimate the physics of any vehicle from its parts and the base-game constants: mass and
+    centre of mass per body, sealed air and solid volume, block-built and premade tanks with
+    litres and fluid, and how it floats with tanks empty, full, as saved and optionally a custom
+    fill (draft, trim, heel, reserve buoyancy, stability GM). Also gives an upper bound on
+    propeller and rotor thrust-to-weight and a lift estimate from wing parts. Returns a side view
+    with the waterline and centres of mass, buoyancy and lift, plus the numbers. Several values
+    are provisional and listed as such; the game is the real test. analyze_hull measures hull
+    material instead. Read-only; never reads or changes the game's own constants."""
+    if (name is None) == (design is None):
+        raise ValueError("choose exactly one saved vehicle name or draft design")
+    if design is not None and source != "vehicles":
+        raise ValueError("source applies only to a saved vehicle name")
+    path = str(_reference_path(name, source)) if name is not None else None
+    record = _read_design(design) if design is not None else None
+    png, report = await run_job("physics", path, record, name or design, tank_fill, airspeed, lift_coefficient)
+    return _result(png, report)
 
 
 @mcp.tool(annotations=CREATE)

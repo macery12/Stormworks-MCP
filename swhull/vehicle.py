@@ -145,6 +145,28 @@ def load_placed(path, body_id=None):
         return placed_from_text(f.read(), body_id)
 
 
+def bodies_from_text(text):
+    """Every body's read-only display parts, as (body_id, parts). Bodies share one build grid,
+    so together they show the vehicle at its editor rest pose."""
+    from .reference import xml_root  # noqa: PLC0415
+    out = []
+    for i, body in enumerate(xml_root(text).findall("bodies/body")):
+        bid = body.get("unique_id") or str(i)
+        parts, _ = placed_from_text(text, body.get("unique_id"))
+        for n, p in enumerate(parts):
+            p.uid = f"{bid}:{n}"
+            q = tuple(tuple(int(round(c)) for c in row) for row in p.Q)
+            if any(abs(c - r) > 1e-6 for row, qrow in zip(p.Q, q) for c, r in zip(row, qrow)):
+                raise ValueError(f"part {p.piece.d} in body {bid} has a scaled or skewed transform; "
+                                 "only grid rotations are supported")
+            p.Q = q
+        if parts:
+            out.append((bid, parts))
+    if not out:
+        raise ValueError("vehicle has no parts")
+    return out
+
+
 def placed_from_text(text, body_id=None):
     """One body's read-only display geometry; controller internals are never vehicle parts."""
     from .reference import xml_root  # noqa: PLC0415
