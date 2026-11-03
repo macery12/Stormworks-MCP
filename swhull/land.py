@@ -1,4 +1,4 @@
-"""Installed land-vehicle parts and read-only, body-local layout evidence."""
+﻿"""Installed land-vehicle parts and read-only, body-local layout evidence."""
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -7,8 +7,48 @@ from . import definitions
 from .pieces import DIRS, add, apply, r_attr, split_mirror
 
 ROAD_WHEEL = re.compile(r"wheel_(?:advanced_[3579](?:_sus)?|small|medium|coaster(?:_large)?)$")
-CATEGORIES = ("wheels", "tracks", "lights", "controls", "propulsion", "transmission",
-              "power", "fuel", "cooling", "body", "logic", "utility")
+CATEGORIES = ("body", "wheels", "tracks", "surfaces", "propulsion", "transmission", "fuel", "cooling",
+              "power", "controls", "lights", "sensors", "logic", "mechanics", "weapons", "utility", "other")
+
+# First match wins, so narrower families come before the prefixes that would also catch them.
+_FAMILIES = (
+    ("tracks", ("wheel_tank", "track_")),
+    ("wheels", ("tyre_", "train_wheels")),
+    ("transmission", ("clutch", "gearbox", "torque", "differential", "rps_", "pipe", "trans_",
+                      "modular_engine_clutch", "modular_engine_gearbox", "modular_engine_crankshaft_converter")),
+    ("cooling", ("radiator", "heatsink", "heat_", "heater", "coolant", "fluid_radiator", "fluid_heat",
+                 "modular_engine_coolant", "intercooler", "cryo_cooler", "air_exchanger")),
+    ("fuel", ("fluid", "water_spawner", "pump", "fuel", "modular_engine_fuel", "modular_engine_air",
+              "modular_engine_exhaust", "modular_engine_intake", "modular_engine_manifold", "modular_engine_fluid",
+              "water_pump", "water_inlet", "water_outlet", "water_suction", "relief_valve", "scoop_intake",
+              "air_filter", "turbocharger", "catalytic_converter", "separator", "slurry_filter")),
+    ("surfaces", ("wing_", "control_surface", "control_fin", "rudder", "keel_", "parachute", "landing_float",
+                  "ski")),
+    ("propulsion", ("motor_", "modular_engine", "engine", "aircraft_engine", "jet_engine", "propeller",
+                    "aircraft_propeller", "large_propeller", "giga_prop", "rotor", "heavy_rotor", "huge_rotor",
+                    "large_rotor", "tail_rotor", "solid_rocket", "liquid_rocket", "rcs_thruster",
+                    "azimuth_thruster", "water_jet", "fan_", "steam_", "turbine")),
+    ("lights", ("small_light", "searchlight", "navigation_light", "light_", "rotating_light")),
+    ("controls", ("seat", "button", "toggle_button", "instrument", "dial", "gauge", "monitor", "handle",
+                  "digital_display", "indicator", "passenger_seat")),
+    ("power", ("battery", "generator", "electric_", "circuit_breaker", "solar", "hydrogen_fuel_cell")),
+    ("body", ("0", "1", "window", "door", "ladder", "weight", "hatch", "railing", "stair", "buoyancy_float",
+              "friction_block", "flag_", "sign")),
+    ("sensors", ("sensor_", "radar", "sonar", "gps", "compass", "altimeter", "barometer", "camera", "rx_",
+                 "transponder", "laser_", "fish_finder", "clock", "temperature_probe", "artificial_horizon",
+                 "data_logger", "gas_measure", "water_measure", "radiation_detector", "viewing_scope")),
+    ("logic", ("microprocessor", "logic", "gate_", "numerical", "composite", "function", "constant")),
+    ("mechanics", ("multibody_", "linear_", "connector", "winch", "rope", "hinge", "pivot", "piston",
+                   "velocity", "gyro", "magall")),
+    ("weapons", ("gun_", "warhead_", "flare_launcher")),
+    ("utility", ("speaker", "siren", "foghorn", "buzzer", "steam_whistle", "inventory_", "vehicle_tool",
+                 "water_hose", "watercannon", "water_nozzle", "water_extractor", "mineral_", "oil_rig",
+                 "lobster_pot", "desalinator", "distillation", "furnace", "map_icon", "no_sleep",
+                 "physics_flooder", "electrolyser", "speed", "distance", "tilt")),
+)
+
+
+_EXACT = {"mic": "sensors", "steam_whistle": "utility"}
 
 
 def road_wheel(d):
@@ -16,35 +56,17 @@ def road_wheel(d):
 
 
 def category(d):
-    """Part-family classification, not a claim about a vehicle's intended use."""
+    """Part family for catalogue filtering, not a claim about what a vehicle is for."""
     if road_wheel(d):
         return "wheels"
-    if d.startswith("wheel_tank") or d.startswith("track_"):
-        return "tracks"
-    if d.startswith(("small_light", "searchlight", "navigation_light", "light_")):
-        return "lights"
-    if d.startswith(("seat", "button", "toggle_button", "instrument", "dial", "gauge", "monitor")):
-        return "controls"
-    if d.startswith(("battery", "generator", "electric_", "circuit_breaker")):
-        return "power"
-    if d.startswith(("clutch", "gearbox", "torque", "differential", "rps_", "pipe", "trans_",
-                     "modular_engine_clutch", "modular_engine_gearbox")):
-        return "transmission"
-    if d.startswith(("radiator", "heatsink", "heat_", "coolant", "fluid_radiator", "modular_engine_coolant")):
-        return "cooling"
-    if d.startswith(("fluid", "water_spawner", "pump", "fuel", "modular_engine_fuel", "modular_engine_air",
-                     "modular_engine_exhaust")):
-        return "fuel"
-    if d.startswith(("motor_", "modular_engine", "engine")) or d in ("aircraft_engine",):
-        return "propulsion"
-    if d.startswith(("0", "window", "door", "ladder", "weight")):
-        return "body"
-    if d.startswith(("microprocessor", "logic", "gate_", "numerical", "composite", "function", "constant")):
-        return "logic"
-    if d.startswith(("winch", "connector", "hinge", "pivot", "piston", "velocity", "speed",
-                     "distance", "tilt", "gps", "compass", "rope", "sensor_")):
-        return "utility"
-    return None
+    if d in _EXACT:
+        return _EXACT[d]
+    if d.endswith("_sensor") or d.endswith("_detector"):
+        return "sensors"
+    for family, prefixes in _FAMILIES:
+        if d.startswith(prefixes):
+            return family
+    return "other"
 
 
 def _page(offset, limit):
@@ -54,33 +76,35 @@ def _page(offset, limit):
 
 
 def catalogue(group="", search="", offset=0, limit=50):
-    from .part_policy import allowed  # noqa: PLC0415
+    """Every placeable installed part, optionally one family, with footprint size, mass and ports."""
+    from .part_policy import allowed, unchecked  # noqa: PLC0415
+    from .pieces import BY_NAME  # noqa: PLC0415
     _page(offset, limit)
     if group and group not in CATEGORIES:
         raise ValueError(f"category must be one of {', '.join(CATEGORIES)}")
     base = definitions.definitions_dir()
     rows = []
-    names = sorted(p.stem for p in Path(base).glob("*.xml")) if base else []
+    names = sorted(p.stem for p in Path(base).glob("*.xml")) if base else sorted(BY_NAME)
     for d in names:
         if not allowed(d):
             continue
         role = category(d)
-        if role is None or group and role != group:
+        if group and role != group:
             continue
         data = definitions.metadata(d)
-        if search.lower() not in f"{d} {data['name']}".lower():
+        if data is None or search.lower() not in f"{d} {data['name']}".lower():
             continue
         size = [max(v[i] for v in data["footprint"]) - min(v[i] for v in data["footprint"]) + 1
                 for i in range(3)]
-        rows.append({"definition": d, "name": data["name"], "category": role,
-                     "size_blocks": size, "size_metres": [n / 4 for n in size], "mass": data["mass"],
-                     "ports": [{k: n[k] for k in ("index", "label", "type", "mode")}
-                               for n in data["logic_nodes"]]})
+        row = {"definition": d, "name": data["name"], "category": role,
+               "size_blocks": size, "size_metres": [n / 4 for n in size], "mass": data["mass"],
+               "ports": [{k: n[k] for k in ("index", "label", "type", "mode")} for n in data["logic_nodes"]]}
+        if system := unchecked(d):
+            row["preflight"] = f"unchecked: preflight does not model {system} systems yet"
+        rows.append(row)
     return {"parts": rows[offset:offset + limit], "total": len(rows), "categories": CATEGORIES,
             "next_offset": offset + limit if offset + limit < len(rows) else None,
-            "definitions_available": base is not None,
-            "equipment_policy": "Prebuilt diesel engines only; radiators only for cooling.",
-            "limitations": ["Family categories include parts useful on land; use search_parts for the permitted catalogue."]}
+            "definitions_available": base is not None}
 
 
 def scan_library(directory, search="", kind="wheeled", offset=0, limit=50, workshop=False):

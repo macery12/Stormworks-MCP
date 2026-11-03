@@ -93,12 +93,22 @@ def test_nested_contracts_reject_malformed_calls(contract, value):
         plain(value, contract)
 
 
-def test_schema_requires_operation_specific_fields_and_publishes_results():
+def test_batches_validate_operation_specific_fields_and_tools_publish_results(tmp_path, monkeypatch):
+    """Batch schemas stay shallow for clients; each operation is still validated before it runs."""
     tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
-    for name in ("edit_parts", "edit_connections", "route_connections"):
-        assert "$defs" in tools[name].parameters
-    assert "delta" in tools["edit_parts"].parameters["$defs"]["Translate"]["required"]
-    assert tools["edit_connections"].parameters["$defs"]["WireEndpoint"]["properties"]["port"]["minimum"] == 0
+    for name, field in (("edit_parts", "operations"), ("edit_connections", "operations"),
+                        ("route_connections", "routes")):
+        items = tools[name].parameters["properties"][field]["items"]
+        assert items["type"] == "object" and "op" in tools[name].description
+    with pytest.raises(ValidationError, match="delta"):
+        plain([{"op": "move", "select": {"ids": ["a"]}}], EditBatch)
+    with pytest.raises(ValidationError, match="port"):
+        plain([{"op": "connect", "from": {"part_id": "a", "port": -1}, "to": {"part_id": "b", "port": 0}}],
+              ConnectionBatch)
+    monkeypatch.setenv("SW_DESIGNS_DIR", str(tmp_path))
+    server.store_design("schema", preset="rowboat")
+    with pytest.raises(ToolError, match="delta"):
+        call(server.edit_parts, "schema", [{"op": "move", "select": {"ids": ["a"]}}])
     for name in ("preflight_vehicle", "plan_vehicle_repairs", "repair_vehicle", "apply_vehicle_assembly", "preview_vehicle_diagnostics", "prepare_vehicle_validation"):
         assert tools[name].output_schema["type"] == "object"
 
@@ -149,17 +159,17 @@ def test_repair_mcp_preview_commit_stale_and_undo(humvee, tmp_path, monkeypatch)
     server._atomic_design("broken", broken)
     p = call(server.plan_vehicle_repairs, "broken")
     ids = [f["finding_id"] for f in p["findings"] if f["repair_status"] == "available"]
-    previewed = call(server.repair_vehicle, "broken", p["revision"], p["plan_id"], ids)
+    previewed = call(server.repair_vehicle, "broken", p["plan_id"], ids)
     assert previewed.content[0].type == "image" and not previewed.structured_content["committed"]
     assert server._read_design("broken") == broken
-    result = call(server.repair_vehicle, "broken", p["revision"], p["plan_id"], ids, commit=True)
+    result = call(server.repair_vehicle, "broken", p["plan_id"], ids, commit=True)
     report = result.structured_content
     tool = next(t for t in server.mcp._tool_manager.list_tools() if t.name == "repair_vehicle")
     assert tool.fn_metadata.convert_result(result).structured_content == report
     TypeAdapter(PreflightReport).validate_python(report["after"])
     assert report["committed"] and not call(server.preflight_vehicle, "broken")["findings"]
     with pytest.raises(ToolError, match="stale"):
-        call(server.repair_vehicle, "broken", p["revision"], p["plan_id"], ids, commit=True)
+        call(server.repair_vehicle, "broken", p["plan_id"], ids, commit=True)
     server.undo_edits("broken", report["revision"])
     assert call(server.preflight_vehicle, "broken")["findings"]
 
@@ -229,12 +239,15 @@ def test_validation_mcp_detects_modified_export(tmp_path, monkeypatch):
     assert run["export_sha256"] == sha(path.read_bytes()) and run["status"] == "pending"
     assert server.get_vehicle_validation(run["run_id"])["export_matches"]
     observations = [{"check": "starting", "result": "skipped", "evidence": "Unit test, game unavailable"}]
-    result = server.record_vehicle_validation(run["run_id"], run["export_sha256"], observations, "fixture", "tests")
+    result = server.record_vehicle_validation(run["run_id"], observations, "fixture", "tests")
     assert result["status"] == "incomplete"
+    with pytest.raises(ToolError, match="check"):
+        server.record_vehicle_validation(run["run_id"], [{"check": "flying", "result": "pass", "evidence": "x"}],
+                                         "fixture")
     path.write_text("changed")
     assert not server.get_vehicle_validation(run["run_id"])["export_matches"]
-    with pytest.raises(ToolError, match="export changed"):
-        server.record_vehicle_validation(run["run_id"], run["export_sha256"], observations, "fixture", "tests")
+    with pytest.raises(ToolError, match="exported file changed"):
+        server.record_vehicle_validation(run["run_id"], observations, "fixture", "tests")
     assert json.loads(server._validation_path(run["run_id"]).read_text())["status"] == "incomplete"
 
 

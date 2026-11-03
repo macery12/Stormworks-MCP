@@ -8,6 +8,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 import server
+from tool_results import unpack
 from swhull import definitions
 from swhull.components import full_faces, mounting_contacts, owners, validate_placement
 from swhull.connections import transmission_ports
@@ -96,7 +97,11 @@ def test_land_catalogue_excludes_flywheels_from_road_wheels(land_definitions):
     ("trans_straight", "transmission"), ("trans_block_angle", "transmission"),
     ("modular_engine_clutch", "transmission"), ("modular_engine_gearbox_3x3", "transmission"),
     ("fluid_radiator_electric_5", "cooling"), ("gate_float_switch", "logic"),
-    ("sensor_linear_speed", "utility"), ("modular_engine_flywheel", "propulsion"),
+    ("sensor_linear_speed", "sensors"), ("modular_engine_flywheel", "propulsion"),
+    ("linear_speed_sensor", "sensors"), ("microprocessor", "logic"), ("mic", "sensors"),
+    ("wing_small", "surfaces"), ("rudder", "surfaces"), ("jet_engine_compressor", "propulsion"),
+    ("multibody_pivot_a", "mechanics"), ("steam_whistle", "utility"), ("gun_m", "weapons"),
+    ("unknown_future_part", "other"),
 ])
 def test_installed_component_family_names_are_categorized(definition, expected):
     assert category(definition) == expected
@@ -245,13 +250,13 @@ def test_default_buggy_and_workshop_tools_preserve_reference_files(buggy_definit
     monkeypatch.setenv("SW_DESIGNS_DIR", str(designs))
     monkeypatch.setenv("SW_VEHICLES_DIR", str(vehicles))
     monkeypatch.setenv("SW_WORKSHOP_DIR", str(workshop))
-    image, text, created = call(server.create_land_vehicle, "buggy", {"bench": "S"})
+    image, text, created = unpack(call(server.create_vehicle, "buggy", "utility_buggy", {"bench": "S"}))
     stored = server.load_design("buggy")
-    assert stored["spec"]["preset"] == "utility_buggy" and created["kind"] == "land"
+    assert stored["spec"]["preset"] == "utility_buggy" and created["kind"] == "draft"
     assert "premade fuel tank" in text and "unfinished" in text
-    assert image.data.startswith(b"\x89PNG") and not list(vehicles.iterdir())
-    image, note = call(server.preview_vehicle, "buggy", layer="components", yaw=35)
-    assert image.data.startswith(b"\x89PNG") and "footprint fallbacks" in note
+    assert image.startswith(b"\x89PNG") and not list(vehicles.iterdir())
+    image, note, _ = unpack(call(server.preview_vehicle, "buggy", layer="components", yaw=35))
+    assert image.startswith(b"\x89PNG") and "footprint fallbacks" in note
     with pytest.raises(ToolError, match="layer"):
         call(server.preview_vehicle, "buggy", layer="invalid")
     opened = []
@@ -274,13 +279,15 @@ def test_default_buggy_and_workshop_tools_preserve_reference_files(buggy_definit
         folder.mkdir(parents=True)
         (folder / "vehicle.xml").write_text(xml, encoding="utf-8")
     original = (workshop / "111" / "vehicle.xml").read_bytes()
-    page = call(server.find_land_vehicles, source="workshop", limit=1)
-    assert page["total"] == 2 and page["next_offset"] == 1
-    assert call(server.find_land_vehicles, source="workshop", offset=1)["vehicles"][0]["name"] == "222"
+    page = call(server.list_game_vehicles, filter="wheeled", source="workshop", limit=1)
+    assert page["total"] == 2 and page["next_offset"] == 1 and page["vehicles"][0]["wheel_count"] == 4
+    assert call(server.list_game_vehicles, filter="wheeled", source="workshop", offset=1)["vehicles"][0]["name"] == "222"
+    names = call(server.list_game_vehicles, source="workshop")
+    assert [v["name"] for v in names["vehicles"]] == ["111", "222"] and names["filter"] == "all"
     report = call(server.analyze_land_vehicle, name="111", source="workshop")
     assert report["counts"]["wheels"] == 4 and report["link_count"] == 1
-    image, note = call(server.preview_game_vehicle, "111", source="workshop")
-    assert image.data.startswith(b"\x89PNG") and "Body 1 of 1" in note
+    image, note, _ = unpack(call(server.preview_game_vehicle, "111", source="workshop"))
+    assert image.startswith(b"\x89PNG") and "Body 1 of 1" in note
     call(server.open_in_viewer, name="111", source="workshop")
     call(server.import_vehicle, "111", "workshop study", source="workshop")
     report = call(server.analyze_land_vehicle, design="workshop study")
@@ -418,20 +425,21 @@ def test_named_spare_and_explicit_roles_do_not_extend_road_wheelbase(land_defini
         layout_text(xml, wheel_roles={"wrong": "spare"})
 
 
-def test_equipment_policy_filters_modular_engines_and_rejects_new_placements(land_definitions):
+def test_any_installed_part_can_be_placed_and_unchecked_systems_are_marked(land_definitions):
     from swhull.editing import part  # noqa: PLC0415
-    assert not catalogue(search="modular")["parts"]
-    assert not definitions.catalogue(search="modular")["parts"]
-    for d in ("modular_engine_flywheel", "heat_exchanger_2_2", "fluid_heatsink"):
-        with pytest.raises(ValueError, match="disabled|restricted"):
-            part({"definition": d, "position": [0, 0, 0]})
+    rows = catalogue(search="modular")["parts"]
+    assert [r["definition"] for r in rows] == ["modular_engine_flywheel"]
+    assert rows[0]["preflight"].startswith("unchecked: preflight does not model modular engine")
+    assert definitions.catalogue(search="modular")["parts"] == rows
+    assert "preflight" not in catalogue(search="motor_small")["parts"][0]
+    assert part({"definition": "modular_engine_flywheel", "position": [0, 0, 0]}).piece.d == "modular_engine_flywheel"
 
 
 def test_unknown_part_diagnostics_distinguish_a_wrong_id_from_a_missing_install(land_definitions, monkeypatch):
     with pytest.raises(ToolError, match="unknown definition.*search_parts"):
         server.get_part_definition("04_wedge")
-    assert "edits" in server.hull_design_guide("topics")
-    assert server.hull_design_guide("edits").startswith("#")
+    assert "edits" in server.get_guide("topics")
+    assert server.get_guide("edits").startswith("#")
     monkeypatch.setattr(definitions, "definitions_dir", lambda: None)
     with pytest.raises(ToolError, match="game definitions not found.*SW_DEFINITIONS_DIR"):
         server.get_part_definition("window_4x4")
@@ -469,35 +477,37 @@ def test_land_tools_create_edit_analyze_and_save_a_draft(land_definitions, tmp_p
     vehicles.mkdir()
     monkeypatch.setenv("SW_VEHICLES_DIR", str(vehicles))
     monkeypatch.setenv("SW_DESIGNS_DIR", str(designs))
-    image, text, created = call(server.create_land_vehicle, "road draft", {"preset": "chassis", "bench": "S"})
-    assert image.data[:8] == b"\x89PNG\r\n\x1a\n" and "Land chassis" in text
-    assert created["kind"] == "land" and not list(vehicles.iterdir())
+    image, text, created = unpack(call(server.create_vehicle, "road draft", "chassis", {"bench": "S"}))
+    assert image[:8] == b"\x89PNG\r\n\x1a\n" and "Land chassis" in text
+    assert created["kind"] == "draft" and not list(vehicles.iterdir())
     query = call(server.query_parts, "road draft", select={"name": "driver"})
     assert query["revision"] == created["revision"]
     operations = [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "123456"}]
-    committed = call(server.edit_parts, "road draft", operations, query["revision"], commit=True)[-1]
+    committed = unpack(call(server.edit_parts, "road draft", operations, query["revision"], commit=True))[2]
     assert committed["committed"]
     report = call(server.analyze_land_vehicle, design="road draft")
     assert report["evidence_level"] == "draft_geometry" and report["counts"]["wheels"] == 4
     call(server.save_vehicle, "road copy", "road draft")
     assert '123456' in (vehicles / "road copy.xml").read_text()
-    assert call(server.find_land_vehicles)["vehicles"][0]["name"] == "road copy"
+    assert call(server.list_game_vehicles, filter="wheeled")["vehicles"][0]["name"] == "road copy"
     report = call(server.analyze_land_vehicle, name="road copy")
     assert report["evidence_level"] == "observed_saved_vehicle"
-    assert call(server.search_land_parts, category="lights")["total"] == 3
+    assert call(server.search_parts, category="lights")["total"] == 3
     stored = server.load_design("road draft")
-    assert stored["kind"] == "land" and stored["revision"] == committed["revision"]
+    assert stored["kind"] == "draft" and stored["revision"] == committed["revision"]
     server.undo_edits("road draft", committed["revision"])
     assert call(server.query_parts, "road draft", select={"name": "driver"})["parts"][0]["color"] != "123456"
-    assert "0.25 m" in server.land_vehicle_guide()
+    assert "0.25 m" in server.get_guide("land")
     with pytest.raises(ToolError, match="already exists"):
-        call(server.create_land_vehicle, "road draft")
-    with pytest.raises(ToolError, match="land draft"):
+        call(server.create_vehicle, "road draft")
+    with pytest.raises(ToolError, match="part-by-part draft"):
         call(server.preview_hull, design="road draft")
     with pytest.raises(ToolError, match="exactly one"):
         call(server.analyze_land_vehicle, name="road copy", design="road draft")
     with pytest.raises(ToolError):
-        call(server.create_land_vehicle, "../unsafe")
+        call(server.create_vehicle, "../unsafe")
     with pytest.raises(ToolError, match="grid"):
-        call(server.create_land_vehicle, "invalid", {"preset": "chassis", "width": 1.1})
+        call(server.create_vehicle, "invalid", "chassis", {"width": 1.1})
+    with pytest.raises(ToolError, match="preset parameter"):
+        call(server.create_vehicle, "invalid", "chassis", {"preset": "humvee_4x4"})
     assert not (designs / "invalid.json").exists()

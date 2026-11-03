@@ -5,12 +5,12 @@ in-game checks, see [Diagnose, repair and verify a vehicle](vehicle-repair.md).
 
 ## Workflow
 
-Start with `find_land_vehicles` to locate the player's saved wheel-based examples. Names are
+Start with `list_game_vehicles(filter="wheeled")` to locate the player's saved wheel-based examples. Names are
 not reliable: unfinished experiments can contain useful wheel mounts, seats or lighting.
-`kind="tracked"` finds track-wheel examples separately. Aircraft and boats with road wheels
+`filter="tracked"` finds track-wheel examples separately. Aircraft and boats with road wheels
 can also match; a saved arrangement is an observation, not a design rule.
 
-Installed workshop vehicles are also supported: `find_land_vehicles(source="workshop")`,
+Installed workshop vehicles are also supported: `list_game_vehicles(filter="wheeled", source="workshop")`,
 then `analyze_land_vehicle(name="3812797708", source="workshop")`. Names for workshop
 references are numeric item IDs, not file paths. Discovery checks every Steam library;
 `SW_WORKSHOP_DIR` can point to a `workshop/content/573090` directory. This reads installed
@@ -24,7 +24,7 @@ For an existing single-body v3 vehicle, use `import_vehicle` to make a separate 
 original component settings, nested controllers and links. Multi-body editing is unsupported.
 Configured or linked original components remain protected from geometric edits.
 
-For a new vehicle, call `create_land_vehicle(design="road draft", spec={...})`, then
+For a new vehicle, call `create_vehicle(design="road draft", preset="chassis", spec={...})`, then
 `query_parts` → `edit_parts` preview → `edit_parts` with `commit=true` and the same revision.
 `preview_vehicle` supports close-ups; `analyze_land_vehicle(design="road draft")` checks the
 draft before saving. `save_vehicle` writes the game vehicle when ready. New drafts default to
@@ -143,7 +143,8 @@ Preset variants and added bodywork must be checked again through steering and su
 
 ## Parts
 
-`search_land_parts(category=...)` exposes installed footprints, masses and actual ports:
+`search_parts(category=...)` exposes installed footprints, masses and actual ports. The families
+most useful on land:
 
 | Category | Useful components |
 | --- | --- |
@@ -151,25 +152,22 @@ Preset variants and added bodywork must be checked again through steering and su
 | tracks | Track wheels and drive wheels; separate from the road chassis builder |
 | controls | Driver seats, passenger seats, buttons and instruments |
 | lights | Marker lights, RGB lights and spotlights |
-| propulsion | Electric motors and the small/medium/large prebuilt diesel engines |
+| propulsion | Electric motors, prebuilt diesel engines and modular engine parts |
 | transmission | Clutches, gearboxes, torque sensors and pipes |
 | power | Batteries, generators and electrical parts |
 | fuel / cooling | Premade tanks, fuel/fluid parts, pumps and radiators |
 | body / utility / logic | Blocks, windows, doors, pivots, winches, connectors and control parts |
 
-These are family filters. Use `search_parts` for the permitted catalogue, then
-`get_part_definition` to inspect the exact installed part. No game definitions or personal
+These are family filters over the whole catalogue (`search_parts` with no category lists
+every family). Use `get_part_definition` to inspect the exact installed part. No game definitions or personal
 vehicle XML belong in the repository.
 
-New placement only offers prebuilt engines: `engine` (small), `aircraft_engine` (the game's Medium Engine, a diesel despite the id),
-`engine_diesel` (large). Modular engines are disabled. Standalone cube gearboxes are allowed
-despite their `modular_engine_gearbox_` IDs; use `modular_engine_gearbox_1x1` for compact road
-vehicles. Deprecated `torque_gearbox`/`torque_gearbox_2` remain readable in references but are
-excluded from new placement. Cooling only offers `fluid_radiator`,
-`fluid_radiator_electric` and installed electric radiator sizes. Heat exchangers and heat sinks
-are disabled. These restrictions apply to catalogue choices, component placement and exact
-add/replace edits. Existing vehicles and workshop references remain readable, including their
-restricted parts; reading a reference does not offer those parts for new placement.
+Any installed part can be placed. The prebuilt engines are `engine` (small), `aircraft_engine`
+(the game's Medium Engine, a diesel despite the id) and `engine_diesel` (large). Modular engines,
+jet engines and heat exchangers can be placed too, but preflight lists them as `unchecked`
+because it does not model their systems yet. Use `modular_engine_gearbox_1x1` (or 3x3, 5x5) for
+gearboxes: the game deprecated `torque_gearbox`/`torque_gearbox_2`, which remain readable in
+references but cannot be placed.
 
 All new prebuilt engines explicitly write `max_force_scale=1`, meaning **100% power**.
 The player confirmed that omitting this setting made a fully connected Humvee crank without

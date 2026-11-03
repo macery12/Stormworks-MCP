@@ -10,6 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 import server
 from swhull.build import resolve_spec
 from swhull.jobs import run_job
+from tool_results import unpack
 
 
 def call(tool, *args, **kwargs):
@@ -28,15 +29,21 @@ def dirs(tmp_path, monkeypatch):
 
 def test_tools_registered():
     names = {t.name for t in server.mcp._tool_manager.list_tools()}
-    assert {"hull_design_guide", "preview_hull", "preview_interior", "save_hull", "inspect_view",
+    assert {"get_guide", "preview_hull", "preview_interior", "save_hull", "inspect_view",
             "open_in_viewer", "preview_game_vehicle", "store_design", "deck_profile",
             "search_parts", "get_part_definition", "import_vehicle", "query_parts", "edit_parts",
             "undo_edits", "preview_vehicle", "save_vehicle", "check_seal",
             "get_part_orientation", "analyze_vehicle", "get_calibration_observations",
             "analyze_hull", "suggest_hull_blocks",
-            "land_vehicle_guide", "search_land_parts", "find_land_vehicles", "analyze_land_vehicle",
-            "create_land_vehicle", "query_connections", "edit_connections", "route_connections",
-            "preflight_vehicle", "study_references", "score_vehicle"} <= names
+            "analyze_land_vehicle", "list_game_vehicles", "create_vehicle", "query_connections",
+            "edit_connections", "route_connections", "preflight_vehicle"} <= names
+    assert not names & {"hull_design_guide", "land_vehicle_guide", "search_land_parts", "find_land_vehicles",
+                        "create_land_vehicle", "study_references", "score_vehicle"}
+
+
+def test_every_tool_declares_an_output_schema():
+    for tool in server.mcp._tool_manager.list_tools():
+        assert tool.output_schema, tool.name
 
 
 def test_every_tool_documents_its_behaviour_and_parameters():
@@ -54,26 +61,30 @@ def test_every_tool_documents_its_behaviour_and_parameters():
 
 def test_choices_are_exposed_in_tool_schemas():
     tools = {t.name: t for t in server.mcp._tool_manager.list_tools()}
-    assert {"edits", "topics"} <= set(tools["hull_design_guide"].parameters["properties"]["topic"]["enum"])
+    assert {"start", "edits", "land", "style_rules", "topics"} <= set(
+        tools["get_guide"].parameters["properties"]["topic"]["enum"])
+    assert tools["search_parts"].parameters["properties"]["category"]["enum"][0] == ""
+    assert set(tools["preflight_vehicle"].parameters["properties"]["style"]["anyOf"][0]["items"]["enum"]) == {
+        "boat_engine_room", "bow_tip", "pipe_colours"}
     assert tools["preview_vehicle"].parameters["properties"]["door_state"]["enum"] == ["closed", "open"]
 
 
 def test_land_instructions_offer_open_door_examples_and_enclosed_wall_crossings():
-    assert "humvee_4x4" in server.INSTRUCTIONS
-    assert "do not enlarge the cabin" in server.INSTRUCTIONS
-    guide = server.land_vehicle_guide()
+    assert "create_vehicle" in server.INSTRUCTIONS and "never refused" in server.INSTRUCTIONS
+    guide = server.get_guide("land")
     assert "through_blocks" in guide and "humvee_4x4" in guide and "1.25 m" in guide
     route_tool = next(t for t in server.mcp._tool_manager.list_tools() if t.name == "route_connections")
     assert "through_blocks" in route_tool.description and "enclosed" in route_tool.description
 
 
-@pytest.mark.parametrize("topic", ["workflow", "units", "spec", "interior", "archetypes", "style",
-                                 "limits", "staged", "building", "testing", "smoothing"])
+@pytest.mark.parametrize("topic", [t for t in server.GUIDE_TOPICS if t != "topics"])
 def test_focused_guides_are_available_to_the_model(topic):
-    assert server.hull_design_guide(topic).startswith("#")
-    assert server.hull_design_guide() == server.GUIDE
+    assert server.get_guide(topic).startswith("#")
+    assert server.get_guide("hull") == server.GUIDE
+    assert server.get_guide().startswith("# Building any Stormworks vehicle")
+    assert all(name in server.get_guide("topics") for name in server.GUIDE_TOPICS)
     with pytest.raises(ToolError, match="unknown guide topic"):
-        server.hull_design_guide("missing")
+        server.get_guide("missing")
 
 
 def test_runtime_status_explains_missing_game_assets(tmp_path, monkeypatch):
@@ -130,8 +141,8 @@ def test_hull_analysis_reports_floor_depth_and_original_body_frame(dirs):
 
 
 def test_preview_returns_image_and_text():
-    image, text = call(server.preview_hull, preset="rowboat")
-    assert image.data[:8] == b"\x89PNG\r\n\x1a\n"
+    image, text, _ = unpack(call(server.preview_hull, preset="rowboat"))
+    assert image[:8] == b"\x89PNG\r\n\x1a\n"
     assert "Overall:" in text
 
 
@@ -163,8 +174,8 @@ def test_store_design_and_patch(dirs):
     server.store_design("draft", preset="tugboat")
     assert (designs / "draft.json").is_file()
     patch = [{"op": "replace", "path": "/superstructure/wheelhouse/height", "value": 3.0}]
-    image, text = call(server.preview_hull, design="draft", patch=patch)
-    assert image.data[:4] == b"\x89PNG" and "Overall:" in text
+    image, text, _ = unpack(call(server.preview_hull, design="draft", patch=patch))
+    assert image[:4] == b"\x89PNG" and "Overall:" in text
     server.store_design("draft", design="draft", patch=patch)
     boxes = {b["name"]: b for b in server.load_design("draft")["superstructure"]}
     assert boxes["wheelhouse"]["height"] == 3.0
@@ -197,8 +208,8 @@ def test_draft_does_not_unlock_foreign_vehicle(dirs):
 
 
 def test_inspect_highlight():
-    image, text = call(server.inspect_view, preset="tugboat", highlight="wheelhouse", yaw=0, pitch=0)
-    assert image.data[:4] == b"\x89PNG" and "wheelhouse:" in text
+    image, text, _ = unpack(call(server.inspect_view, preset="tugboat", highlight="wheelhouse", yaw=0, pitch=0))
+    assert image[:4] == b"\x89PNG" and "wheelhouse:" in text
     with pytest.raises(ToolError, match="did you mean"):
         call(server.inspect_view, preset="tugboat", highlight="wheel")
 
@@ -231,13 +242,17 @@ def test_edit_preview_commit_undo_and_stale_revision(dirs):
     query = call(server.query_parts, "editable", limit=1)
     change = [{"op": "paint", "select": {"ids": [query["parts"][0]["id"]]}, "color": "123456"}]
     before = server.load_design("editable")
-    note, report = call(server.edit_parts, "editable", change, query["revision"])
+    image, note, report = unpack(call(server.edit_parts, "editable", change, query["revision"]))
+    assert image is None
     assert "Parts: 0 added, 0 removed, 1 changed" in note and "preview=true" in note
-    image, _, _ = call(server.edit_parts, "editable", change, query["revision"], preview=True)
-    assert image.data[:4] == b"\x89PNG"
+    image, _, _ = unpack(call(server.edit_parts, "editable", change, query["revision"], preview=True))
+    assert image[:4] == b"\x89PNG"
     assert not report["committed"]
     assert server.load_design("editable") == before
-    report = call(server.edit_parts, "editable", change, query["revision"], commit=True)[-1]
+    assert not unpack(call(server.edit_parts, "editable", change))[2]["committed"]   # previews need no revision
+    with pytest.raises(ToolError, match="needs the revision"):
+        call(server.edit_parts, "editable", change, commit=True)
+    report = unpack(call(server.edit_parts, "editable", change, query["revision"], commit=True))[2]
     assert report["committed"]
     with pytest.raises(ToolError, match="stale"):
         call(server.edit_parts, "editable", change, query["revision"], commit=True)
@@ -273,9 +288,9 @@ def test_imported_newlines_and_undo_preserve_source_bytes(dirs):
     (vehicles / "original.xml").write_bytes(source)
     call(server.import_vehicle, "original", "draft")
     q = call(server.query_parts, "draft")
-    *_, report = call(server.edit_parts, "draft",
-                        [{"op": "paint", "select": {"ids": [q["parts"][0]["id"]]}, "color": "123456"}],
-                        q["revision"], commit=True)
+    report = unpack(call(server.edit_parts, "draft",
+                         [{"op": "paint", "select": {"ids": [q["parts"][0]["id"]]}, "color": "123456"}],
+                         q["revision"], commit=True))[2]
     record = server._read_design("draft")
     assert "source_xml" not in record["history"][0]
     server.undo_edits("draft", report["revision"])
@@ -289,13 +304,13 @@ def test_seal_tool_generated_and_imported_seed_requirement(dirs):
     from swhull.vehicle import to_xml  # noqa: PLC0415
     vehicles, _ = dirs
     server.store_design("closed", preset="barge")
-    image, report = call(server.check_seal, "closed")
-    assert image.data[:4] == b"\x89PNG" and report["status"] == "sealed"
+    image, _, report = unpack(call(server.check_seal, "closed"))
+    assert image[:4] == b"\x89PNG" and report["status"] == "sealed"
     (vehicles / "plate.xml").write_text(to_xml([Placed(BLOCK, (0, 0, 0))]), encoding="utf-8")
     call(server.import_vehicle, "plate", "imported")
     with pytest.raises(ToolError, match="require explicit"):
         call(server.check_seal, "imported")
-    _, report = call(server.check_seal, "imported", seeds=[[0, 1, 0]])
+    report = unpack(call(server.check_seal, "imported", seeds=[[0, 1, 0]]))[2]
     assert report["status"] == "leaking"
 
 
@@ -307,12 +322,12 @@ def test_edited_tank_can_preview_but_cannot_save_until_undo(dirs):
     server.store_design("tank draft", preset="barge",
                         spec={"tanks": [{"name": "fuel", "position": [-1, .25, 3], "size": [2, 1.5, 2]}]})
     q = call(server.query_parts, "tank draft", select={"bounds": [[-4, 3, 15], [-4, 3, 15]]})
-    *_, report = call(server.edit_parts, "tank draft",
-                        [{"op": "remove", "select": {"ids": [q["parts"][0]["id"]]}}],
-                        q["revision"], commit=True)
-    image, _ = call(server.preview_vehicle, "tank draft")
-    assert image.data[:4] == b"\x89PNG"
-    _, seal = call(server.check_seal, "tank draft")
+    report = unpack(call(server.edit_parts, "tank draft",
+                         [{"op": "remove", "select": {"ids": [q["parts"][0]["id"]]}}],
+                         q["revision"], commit=True))[2]
+    image, _, _ = unpack(call(server.preview_vehicle, "tank draft"))
+    assert image[:4] == b"\x89PNG"
+    seal = unpack(call(server.check_seal, "tank draft"))[2]
     assert seal["status"] == "leaking" and seal["tanks"][0]["status"] == "leaking"
     for tool in (server.save_vehicle, server.save_hull):
         with pytest.raises(ToolError, match="cannot export"):
@@ -333,3 +348,22 @@ def test_fast_worker_exit_keeps_result_and_leaves_no_children():
             assert record["source_xml"] == text and count == 1
     anyio.run(repeated)
     assert not multiprocessing.active_children()
+
+
+def test_empty_draft_builds_anything_and_preflight_takes_optional_style(dirs):
+    vehicles, _ = dirs
+    image, notes, created = unpack(call(server.create_vehicle, "blank"))
+    assert image[:4] == b"\x89PNG" and created["kind"] == "draft" and "Empty draft" in notes
+    query = call(server.query_parts, "blank")
+    assert [p["definition"] for p in query["parts"]] == ["01_block"]
+    add = [{"op": "add", "parts": [{"definition": "01_block", "position": [0, 0, z]} for z in (1, 2)]}]
+    report = unpack(call(server.edit_parts, "blank", add, query["revision"], commit=True))[2]
+    assert report["committed"] and call(server.query_parts, "blank")["total"] == 3
+    preflight = call(server.preflight_vehicle, "blank")
+    assert preflight["unchecked"] == [] and "style_checks" not in preflight
+    styled = call(server.preflight_vehicle, "blank", style=["bow_tip", "boat_engine_room"])
+    assert all(row["severity"] == "warning" for row in styled["style_checks"])
+    call(server.save_vehicle, "blank copy", "blank")
+    assert (vehicles / "blank copy.xml").is_file()
+    with pytest.raises(ToolError, match="only color and bench"):
+        call(server.create_vehicle, "blank 2", spec={"length": 3})

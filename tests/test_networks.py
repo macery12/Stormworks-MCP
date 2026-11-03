@@ -245,7 +245,7 @@ def test_installed_connected_4x4_has_all_subsystems_and_only_signal_electric_lin
     result = preflight(record, parts)
     assert result["status"] == "connected geometry" and result["missing_count"] == 0
     assert result["physical_face_pairs"] > 50 and result["wire_count"] >= 20
-    assert all(allowed(p.piece.d) for p in parts)
+    assert all(allowed(p.piece.d) for p in parts) and result["unchecked"] == []
     assert not any(p.piece.d.startswith("heat_exchanger") or p.piece.d.startswith("modular_engine")
                    and p.piece.d not in CURRENT_GEARBOXES for p in parts)
     assert sum(p.piece.d == "modular_engine_gearbox_1x1" for p in parts) == 1

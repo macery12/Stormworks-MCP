@@ -10,7 +10,9 @@ from pathlib import Path
 import tomlkit
 from tomlkit.exceptions import ParseError
 
-SERVER_NAME = "stormworks-hulls"
+SERVER_NAME = "stormworks"
+# Earlier releases registered the server under these names; setup moves them to SERVER_NAME.
+LEGACY_NAMES = ("stormworks-hulls",)
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -66,12 +68,16 @@ def _updated_config(original, client, entry, replace):
         servers = data[key]
     if not isinstance(servers, dict):
         raise ValueError(f"{key} must be an object/table")
-    if SERVER_NAME in servers and not replace:
+    legacy = [name for name in LEGACY_NAMES if name in servers]
+    if (SERVER_NAME in servers or legacy) and not replace:
         raise ValueError("This server already exists. Select 'Replace existing Stormworks entry' to update it.")
-    # Preserve custom environment, disabled-tool settings and other options on an existing entry.
-    current = servers.get(SERVER_NAME, {})
+    # Preserve custom environment, disabled-tool settings and other options on an existing entry,
+    # including one saved under an earlier name, which is renamed rather than left as a duplicate.
+    current = servers.get(SERVER_NAME) or (servers[legacy[0]] if legacy else {})
     if not isinstance(current, dict):
         raise ValueError("The existing Stormworks entry must be an object/table")
+    for name in legacy:
+        del servers[name]
     incompatible = ("url", "http_headers", "bearer_token_env_var", "oauth", "http_headers_helper")
     for field in incompatible:
         if field in current:

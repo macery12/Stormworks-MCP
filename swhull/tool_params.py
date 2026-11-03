@@ -28,7 +28,7 @@ def _d(description, **constraints):
 Renderer = Literal["auto", "gpu", "cpu", "flat"]
 
 Spec = Annotated[dict[str, Any] | None, _d(
-    "Hull spec, partial or full (fields: hull_design_guide topic=spec); merged over preset or "
+    "Hull spec, partial or full (fields: get_guide topic=hull_spec); merged over preset or "
     "design. Lengths in metres.")]
 Preset = Annotated[str | None, _d(
     "Built-in hull preset to start from, e.g. 'runabout'; names from list_hull_presets.")]
@@ -44,10 +44,13 @@ RendererChoice = Annotated[Renderer | None, _d(
     'force one; "flat" is fastest and unlit, with block outlines for counting blocks.')]
 
 Draft = Annotated[str, _d(
-    "Stored draft name (from import_vehicle, create_land_vehicle, store_design or save_hull; "
+    "Stored draft name (from create_vehicle, import_vehicle, store_design or save_hull; "
     "see list_designs).")]
 Revision = Annotated[str, _d(
     "The draft's current revision from query_parts or query_connections; a stale one is rejected.")]
+EditRevision = Annotated[str | None, _d(
+    "The draft's current revision from query_parts or query_connections. Required with "
+    "commit=true; a preview may omit it. A stale one is rejected.")]
 Commit = Annotated[bool, _d(
     "false (default) previews without changing the draft; true applies it as one undo step.")]
 Offset = Annotated[int, _d("Rows to skip, for paging; use next_offset from the previous page.", ge=0)]

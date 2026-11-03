@@ -24,6 +24,7 @@ DEFAULT_SPEC = {
     "ballast": "auto",
     "railings": "auto",
     "mooring": "auto",
+    "style": [],
     "livery": None,
     "scale": 1,
     "bench": None,
@@ -203,6 +204,10 @@ def validate(spec):
         problems.append('railings must be "auto" or "none"')
     if spec.get("mooring", "auto") not in ("auto", "none"):
         problems.append('mooring must be "auto" or "none"')
+    from .style import RULE_SETS  # noqa: PLC0415
+    style = spec.get("style") or []
+    if not isinstance(style, list) or any(name not in RULE_SETS for name in style):
+        problems.append(f"style must be a list of rule sets from: {', '.join(RULE_SETS)}")
     for key in ("rail", "roof", "trim", "sheer_stripe"):
         value = (spec.get("colors") or {}).get(key)
         if value is not None and not (isinstance(value, str) and re.fullmatch(r"[0-9A-Fa-f]{6}", value)):
@@ -340,7 +345,7 @@ def _validate_structure(spec):
             if key not in allowed:
                 close = difflib.get_close_matches(key, allowed, n=1)
                 suggestion = f"; did you mean '{close[0]}'?" if close else ""
-                raise ValueError(f"unknown field {where}.{key}{suggestion}; see hull_design_guide")
+                raise ValueError(f"unknown field {where}.{key}{suggestion}; see get_guide(topic=\"hull_spec\")")
 
     known_fields(spec, set(DEFAULT_SPEC) | {"interior"}, "spec")
     for group in ("bow", "stern", "sheer", "section", "colors"):

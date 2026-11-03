@@ -17,11 +17,11 @@ def test_claude_add_preserves_other_servers_and_exact_backup(tmp_path):
     assert target == path and backup.read_bytes() == original
     data = json.loads(path.read_text())
     assert data["mcpServers"]["other"]["command"] == "other.exe"
-    assert data["mcpServers"]["stormworks-hulls"] == ENTRY
+    assert data["mcpServers"]["stormworks"] == ENTRY
     assert data["preferences"]["theme"] == "dark"
 
 
-def test_codex_preserves_comments_model_and_existing_server_options(tmp_path):
+def test_codex_moves_the_old_server_name_and_keeps_its_options(tmp_path):
     path = tmp_path / "config.toml"
     original = ('# keep my preferences\nmodel = "my-model"\n'
                 '[mcp_servers.other]\ncommand = "other.exe" # keep this too\n'
@@ -34,11 +34,24 @@ def test_codex_preserves_comments_model_and_existing_server_options(tmp_path):
     assert "# keep my preferences" in updated and "# keep this too" in updated
     data = tomlkit.parse(updated)
     assert data["model"] == "my-model"
-    server = data["mcp_servers"]["stormworks-hulls"]
+    server = data["mcp_servers"]["stormworks"]
     assert server["command"] == ENTRY["command"] and "url" not in server
     assert server["env"]["SW_GAME_DIR"] == "D:/Steam/Stormworks"
     assert server["disabled_tools"] == ["save_hull"]
     assert server["tool_timeout_sec"] == 300
+    assert "stormworks-hulls" not in data["mcp_servers"]
+
+
+def test_claude_moves_the_old_server_name_only_when_replacing(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"mcpServers":{"stormworks-hulls":{"command":"old.exe","env":{"SW_GAME_DIR":"D:/SW"}}}}')
+    with pytest.raises(ValueError, match="already exists"):
+        client_config.add_client("claude", path, entry=ENTRY)
+    client_config.add_client("claude", path, entry=ENTRY, replace=True)
+    servers = json.loads(path.read_text())["mcpServers"]
+    assert list(servers) == ["stormworks"]
+    assert servers["stormworks"]["command"] == ENTRY["command"]
+    assert servers["stormworks"]["env"] == {"SW_GAME_DIR": "D:/SW"}
 
 
 @pytest.mark.parametrize("client,original", [("claude", "not json"), ("claude", "[]"),
@@ -71,8 +84,8 @@ def test_frozen_config_uses_installed_executable(monkeypatch):
     monkeypatch.setattr(client_config.sys, "executable", ENTRY["command"])
     assert client_config.server_entry() == {"command": str(Path(ENTRY["command"]).resolve()), "args": ["--connect"]}
     data = tomlkit.parse(client_config.raw_config("toml", ENTRY))
-    assert data["mcp_servers"]["stormworks-hulls"]["command"] == ENTRY["command"]
-    assert json.loads(client_config.raw_config("json", ENTRY))["mcpServers"]["stormworks-hulls"] == ENTRY
+    assert data["mcp_servers"]["stormworks"]["command"] == ENTRY["command"]
+    assert json.loads(client_config.raw_config("json", ENTRY))["mcpServers"]["stormworks"] == ENTRY
 
 
 def test_client_paths_honor_appdata_and_codex_home(monkeypatch, tmp_path):

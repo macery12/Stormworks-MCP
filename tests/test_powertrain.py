@@ -134,8 +134,11 @@ def test_existing_room_engines_are_reported_not_doubled():
     assert not named(parts, "engine") and named(parts, "propeller")
 
 
-def test_hand_placed_machinery_outside_the_hull_is_flagged():
-    _, info = fitted("core", components=[{"name": "engine", "definition": "engine", "position": [0, 1.5, 0.6]}])
+def test_hand_placed_machinery_outside_the_hull_is_flagged_only_with_the_style_rule():
+    engine = [{"name": "engine", "definition": "engine", "position": [0, 1.5, 0.6]}]
+    _, info = fitted("core", components=engine)
+    assert not any(w.startswith("engine 'engine' sits above the deck") for w in info["warnings"])
+    _, info = fitted("core", components=engine, style=["boat_engine_room"])
     assert any(w.startswith("engine 'engine' sits above the deck") for w in info["warnings"])
     parts, info = fitted("structure")
     shift = info["shift"]

@@ -1,7 +1,7 @@
 """Typed wiring, physical subsystem preflight and lossless connection overlays."""
 import copy
 import re
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from itertools import combinations
 
 from . import definitions
@@ -304,13 +304,20 @@ def wheel_control_checks(parts, links):
     return rows
 
 
+def unchecked_parts(parts):
+    """Parts whose systems preflight does not model yet, grouped by definition."""
+    from .part_policy import unchecked  # noqa: PLC0415
+    counts = Counter(p.piece.d for p in parts if unchecked(p.piece.d))
+    return [{"definition": d, "count": n, "system": unchecked(d),
+             "note": "placed normally; preflight does not check this system yet"}
+            for d, n in sorted(counts.items())]
+
+
 def preflight(record, parts):
     identify(parts)
     links, issues, checks = wires(record, parts), [], []
     graph, faces = physical_graph(parts)
     by_id = {p.uid: p for p in parts}
-    if not any(p.piece.d in PREBUILT_ENGINES for p in parts):
-        issues.append({"issue": "no prebuilt diesel engine; powertrain completion is not assessed"})
     configuration = [engine_power(p) for p in parts if p.piece.d in PREBUILT_ENGINES]
     issues.extend({**row, "issue": "engine power is missing, zero or invalid"}
                   for row in configuration if row["status"] == "invalid")
@@ -435,6 +442,7 @@ def preflight(record, parts):
             "configuration_checks": configuration,
             "gearbox_configuration_checks": gearbox_checks,
             "wheel_direction_checks": wheel_checks,
+            "unchecked": unchecked_parts(parts),
             "verification": "Topology, engine-power and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
     from .repairs import findings  # noqa: PLC0415
     report["findings"] = findings(report, parts, links)

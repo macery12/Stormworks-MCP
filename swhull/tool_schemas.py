@@ -2,7 +2,7 @@
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 Block = Annotated[int, Field(strict=True)]
 Vector = tuple[Block, Block, Block]
@@ -181,6 +181,8 @@ class PreflightReport(TypedDict):
     configuration_checks: list[dict[str, Any]]
     gearbox_configuration_checks: list[dict[str, Any]]
     wheel_direction_checks: list[dict[str, Any]]
+    unchecked: list[dict[str, Any]]
+    style_checks: NotRequired[list[dict[str, Any]]]
     verification: str
 
 
@@ -215,7 +217,7 @@ class AssemblyReport(TypedDict):
     verification: str
     committed: bool
     revision: str
-    base_revision: str
+    base_revision: str | None
 
 
 class AssemblyBindings(Request):
@@ -238,8 +240,52 @@ class AssemblyOptions(Request):
     reverse_hotkey: Annotated[int, Field(strict=True, ge=1, le=6)] = 3
 
 
-class ReferenceVehicle(Request):
-    name: str
-    source: Literal["vehicles", "workshop"] = "vehicles"
-    kind: Literal["boat", "land", "other"] | None = None
-    label: Annotated[str, Field(max_length=64)] | None = None
+class PreviewResult(TypedDict):
+    """Returned beside the image by every render tool."""
+    title: str
+    notes: str
+
+
+class EditResult(TypedDict):
+    """Returned by the edit tools; the image comes too when preview=true."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    notes: str
+    operations: NotRequired[int]
+
+
+class DraftCreated(TypedDict):
+    design: str
+    kind: str
+    revision: str
+    notes: str
+
+
+class SealReport(TypedDict):
+    status: str
+    compartments: list[dict[str, Any]]
+    door_state: NotRequired[str]
+    tanks: NotRequired[list[dict[str, Any]]]
+    reason: NotRequired[str]
+    method: NotRequired[str]
+    verification: NotRequired[str]
+
+
+class VehicleList(TypedDict):
+    vehicles: list[dict[str, Any]]
+    total: int
+    next_offset: int | None
+    source: str
+    filter: str
+    files_considered: NotRequired[int]
+    skipped_count: NotRequired[int]
+    skipped_samples: NotRequired[list[dict[str, Any]]]
+    evidence_level: NotRequired[str]
+    limitations: NotRequired[list[str]]
+
+
+# Batches reach the tools as plain JSON objects so their input schemas stay shallow (the
+# operation fields are documented in the tool descriptions); plain() validates each batch
+# against these models before anything runs.
+Operations = Annotated[list[dict[str, Any]], Field(min_length=1, max_length=100)]

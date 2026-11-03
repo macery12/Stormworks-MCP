@@ -172,7 +172,7 @@ class DesktopApp:
             self.controller.log(f"Configured {label}: {target}")
             messagebox.showinfo("Server added", f"Updated {target}\nBackup: {backup or 'new file'}\n\n"
                                 "Press Start in Stormworks MCP, then restart the client.\n"
-                                "Ask: List the Stormworks hull presets.", parent=dialog)
+                                "Ask: Read the Stormworks start guide, then build me a small boat.", parent=dialog)
 
         ttk.Button(frame, text="Add to client", command=add).pack(anchor="e", pady=8)
 

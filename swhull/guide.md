@@ -1,15 +1,17 @@
 # Stormworks hull design guide
 
-Build Stormworks boats in stages: hull, structure, core parts, access, propulsion parts,
+The hull generator is one way to start a boat; `get_guide(topic="start")` covers building
+any vehicle part by part. Build Stormworks boats in stages: hull, structure, core parts, access, propulsion parts,
 and custom block-built tanks. Preview and save at whichever stage the player wants.
 Use query_connections, edit_connections and route_connections to assemble control/electric
 links and physical pipe networks. preflight_vehicle checks required paths; operation is tested
-in game. New engine choices are prebuilt diesel engines; cooling choices are radiators.
+in game. The generator's powertrain stage lays out prebuilt diesel engines and radiators; any
+installed part can be added by hand.
 
 ## Workflow
 
 Ask which workbench the player will use; set `bench` before committing to dimensions.
-For step-by-step tool calls, read `hull_design_guide(topic="building")`. The `staged` and
+For step-by-step tool calls, read `get_guide(topic="edits")`. The `hull_staged` and
 `testing` topics return the actual references inside the installed server, including offline.
 Use `get_runtime_status` if game parts are missing or the save location is unclear.
 
@@ -89,9 +91,10 @@ Copied from a player's in-game fix of a generated speedboat:
   measured speed and fuel use on different hulls, not shaft power or performance on the same hull.
   See `docs/in-game-testing.md` for the readings and follow-up runs.
   The medium engine stands on a three-block foot; the layout adds engine bed blocks under it.
-- Hand placements are checked: an engine above the deck or outside the hull, a propeller hanging
-  more than its blades behind the transom, or a rudder past the transom get a warning. A part with
-  no mount contact is refused with its mount faces and a fill that would support it.
+- A part with no mount contact is refused with its mount faces and a fill that would support it.
+  With `style: ["boat_engine_room"]` in the spec, hand placements are also checked against the
+  engine-room habit: an engine above the deck or outside the hull, a propeller hanging more than
+  its blades behind the transom, or a rudder past the transom get a warning.
 
 **Replies.** edit_parts, edit_connections, route_connections and apply_vehicle_assembly
 return a compact list of what changed (new part ids next to the names you gave), warnings and
@@ -103,7 +106,7 @@ edit_parts parts, wires and pipes.
 brown 7A4A23, fresh and cooling water blue 1F5FBF, sea water green 2E8B3A, exhaust black 141414,
 air maroon 7A1F2B, oil orange FF7F27, steam silver C0C0C0; drive shafts orange FF7F27. Pipes
 inside blocks (enclosed) keep the hull colour around them. route_connections does the same and
-takes `color` to override.
+takes `color` to override; the `pipe_colours` style rule set checks a draft against these colours.
 
 **components** holds named requests addressed by patches such as **/components/house battery/size**:
 
@@ -133,20 +136,13 @@ mirrored wheel frames, seat A/D and W/S signs, and preflight direction checks.
 Choose standalone cube `modular_engine_gearbox_1x1` rather than deprecated torque gearboxes.
 New gearboxes explicitly default to off `gear_ratio_1=1` (1:1 forward) and on
 `gear_ratio_2=0` (1:-1 reverse). Inspect `preflight_vehicle` gearbox configuration checks;
-index 0 reverses the shaft. This transmission part is allowed while modular engines remain disabled.
+index 0 reverses the shaft.
 Both require base contact and conservatively clear motion space. Check these placements in game.
 **analyze_vehicle(name, search, section, offset, limit)** reads multi-body references without
 editing them; sections expose parts, links, controllers, bodies, placement_issues,
 connection_candidates and open_transmission_ports. Consult saved examples and missing coverage
 before claiming a rule is verified. **get_calibration_observations(definition)** reads recorded
 player checks and exposes stale or contradictory evidence. See `docs/advanced-testing.md`.
-
-**study_references(references, save_as)** measures how vehicles the player rates are built
-(slope piece sizes, pyramid/inverse pairing, ballast, sub-bodies, detail parts, paint, logic)
-and stores the set locally. Mark hovercraft, aircraft and unusual builds `kind: "other"`.
-**score_vehicle(reference_set, name | design | spec | preset)** compares a vehicle with the
-references of the same kind and gives a hint for each metric outside their range. Use it after
-a preview to choose the next improvement; a miss is where to look, not proof of a fault.
 
 For a single block or region: **query_parts(design, select)** returns stable ids, footprints
 and revision. **edit_parts** accepts add, fill, remove, replace, move, rotate, paint, copy,
@@ -277,6 +273,7 @@ A spec is JSON. Anything you leave out comes from the preset, or from the defaul
 | `ballast` | `"auto"` (default) or `"none"` | weight blocks low in the hull to level the trim, reach the painted waterline and keep it stable; the summary gives the flotation estimate |
 | `railings` | `"auto"` (default) or `"none"` | 1 m railings along the straight edges of open decks; see "Railings" |
 | `mooring` | `"auto"` (default) or `"none"` | Rope Anchors set into the deck edge in pairs; see "Railings" |
+| `style` | list of style rule sets, default `[]` | Optional habit warnings in the build summary; `"boat_engine_room"` warns about hand-placed engines above the deck and propellers or rudders behind the transom. `get_guide(topic="style_rules")` lists them |
 | `hulls` / `hull_spacing` | 1 mono, 2 catamaran, 3 trimaran; spacing is centreline to centreline, m | |
 | `bow.entry` | fraction of length over which the bow narrows | 0.1 blunt, 0.3 normal, 0.45 very fine |
 | `bow.fullness` | plan shape of the bow: 1 = straight V, 2 = rounded, 3 = bluff | 1.2-2.3 |
@@ -601,7 +598,7 @@ plumbing and in-game confirmation of actual capacity and contents remain player 
   where the sloped surface lies, as well as its angle. It compares both final skins after
   seal backing and retains the original fit if V2 adds seams or exceeds a small shape-error
   allowance. Interior floors/walls and their immediate backing stay full blocks in both modes.
-  V2 takes longer. Read `hull_design_guide(topic="smoothing")`, call `analyze_hull` to check
+  V2 takes longer. Read `get_guide(topic="hull_smoothing")`, call `analyze_hull` to check
   floor-to-rim depth, and use `suggest_hull_blocks` for real slope families. This does not
   make an arbitrary curve exactly representable by the game's limited block catalogue.
 - Previews show a 3/4 view from below too; check the hull bottom there. For details, use

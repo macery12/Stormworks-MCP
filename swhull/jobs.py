@@ -33,7 +33,7 @@ def preview(full, title, renderer=None):
 def interior(full, title):
     placed, info = build(full)
     if not info["interior"].rooms:
-        raise ValueError("this spec has no interior.rooms; add some first (see hull_design_guide)")
+        raise ValueError("this spec has no interior.rooms; add some first (see get_guide topic=hull_interior)")
     png = render_interior(placed, info, title=title, ruler=design_ruler(info, info["scale"]))
     return png, summary(full, placed, info)
 
@@ -182,7 +182,7 @@ def analyze_reference(path, search, offset, limit, section="parts"):
     return audit_file(path, search, offset, limit, section)
 
 
-def land_parts(category, search, offset, limit):
+def parts_catalogue(category, search, offset, limit):
     from .land import catalogue  # noqa: PLC0415
     return catalogue(category, search, offset, limit)
 
@@ -290,11 +290,15 @@ def route_connections(record, operations, title, preview=False):
     return proposed, png, note
 
 
-def preflight_vehicle(record, detail=False):
+def preflight_vehicle(record, detail=False, style=()):
     from .networks import compact, preflight  # noqa: PLC0415
+    from .style import check  # noqa: PLC0415
     parts, _ = materialize(record)
     report = preflight(record, parts)
-    return {**(report if detail else compact(report)), "revision": revision(record)}
+    out = {**(report if detail else compact(report)), "revision": revision(record)}
+    if style:
+        out["style_checks"] = check(parts, style)
+    return out
 
 
 def plan_vehicle_repairs(record):
@@ -341,26 +345,6 @@ def diagnostic_geometry(record):
     xml = (VehicleDocument.parse(record["source_xml"]).to_xml(parts) if record.get("kind") == "imported"
            else to_xml(parts))
     return xml, {**geometry(xml), "diagnostics": overlay(record, parts)}
-
-
-def study_references(entries):
-    from .study import study_text  # noqa: PLC0415
-    studies = []
-    for path, kind in entries:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            studies.append(study_text(f.read(), kind))
-    return studies
-
-
-def score_vehicle(path, record, references, kind):
-    from .study import scorecard, study_text  # noqa: PLC0415
-    if path is not None:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            text = f.read()
-    else:
-        text, _, _ = export(record)
-    study = study_text(text, kind)
-    return {**scorecard(study, references, kind), "counts": study["counts"]}
 
 
 def hull_analysis(full, path, body_id, stations, x):
@@ -443,10 +427,10 @@ def _highlight(placed, info, box_name, scale):
 JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehicle, game_vehicle,
                                 vehicle_xml, query_draft, preview_draft, edit_draft, import_draft,
                                 export_draft, seal_draft, analyze_reference, hull_analysis,
-                                land_parts, land_library, land_layout, land_draft, viewer_geometry,
+                                parts_catalogue, land_library, land_layout, land_draft, viewer_geometry,
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
-                                prepare_validation, diagnostic_geometry, study_references, score_vehicle,
+                                prepare_validation, diagnostic_geometry,
                                 thumbnail)}
 
 

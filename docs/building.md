@@ -8,7 +8,7 @@ sealing, or operation. See [the staged reference](staged-builder.md) for placeme
 
 These are MCP tool names and JSON arguments; ask your client to make the calls.
 
-1. Read `hull_design_guide({"topic": "workflow"})` and call `list_workbenches({})`.
+1. Read `get_guide({"topic": "hull_workflow"})` and call `list_workbenches({})`.
 2. Call `store_design({"name": "First tug", "preset": "tugboat", "spec": {"bench": "S", "scale": "fit", "smoothing": "blocks"}})`.
 3. Call `preview_hull({"design": "First tug"})`. Compare the bow, stern, beam and deck to the
    brief. Read the fit, loose-part and component-limit warnings.
@@ -66,8 +66,8 @@ adds/removes typed signal/electric links; `route_connections` adds/removes actua
 Use enclosed pipes in bodywork and `through_blocks` for explicitly selected wall crossings.
 Both use the draft revision and support preview, commit and undo. `preflight_vehicle` checks
 required subsystem paths. See [the land vehicle guide](land-vehicles.md#connections-and-subsystem-preflight)
-for endpoint formats, examples and topology limits. Engine choices are prebuilt diesels and
-cooling choices are radiators.
+for endpoint formats, examples and topology limits. Preflight checks prebuilt diesel engines;
+it lists modular and jet engines as unchecked.
 
 ## Diagnose a result
 

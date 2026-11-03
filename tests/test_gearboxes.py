@@ -9,7 +9,7 @@ from swhull.connections import transmission_ports
 from swhull.editing import VehicleDocument, part
 from swhull.land import catalogue
 from swhull.networks import physical_graph, preflight
-from swhull.part_policy import CURRENT_GEARBOXES, GEARBOXES, LEGACY_GEARBOXES, allowed
+from swhull.part_policy import CURRENT_GEARBOXES, GEARBOXES, LEGACY_GEARBOXES, allowed, unchecked
 from swhull.pieces import ROTATIONS, Placed, add, apply, r_attr
 from swhull.vehicle import to_xml
 from swhull.reference import xml_root
@@ -54,15 +54,17 @@ def test_new_current_gearboxes_export_forward_off_reverse_on_in_every_rotation(g
     assert "max_force_scale" not in schema
 
 
-def test_cube_gearboxes_are_offered_without_enabling_modular_engines_or_legacy_gearboxes(gearboxes):
+def test_cube_gearboxes_are_offered_and_only_the_deprecated_gearboxes_are_refused(gearboxes):
     expected = CURRENT_GEARBOXES
     assert {r["definition"] for r in catalogue("transmission", "gearbox")["parts"]} == expected
     assert {r["definition"] for r in definitions.catalogue("gearbox")["parts"]} == expected
-    for d in LEGACY_GEARBOXES | {"modular_engine_cylinder"}:
+    for d in LEGACY_GEARBOXES:
         assert not allowed(d)
-        with pytest.raises(ValueError, match="disabled"):
+        with pytest.raises(ValueError, match="deprecated"):
             part({"definition": d, "position": [0, 0, 0]})
-    assert allowed("engine")
+    assert allowed("engine") and allowed("modular_engine_cylinder") and allowed("jet_engine_compressor")
+    assert unchecked("modular_engine_cylinder") == "modular engine" and unchecked("engine") is None
+    assert all(unchecked(d) is None for d in CURRENT_GEARBOXES)
 
 
 def test_explicit_editor_ratio_choices_are_preserved(gearboxes):

@@ -50,7 +50,7 @@ async def exercise(command, args):
         # Prove configuration targets the actual executable, also when invoked from another cwd.
         config = subprocess.run([command, *args, "--config", "json"], check=True, capture_output=True,
                                 text=True, env=env, cwd=temporary, timeout=60)
-        entry = json.loads(config.stdout)["mcpServers"]["stormworks-hulls"]
+        entry = json.loads(config.stdout)["mcpServers"]["stormworks"]
         assert Path(entry["command"]).resolve() == Path(command).resolve()
         assert entry["args"][-1] == "--connect"
         parameters = StdioServerParameters(command=command, args=[*args, "--connect"], env=env, cwd=str(temporary))
@@ -82,17 +82,18 @@ async def exercise(command, args):
                         assert init.instructions and init.server_info.version
                         descriptors = {tool.name: tool for tool in (await session.list_tools()).tools}
                         tools = set(descriptors)
-                        assert {"preview_hull", "save_hull", "get_runtime_status", "hull_design_guide",
-                                "analyze_hull", "suggest_hull_blocks", "land_vehicle_guide", "create_land_vehicle", "query_connections",
+                        assert {"preview_hull", "save_hull", "get_runtime_status", "get_guide",
+                                "analyze_hull", "suggest_hull_blocks", "create_vehicle", "search_parts", "query_connections",
                                 "edit_connections", "route_connections", "preflight_vehicle", "plan_vehicle_repairs",
                                 "repair_vehicle", "apply_vehicle_assembly", "preview_vehicle_diagnostics",
                                 "prepare_vehicle_validation", "record_vehicle_validation"} <= tools
                         assert descriptors["repair_vehicle"].output_schema["type"] == "object"
-                        assert "delta" in descriptors["edit_parts"].input_schema["$defs"]["Translate"]["required"]
-                        for topic in ("workflow", "staged", "building", "testing", "smoothing", "edits", "topics"):
-                            response = await session.call_tool("hull_design_guide", {"topic": topic})
+                        assert all(tool.output_schema for tool in descriptors.values())
+                        for topic in ("start", "hull_workflow", "hull_staged", "edits", "testing", "hull_smoothing",
+                                      "style_rules", "topics"):
+                            response = await session.call_tool("get_guide", {"topic": topic})
                             assert not response.is_error and response.content[0].text
-                        response = await session.call_tool("land_vehicle_guide", {})
+                        response = await session.call_tool("get_guide", {"topic": "land"})
                         assert not response.is_error and "humvee_4x4" in response.content[0].text
                         assert "through_blocks" in response.content[0].text
                         response, status = await asyncio.gather(
@@ -108,7 +109,9 @@ async def exercise(command, args):
                         diagnosis = await session.call_tool("plan_vehicle_repairs", {"design": "packaged smoke test"})
                         assert not diagnosis.is_error and diagnosis.structured_content["plan_id"]
                         preflight = await session.call_tool("preflight_vehicle", {"design": "packaged smoke test"})
-                        assert not preflight.is_error and preflight.structured_content["findings"]
+                        # A boat without an engine is not a fault: preflight checks what is there.
+                        assert not preflight.is_error and preflight.structured_content["status"] == "connected geometry"
+                        assert preflight.structured_content["unchecked"] == []
                         diagnostics = await session.call_tool("preview_vehicle_diagnostics", {"design": "packaged smoke test", "layer": "all"})
                         assert not diagnostics.is_error and diagnostics.structured_content["overlay"]["legend"]
                         assert any(part.type == "image" for part in diagnostics.content)

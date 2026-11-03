@@ -1,7 +1,7 @@
 # Notes for AI coding assistants
 
-MCP server (Python, `mcp` SDK 2.x `MCPServer`, managed with uv) that designs Stormworks boats and
-writes vehicle XML. Humans: start with [README.md](README.md).
+MCP server (Python, `mcp` SDK 2.x `MCPServer`, managed with uv) that builds any Stormworks vehicle
+(boats, land vehicles, aircraft, assemblies) and writes vehicle XML. Humans: start with [README.md](README.md).
 
 ## Commands
 
@@ -24,6 +24,11 @@ These were each found by loading generated files in Stormworks; tests guard them
   adding views.
 - Never cut the hull skin below the main deck (doors and hatches in `interior.py` check this).
   A propeller hub or rudder plate may replace the blocks it sits in; nothing is left open.
+
+The next two rules describe what the hull generator produces. For anything else the player builds
+they are optional style rule sets (`swhull/style.py`, `preflight_vehicle(style=[...])`), off by
+default: never refuse or "fix" a player's design because it breaks one.
+
 - **A symmetric hull gets a mirror-image skin**, and a sharp stem ends on a three-wide nose
   (wedge, block, wedge), never a one-wide stub (from the player's hand fix of "Slim
   Speedboat"; `tests/test_symmetry.py`).
@@ -60,7 +65,8 @@ verified.
   timeout), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays,
   flat painting), `raster` (lit rendering: GPU or CPU rasterizing, one shared NumPy lighting
   pass), `definitions` (game install detection).
-- `swhull/guide.md` is served to Claude by `hull_design_guide`; keep it in sync with the spec.
+- `get_guide` serves `docs/start.md` (any vehicle), `swhull/guide.md` (hull generator) and the
+  other guides; keep `swhull/guide.md` in sync with the hull spec.
 - Wedge fit (`smooth.py`): after changing it, render the calibration shapes (1:1, 1:2, 1:4 hip
   roofs must come out in Wedge, Wedge 1x2, Wedge 1x4) and a few presets. `tests/test_smooth.py`
   guards the piece catalogue against the game files, symmetry, spike tips and watertightness.
