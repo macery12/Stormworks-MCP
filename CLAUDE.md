@@ -61,7 +61,7 @@ verified.
   `pipe_colours`, `telemetry` (in-game engine logger microcontroller; tools/engine_test_boats.py,
   tools/telemetry_logger.py),
   `prefabs` (vehicles reused inside other vehicles: connection points, cuts, pasting),
-  `modular` (modular engine couplings and checks), `tanks` (block-built tanks), `bodies`
+  `modular` (modular engine couplings and checks), `engine_builder` (place_modular_engine layouts), `tanks` (block-built tanks), `bodies`
   (multi-body pairs), `physics` (read-only mass, flotation, thrust and lift estimates),
   `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries` (named paint
   schemes), `jobs` (heavy tool work in a child process the server kills on cancel or

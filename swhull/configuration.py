@@ -88,20 +88,36 @@ def engine_power(p):
             "detail": "Prebuilt engine power must be explicitly positive; use max_force_scale=1 for 100% power."}
 
 
+# Modular gearbox ratio indices, input:output with power entering RPS A. Decoded from the
+# player's engine tester (each output switches one gearbox whose overall ratio it labels) and
+# 886 saved gearboxes: the game never saves off=1 or on=5, so those are the omitted defaults.
+# Power entering RPS B gives the inverse (index 7 is then 1:3). Index 0 is reverse (road test).
+MODULAR_RATIOS = {0: "1:-1", 1: "1:1", 2: "6:5", 3: "3:2", 4: "9:5", 5: "2:1", 6: "5:2", 7: "3:1"}
+MODULAR_DEFAULTS = {"gear_ratio_1": 1, "gear_ratio_2": 5}
+
+
 def gearbox_ratios(p):
-    """Expose saved switch states; other editor ratios remain unverified, not guessed."""
+    """Saved switch states with their ratios; a modular gearbox's omitted setting is the game default."""
     settings, states = settings_of(p), {}
+    modular = p.piece.d.startswith("modular_engine_gearbox")
     for state, key in (("off", "gear_ratio_1"), ("on", "gear_ratio_2")):
         value = settings.get(key)
+        default = value is None and modular
+        if default:
+            value = MODULAR_DEFAULTS[key]
         try:
             index = int(str(value))
         except (TypeError, ValueError):
             index = None
         valid = index is not None and index >= 0
+        ratio = (MODULAR_RATIOS if modular else {0: "1:-1", 1: "1:1"}).get(index)
         states[state] = {"setting": key, "value": value, "index": index if valid else None,
-                         "ratio": {0: "1:-1", 1: "1:1"}.get(index),
+                         "ratio": ratio, "saved_default": default,
                          "direction": "invalid" if not valid else
-                         {0: "reverse", 1: "forward"}.get(index, "unverified")}
+                         "reverse" if index == 0 else "forward" if ratio else "unverified"}
     return {"part_id": p.uid, "definition": p.piece.d, **states,
             "status": "invalid" if any(s["direction"] == "invalid" for s in states.values()) else "configured",
-            "detail": "Gear Switch off uses gear_ratio_1; on uses gear_ratio_2. Placement defaults: off 1:1, on 1:-1. Other ratio indices require editor/game checks."}
+            "detail": "Gear Switch off uses gear_ratio_1; on uses gear_ratio_2 (an unwired gearbox stays at its off "
+                      "ratio). Ratios are input:output with power entering RPS A; entering RPS B inverts them. "
+                      "Modular indices: " + ", ".join(f"{k}={v}" for k, v in MODULAR_RATIOS.items())
+                      + "; a save without a setting uses off 1:1, on 2:1. Placement writes off 1:1, on 1:-1."}

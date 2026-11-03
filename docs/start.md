@@ -49,13 +49,17 @@ These come from the game and its file format, and the server follows them on eve
 
 Useful settings and controls:
 
-- Gearbox: off uses `gear_ratio_1` (1 = 1:1 forward), on uses `gear_ratio_2` (0 = 1:-1
-  reverse). Prebuilt engines use `max_force_scale` (1 = 100% power).
+- Gearbox: off uses `gear_ratio_1`, on uses `gear_ratio_2`. Modular gearbox indices,
+  input:output with power entering RPS A (RPS B inverts them): 0 = 1:-1 reverse, 1 = 1:1,
+  2 = 6:5, 3 = 3:2, 4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1. A save without the setting uses
+  off 1:1, on 2:1. A gearbox with no Gear Switch wire is a fixed ratio and needs no power:
+  players use one to match a generator's speed to the engine. Prebuilt engines use
+  `max_force_scale` (1 = 100% power).
 - Seat Axis 1 is A = -1, D = +1. Axis 2 is W = +1, S = -1.
 - Wheels steer themselves. Their drive direction needs `wheel_forward` and
   `wheel_reference_up` targets (`get_part_orientation`), so check preflight
   `wheel_direction_checks` after rotating or wiring wheels.
-- A Fluid Spawner saved without `fluid_type` fills its sealed pocket with diesel.
+- A Fluid Spawner or premade tank saved without `fluid_type` holds diesel.
 
 ## What preflight checks
 
@@ -67,7 +71,37 @@ crankshaft, each cylinder's manifolds reaching an air, a fuel and an exhaust man
 on a drive belt, a clutch on the crankshaft line and what its shaft reaches, throttle, starter
 and clutch wires, the air intake and exhaust outlet, and a fuel line into a tank holding diesel
 (block-built tanks count). An engine without a coolant manifold is noted: it is not liquid
-cooled. `modular_engines` in the report summarises each engine.
+cooled. `modular_engines` in the report summarises each engine. Fluid passes through valves,
+impeller pumps and catalytic converters (one circuit per part: a heat exchanger's two sides stay
+apart); an air ram counts as an air intake and an exhaust outlet; a temperature sensor joins in
+a cylinder's small manifold hole. Power passes through circuit breakers and relays, and a diode
+from In to Out. A pipe end butted against another part is listed under `blocked_faces` as a
+note: players leave spare ports and decorative pipe there.
+
+## Modular engines
+
+`place_modular_engine` builds a complete engine from the game's coupled parts, in any size:
+
+- `size` 1, 3 or 5 picks the part family. `cylinders` are shared out over `banks`, the crank
+  sides that carry a row of cylinders: `["top"]` is an in-line engine, `["left", "right"]` an
+  opposed (boxer) engine, all four the compact ring.
+- Cylinders touching in a row share one manifold network through the holes that face each
+  other. Separate banks are joined by the shortest run of manifold parts; on a 1x1 crank two
+  neighbouring banks meet in a corner cell of the 3x3 cross-section, so one corner manifold
+  joins them and a four-bank 1x1 engine stays three blocks wide.
+- Air, fuel, exhaust and coolant manifolds go on free cylinder holes (air, fuel, coolant and
+  exhaust may join anywhere on the network); `air_rams` puts an air ram straight on the air and
+  exhaust manifolds. The drive belt at the front carries the starters (default 1, 2 or 3 by
+  size, the player's minimum) and `alternators`; an optional flywheel and the clutch sit at the
+  back, and the clutch's RPS face (`output`) is the power output.
+- Nothing is wired: fit an ECU, then route the reported pipe faces with route_connections and
+  wire the throttles, starters and clutch with edit_connections.
+- Drivelines: direct drive goes clutch, gearbox if needed (a reverse gearbox for astern), then
+  propeller. Diesel-electric ("costal patrol v17 v2") goes engine, clutch, a fixed-ratio
+  gearbox, generator; batteries; electric motors, gearboxes, propeller. Tune the generator's
+  gearbox so the engine is not overrun.
+- Coolant is recommended on every engine; a small 1x1 engine runs only a short while without.
+  The modular fluid pump on the belt is weak: use an electric pump or an impeller pump.
 
 Jet engines, rockets, steam power and heat exchangers are placed normally but listed under
 `unchecked`, because preflight does not model them yet.

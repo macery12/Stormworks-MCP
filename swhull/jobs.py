@@ -528,24 +528,10 @@ def create_prefab(name, file, text, old, rename, box, follow, source):
     return record, xml, {**prefabs.describe(record, xml), "cut": report}
 
 
-def paste_prefab(record, op, title, preview=False, names=None):
-    """Place a prefab in a draft: the proposed record, optional image, notes, and a report of
-    the placed parts, loose groups and connection points by draft part ID."""
+def _loose(after, new):
+    """Groups of new parts joined face to face, none of them touching the rest of the draft."""
     from collections import Counter  # noqa: PLC0415
-    from . import prefabs  # noqa: PLC0415
-    from .connections import transmission_ports  # noqa: PLC0415
-    from .networks import ports  # noqa: PLC0415
     from .pieces import DIRS, add  # noqa: PLC0415
-    proposed = edited(record, [op])
-    before, _ = materialize(record)
-    after, _ = materialize(proposed)
-    old = {p.uid for p in before}
-    new = [p for p in after if p.uid not in old]
-    kept = {p.uid for p in after}
-    replaced = sum(uid not in kept for uid in old)
-    key = new[0].uid.rsplit(":", 1)[0]
-    by_index = {int(p.uid.rsplit(":", 1)[1]): p for p in new if p.uid.rsplit(":", 1)[0] == key}
-    # Loose groups: pasted parts joined face to face, none of them touching the rest of the draft.
     mine = {v: p.uid for p in new for v in p.voxels()}
     rest = {v for p in after if p.uid not in mine.values() for v in p.voxels()}
     group = {p.uid: p.uid for p in new}
@@ -567,9 +553,56 @@ def paste_prefab(record, op, title, preview=False, names=None):
         members.setdefault(find(p.uid), []).append(p)
         if any(add(v, d) in rest for v in p.voxels() for d in DIRS):
             touches.add(find(p.uid))
-    loose = [{"parts": len(ps), "first_part_id": ps[0].uid,
-              "definitions": dict(Counter(p.piece.d for p in ps).most_common(4))}
-             for root, ps in members.items() if root not in touches]
+    return [{"parts": len(ps), "first_part_id": ps[0].uid,
+             "definitions": dict(Counter(p.piece.d for p in ps).most_common(4))}
+            for root, ps in members.items() if root not in touches]
+
+
+def place_engine(record, op, title, preview=False):
+    """Place a modular engine in a draft: the proposed record, optional image, notes, and a
+    report of the parts, whether it touches the vehicle, and its connection points."""
+    from collections import Counter  # noqa: PLC0415
+    from . import engine_builder  # noqa: PLC0415
+    proposed = edited(record, [op])
+    before, _ = materialize(record)
+    after, _ = materialize(proposed)
+    old = {p.uid for p in before}
+    new = [p for p in after if p.uid not in old]
+    loose = _loose(after, new)
+    cells = [v for p in new for v in p.voxels()]
+    lo = [min(v[a] for v in cells) for a in range(3)]
+    hi = [max(v[a] for v in cells) for a in range(3)]
+    kinds = Counter(p.piece.d for p in new)
+    note = change_summary(record, proposed) if not preview else None
+    png = None
+    if preview:
+        png, note = preview_draft(proposed, title)
+    if loose:
+        note += "\n! The engine touches nothing else in the draft; place it against a mount or the hull"
+    report = {"parts": len(new), "bounds": [lo, hi], "size_blocks": [hi[a] - lo[a] + 1 for a in range(3)],
+              "cylinders": sum(n for d, n in kinds.items() if d.startswith(("modular_engine_piston", "modular_engine_cylinder"))),
+              "starters": kinds["modular_engine_starter"], "alternators": kinds["modular_engine_alternator"],
+              "bridge_manifolds": sum("bridge" in p.name for p in new),
+              "attached": not loose, "loose_groups": loose, "points": engine_builder.points(new)}
+    return proposed, png, note, report
+
+
+def paste_prefab(record, op, title, preview=False, names=None):
+    """Place a prefab in a draft: the proposed record, optional image, notes, and a report of
+    the placed parts, loose groups and connection points by draft part ID."""
+    from . import prefabs  # noqa: PLC0415
+    from .connections import transmission_ports  # noqa: PLC0415
+    from .networks import ports  # noqa: PLC0415
+    proposed = edited(record, [op])
+    before, _ = materialize(record)
+    after, _ = materialize(proposed)
+    old = {p.uid for p in before}
+    new = [p for p in after if p.uid not in old]
+    kept = {p.uid for p in after}
+    replaced = sum(uid not in kept for uid in old)
+    key = new[0].uid.rsplit(":", 1)[0]
+    by_index = {int(p.uid.rsplit(":", 1)[1]): p for p in new if p.uid.rsplit(":", 1)[0] == key}
+    loose = _loose(after, new)
     rows = []
     for row in prefabs.points(op["xml"]):
         p = by_index.get(row["part"])
@@ -610,7 +643,7 @@ JOBS = {f.__name__: f for f in (preview, interior, inspect_design, inspect_vehic
                                 query_connections, edit_connections, route_connections, preflight_vehicle,
                                 plan_vehicle_repairs, repair_vehicle, assemble_vehicle, diagnostic_preview,
                                 prepare_validation, diagnostic_geometry, physics,
-                                list_prefabs, create_prefab, paste_prefab, import_tanks, thumbnail)}
+                                list_prefabs, create_prefab, paste_prefab, place_engine, import_tanks, thumbnail)}
 
 
 def _watch_parent():

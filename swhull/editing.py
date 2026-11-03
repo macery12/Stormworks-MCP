@@ -545,9 +545,16 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
         elif kind == "tank":
             from .tanks import custom  # noqa: PLC0415
             created = custom(out, op, key)
+        elif kind == "engine":
+            from .engine_builder import place  # noqa: PLC0415
+            created = place(out, op, key)
+            if op.get("body") is not None:
+                body = _body_choice(op["body"], known, fresh)
+                explicit.update((id(p), body) for p in created)
+            pasted.update(p.uid for p in created)
         else:
             raise ValueError(f"unsupported edit operation {kind!r}")
-        if kind in ("add", "fill", "tank"):
+        if kind in ("add", "fill", "tank", "engine"):
             bodies.assign(out + created, created, explicit)
             out.extend(created)
         elif kind in ("copy", "repeat", "mirror"):
@@ -569,7 +576,7 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
     # Untouched configured imports remain in place; their game settings are not reinterpreted.
     from .components import owners, validate_placement  # noqa: PLC0415
     # A child half hangs on its parent half's joint, which bodies.problems already checked.
-    # Pasted prefab parts are mounted inside their prefab; paste_prefab reports loose ones.
+    # Pasted prefab and engine parts are mounted on each other; their tools report loose groups.
     changed = [p for p in out if p.piece.d not in BY_NAME and p.piece.d not in bodies.CHILDREN
                and p.uid not in pasted and original.get(p.uid) != (p.piece.d, p.origin, p.Q)]
     owner = owners(out) if changed else {}

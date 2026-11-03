@@ -254,6 +254,34 @@ def physical_graph(parts):
     return graph, faces
 
 
+# Parts that pass electric power between their two electric nodes: a breaker or relay either
+# way (when closed), a diode only from In to Out.
+ELECTRIC_THROUGH = {"electric_curcuit_breaker": ("Electric A", "Electric B", True),
+                    "electric_relay": ("Electric A", "Electric B", True),
+                    "electric_diode": ("Electric In", "Electric Out", False)}
+
+
+def powered_nodes(parts, links):
+    """Electric nodes (part_id, port) a battery reaches through wires and pass-through parts."""
+    electric = defaultdict(set)
+    for link in links:
+        if link.get("type") == 4 and "from" in link:
+            a, b = ((link[k]["part_id"], str(link[k]["port"])) for k in ("from", "to"))
+            electric[a].add(b)
+            electric[b].add(a)
+    for p in parts:
+        through = ELECTRIC_THROUGH.get(p.piece.d)
+        if through:
+            index = {n["label"]: (p.uid, str(n["index"])) for n in ports(p) if n["type"] == 4}
+            a, b = index.get(through[0]), index.get(through[1])
+            if a and b:
+                electric[a].add(b)
+                if through[2]:
+                    electric[b].add(a)
+    return _reachable(electric, [(p.uid, str(n["index"])) for p in parts if p.piece.d.startswith("battery")
+                                 for n in ports(p) if n["type"] == 4])
+
+
 def _reachable(graph, starts):
     visited, queue = set(starts), deque(starts)
     while queue:
@@ -353,27 +381,27 @@ def preflight(record, parts):
 
     wheeled = any(road_wheel(p.piece.d) and "spare" not in p.name.lower() for p in parts)
     # Driven wheels need a clutch and gearbox; propellers and carried spare wheels do not.
-    directed, electric = defaultdict(set), defaultdict(set)
+    directed = defaultdict(set)
     for link in links:
         if "from" not in link:
             issues.append({"link_id": link["link_id"], "issue": "unresolved original link"})
             continue
         a, b = ((link[k]["part_id"], str(link[k]["port"])) for k in ("from", "to"))
         directed[a].add(b)
-        if link["type"] == 4:
-            electric[a].add(b)
-            electric[b].add(a)
-    powered = _reachable(electric, [(p.uid, str(n["index"])) for p in parts if p.piece.d.startswith("battery")
-                                    for n in ports(p) if n["type"] == 4])
+    powered = powered_nodes(parts, links)
     targets = {b for values in directed.values() for b in values}
     for p in parts:
-        for n in ports(p):
+        nodes = ports(p)
+        # A gearbox with no Gear Switch wire is a fixed ratio (players tune generator speed this
+        # way); it needs no power. A switched one needs power to shift.
+        fixed_gearbox = p.piece.d in GEARBOXES and not any(
+            n["label"] == "Gear Switch" and (p.uid, str(n["index"])) in targets for n in nodes)
+        for n in nodes:
             key = (p.uid, str(n["index"]))
-            if n["type"] == 4 and not p.piece.d.startswith("battery"):
+            if n["type"] == 4 and not p.piece.d.startswith("battery") and not fixed_gearbox:
                 check(p, "electric", key in powered, n["label"])
             required = (p.piece.d in PREBUILT_ENGINES and n["label"] in ("Throttle", "Starter")
                         or p.piece.d == "torque_clutch" and n["label"] == "Clutch Pressure"
-                        or p.piece.d in GEARBOXES and n["label"] == "Gear Switch"
                         or road_wheel(p.piece.d) and "spare" not in p.name.lower() and (n["label"] == "Brake"
                             or "front" in p.name.lower() and n["label"] == "Steering")
                         or p.piece.d.startswith(("searchlight", "small_light")) and n["label"] in ("On/Off", "Light Switch")
@@ -422,8 +450,8 @@ def preflight(record, parts):
                     root = xml_root('<vehicle data_version="3"><bodies><body unique_id="1"><components>'
                                     + tank.raw_xml + '</components></body></bodies></vehicle>')
                     settings = root.find("bodies/body/components/c/o").attrib
-                diesel |= str(settings.get("fluid_type", "0")) == "1" and float(settings.get("fluid_fill", "1")) > 0
-            check(p, "diesel supply", diesel, "connected premade tank must select diesel and have nonzero fill")
+                diesel |= definitions.spawner_fluid(settings) == 1 and float(settings.get("fluid_fill", "1")) > 0
+            check(p, "diesel supply", diesel, "connected premade tank must hold diesel (the default) and have nonzero fill")
             inlet, outlet = circuits["In Coolant"], circuits["Out Coolant"]
             cooling = _reachable(graph, inlet)
             check(p, "cooling loop", bool(outlet & cooling), "engine return and supply must join through a radiator")
@@ -445,7 +473,9 @@ def preflight(record, parts):
                             lambda keys: _reachable(fluid_graph, keys), tank_cells)
     owner = {v: p for p in parts for v in p.voxels()}
     pairs, open_faces = adjacency(parts, "draft")
-    capped_unused, non_driven = [], []
+    # A pipe end butted against another part is usually decoration or a spare port; a needed
+    # line that is blocked already shows as a missing check, so these are notes, not faults.
+    capped_unused, non_driven, blocked = [], [], []
     for f in open_faces:
         v = add(f["position"], f["normal"])
         if v in owner:
@@ -457,7 +487,7 @@ def preflight(record, parts):
                 non_driven.append({**row, "role": "spare", "issue": "non-driven spare mounted against bodywork"})
                 continue
             destination = capped_unused if p.piece.d.startswith("fluid_tank_") and any(
-                graph[_key(port)] for port in transmission_ports(p) if _key(port) != _key(f)) else issues
+                graph[_key(port)] for port in transmission_ports(p) if _key(port) != _key(f)) else blocked
             destination.append(row)
     missing = sum(c["status"] == "missing" for c in checks)
     report = {"status": "incomplete" if missing or issues else "connected geometry", "missing_count": missing,
@@ -465,6 +495,7 @@ def preflight(record, parts):
             "physical_face_pairs": len(pairs), "open_transmission_faces": open_faces,
             "capped_unused_tank_faces": capped_unused,
             "non_driven_wheel_faces": non_driven,
+            "blocked_faces": blocked,
             "configuration_checks": configuration,
             "gearbox_configuration_checks": gearbox_checks,
             "wheel_direction_checks": wheel_checks,

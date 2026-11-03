@@ -5,10 +5,12 @@ cylinder to manifold, drive belt to starter), not through pipes. Two couplings j
 face each other across one block face, have the same type and fit: two neutral (0) ends, or a
 male (1) and a female (2) end.
 """
+import re
 from collections import defaultdict
 from functools import cache
 
 from . import definitions
+from .part_policy import PREBUILT_ENGINES
 from .pieces import DIRS, add, apply, neg
 
 CRANKSHAFT = "modular_engine_crankshaft"
@@ -19,7 +21,10 @@ FEEDS = {"modular_engine_air_manifold": "air", "modular_engine_intake_manifold":
          "modular_engine_exhaust_manifold_straight": "exhaust", "modular_engine_coolant_manifold": "coolant"}
 PLAIN_MANIFOLDS = frozenset(f"modular_engine_manifold_{k}" for k in ("corner", "straight", "t"))
 AIR_SOURCES = frozenset(("air_filter", "water_inlet", "fluid_intake", "modular_engine_air_ram", "scoop_intake"))
-EXHAUST_OUTLETS = frozenset(("fluid_exhaust", "water_inlet", "fluid_intake"))
+EXHAUST_OUTLETS = frozenset(("fluid_exhaust", "water_inlet", "fluid_intake", "modular_engine_air_ram"))
+# The temperature sensor's coupling says "cylinder", but players plug it into a cylinder's
+# small manifold hole (1x1 and 3x3, "claude_example"); it joins there as well.
+SENSOR = "modular_engine_sensor_temperature"
 FLUID_PORTS = frozenset(("water_inlet", "fluid_intake"))
 
 
@@ -56,9 +61,17 @@ def joins(parts):
     for (cell, normal), items in index.items():
         for p, (t, name, g, _, _) in items:
             for q, (t2, name2, g2, _, _) in index.get((add(cell, normal), neg(normal)), ()):
-                if p is not q and t == t2 and _fits(g, g2) and id(p) < id(q):
+                if p is q or id(p) >= id(q):
+                    continue
+                if t == t2 and _fits(g, g2):
                     out.append((p, name, q, name2, t))
+                elif _sensor_hole(p, t, q, t2) or _sensor_hole(q, t2, p, t):
+                    out.append((p, name, q, name2, "sensor"))
     return out
+
+
+def _sensor_hole(sensor, t, cylinder, t2):
+    return sensor.piece.d == SENSOR and t == "cylinder" and t2 == "manifold" and cylinder.piece.d.startswith(CYLINDERS)
 
 
 def engines(parts):
@@ -111,17 +124,43 @@ def _feeds(group, pairs):
     return out
 
 
+_SIDE = re.compile(r" (In|Out|A|B)$")
+
+
 def through_valves(graph, parts, transmission_ports):
-    """The pipe graph with fluid passing through valves and pumps (parts whose pipe faces are
-    all fluid), so an air line with a relief valve still reaches its intake."""
+    """The pipe graph with fluid passing through valves, pumps and converters, so an air line
+    with a relief valve or an impeller pump still reaches its intake.
+
+    A part passes fluid between the pipe faces of one circuit: fluid nodes named alike but for
+    an In/Out or A/B ending ("Fluid In"/"Fluid Out", "Exhaust In"/"Exhaust Out"). A heat
+    exchanger's two circuits stay apart; a face shared by two circuits passes nothing."""
+    from .networks import ports  # noqa: PLC0415
     out = defaultdict(set, {k: set(v) for k, v in graph.items()})
     for p in parts:
-        faces = transmission_ports(p)
-        if len(faces) < 2 or p.piece.d.startswith("modular_engine") or any(f["trans_type"] != 2 for f in faces):
+        if p.piece.d.startswith(("modular_engine", "fluid_tank_")) or p.piece.d in PREBUILT_ENGINES:
             continue
-        keys = [(f["part_id"], f["surface_index"]) for f in faces]
-        for k in keys:
-            out[k].update(o for o in keys if o != k)
+        faces = [f for f in transmission_ports(p) if f["trans_type"] == 2]
+        if len(faces) < 2:
+            continue
+        circuits = defaultdict(set)
+        for n in ports(p):
+            if n["type"] == 3:
+                circuits[_SIDE.sub("", n["label"])].add(n["position"])
+        if len(circuits) == 1:
+            groups = [faces]
+        else:
+            owner = defaultdict(set)
+            for name, cells in circuits.items():
+                for f in faces:
+                    if f["position"] in cells:
+                        owner[f["surface_index"]].add(name)
+            if any(len(names) > 1 for names in owner.values()):
+                continue
+            groups = [[f for f in faces if owner.get(f["surface_index"]) == {name}] for name in circuits]
+        for group in groups:
+            keys = [(f["part_id"], f["surface_index"]) for f in group]
+            for k in keys:
+                out[k].update(o for o in keys if o != k)
     return out
 
 
@@ -133,21 +172,9 @@ def check(parts, report, links, graph, by_id, ports, starts, reachable, tank_cel
     groups, pairs = engines(parts)
     if not groups:
         return []
+    from .networks import powered_nodes  # noqa: PLC0415
     driven_inputs = {(link["to"]["part_id"], str(link["to"]["port"])) for link in links if "to" in link}
-    electric = defaultdict(set)
-    for link in links:
-        if link.get("type") == 4 and "from" in link:
-            a, b = ((link[k]["part_id"], str(link[k]["port"])) for k in ("from", "to"))
-            electric[a].add(b)
-            electric[b].add(a)
-    batteries = [(p.uid, str(n["index"])) for p in parts if p.piece.d.startswith("battery")
-                 for n in ports(p) if n["type"] == 4]
-    powered, queue = set(batteries), list(batteries)
-    while queue:
-        for n in electric[queue.pop()]:
-            if n not in powered:
-                powered.add(n)
-                queue.append(n)
+    powered = powered_nodes(parts, links)
 
     def add_check(p, system, ok, detail):
         report["checks"].append({"part_id": p.uid, "system": system,
@@ -231,5 +258,6 @@ def check(parts, report, links, graph, by_id, ports, starts, reachable, tank_cel
         summaries.append({"crankshaft_id": crank.uid, "parts": len(group), "cylinders": len(cylinders),
                           "starters": len(starters), "clutches": len(clutches),
                           "alternators": sum(p.piece.d == "modular_engine_alternator" for p in group),
+                          "temperature_sensors": sum(p.piece.d == SENSOR for p in group),
                           "notes": notes})
     return summaries

@@ -136,7 +136,8 @@ mirrored wheel frames, seat A/D and W/S signs, and preflight direction checks.
 Choose standalone cube `modular_engine_gearbox_1x1` rather than deprecated torque gearboxes.
 New gearboxes explicitly default to off `gear_ratio_1=1` (1:1 forward) and on
 `gear_ratio_2=0` (1:-1 reverse). Inspect `preflight_vehicle` gearbox configuration checks;
-index 0 reverses the shaft.
+index 0 reverses the shaft. Other indices (input:output from RPS A): 2 = 6:5, 3 = 3:2,
+4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1.
 Both require base contact and conservatively clear motion space. Check these placements in game.
 **analyze_vehicle(name, search, section, offset, limit)** reads multi-body references without
 editing them; sections expose parts, links, controllers, bodies, placement_issues,

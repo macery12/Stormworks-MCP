@@ -36,7 +36,7 @@ from swhull.land_presets import PRESETS as VEHICLE_PRESETS
 from swhull.style import RULE_SETS
 from swhull.tool_schemas import (AssemblyBindings, AssemblyOptions, AssemblyReport, ChangeReport,
                                  ConnectionBatch, DiagnosticReport, DraftCreated, EditBatch, EditResult,
-                                 Operations, PasteResult, PhysicsReport, PreflightReport, PrefabInfo, PrefabList,
+                                 EngineResult, Operations, PasteResult, PhysicsReport, PreflightReport, PrefabInfo, PrefabList,
                                  PreviewResult, RepairPlan, RouteBatch, SealReport,
                                  Selection, VehicleList, plain)
 from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Commit, Design, Detail, DoorState,
@@ -71,7 +71,7 @@ generator (preview_hull, store_design, save_hull). Find parts with search_parts(
 get_part_definition and get_part_orientation. Edit with query_parts then edit_parts: preview,
 look, then commit=true with the revision. Edits use integer blocks (0.25 m), x across, +y up,
 +z forward. Reuse a saved vehicle or a box cut out of one as a prefab (create_prefab,
-list_prefabs, paste_prefab). Wire with edit_connections, lay pipes and shafts with
+list_prefabs, paste_prefab). Build a modular engine of any size with place_modular_engine. Wire with edit_connections, lay pipes and shafts with
 route_connections, and use apply_vehicle_assembly for whole starter, clutch, brake or light
 set-ups. Check with
 preflight_vehicle (parts it cannot check yet are listed as unchecked, never refused; style=[...]
@@ -1118,6 +1118,73 @@ async def paste_prefab(design: Draft,
     op = prefabs.paste_operation(text, position, rotation, replace, body, prefab)
     proposed, png, note, report = await run_job("paste_prefab", record, op, design, preview,
                                                 (side or {}).get("names"))
+    if commit:
+        proposed = _commit_record(design, proposed, revision)
+    return _result(png, {"committed": commit, "revision": _revision(proposed), "base_revision": revision,
+                         **report, "notes": note})
+
+
+EngineSide = Literal["top", "right", "bottom", "left"]
+Direction = Literal["+x", "-x", "+y", "-y", "+z", "-z"]
+
+
+@mcp.tool(annotations=EDIT)
+@_user_errors
+async def place_modular_engine(design: Draft,
+                               size: Annotated[Literal[1, 3, 5], Field(description=(
+                                   "Part size: 1 (1x1 parts, compact), 3 (3x3) or 5 (5x5, most power)."))],
+                               position: Annotated[list[int], Field(min_length=3, max_length=3, description=(
+                                   "Where the engine's lowest corner goes (after turning), integer blocks in "
+                                   "the draft frame (query_parts)."))],
+                               cylinders: Annotated[int, Field(ge=1, le=64, description=(
+                                   "Total cylinders, shared out over the banks slice by slice."))] = 4,
+                               banks: Annotated[list[EngineSide] | None, Field(min_length=1, max_length=4, description=(
+                                   "Crank sides that carry a row of cylinders: one side is an in-line engine, "
+                                   "left and right an opposed (boxer) engine, all four the compact ring. "
+                                   "Default ['top']."))] = None,
+                               output: Annotated[Direction, Field(description=(
+                                   "Draft direction the clutch's power output faces; the drive belt is at the "
+                                   "other end."))] = "+z",
+                               top: Annotated[Direction, Field(description=(
+                                   "Draft direction of the engine's top bank side; perpendicular to output."))] = "+y",
+                               starters: Annotated[int | None, Field(ge=0, le=14, description=(
+                                   "Starters on the drive belt; default the minimum for the size (1, 2 or 3)."))] = None,
+                               alternators: Annotated[int, Field(ge=0, le=14, description=(
+                                   "Alternators on the drive belt (charge a battery)."))] = 0,
+                               flywheel: Annotated[bool, Field(description=(
+                                   "Add a flywheel between the crankshaft and the clutch."))] = False,
+                               coolant: Annotated[bool, Field(description=(
+                                   "Add a coolant manifold (recommended; a small 1x1 engine runs briefly "
+                                   "without one)."))] = True,
+                               temperature_sensor: Annotated[bool, Field(description=(
+                                   "Plug a temperature sensor into a free cylinder hole."))] = False,
+                               air_rams: Annotated[bool, Field(description=(
+                                   "Put an air ram straight on the air and exhaust manifolds (the most compact "
+                                   "intake and outlet; they must reach outside air)."))] = False,
+                               body: Annotated[str | None, Field(description=(
+                                   "Body for the engine: an existing body ID or \"new\"; omit to join the body "
+                                   "it touches."))] = None,
+                               revision: EditRevision = None, commit: Commit = False, preview: Preview = False
+                               ) -> EngineResult:
+    """Build a complete modular engine in a draft from the game's coupled parts: crankshaft
+    line, cylinders on the chosen sides, manifolds bridging the banks, air, fuel, exhaust and
+    coolant manifolds, drive belt with starters and alternators, optional flywheel, and the
+    clutch. Nothing is wired (the player fits an ECU). Refused when it overlaps draft parts.
+    Returns its size, whether it touches the vehicle, and its connection points as draft part
+    IDs: pipe faces for route_connections (air in, fuel in, exhaust out, coolant, power output)
+    and logic nodes for edit_connections (throttles, starters, clutch pressure, RPS, cylinder
+    data). commit=true applies it as one undo step (undo_edits); otherwise it is a preview. Use
+    paste_prefab instead to reuse an engine a player already built."""
+    record = _read_design(design)
+    _check_revision(record, revision, commit, "query_parts")
+    op = {"op": "engine", "size": size, "cylinders": cylinders, "banks": banks or ["top"], "position": position,
+          "output": output, "top": top, "alternators": alternators, "flywheel": flywheel, "coolant": coolant,
+          "temperature_sensor": temperature_sensor, "air_rams": air_rams}
+    if starters is not None:
+        op["starters"] = starters
+    if body is not None:
+        op["body"] = body
+    proposed, png, note, report = await run_job("place_engine", record, op, design, preview)
     if commit:
         proposed = _commit_record(design, proposed, revision)
     return _result(png, {"committed": commit, "revision": _revision(proposed), "base_revision": revision,

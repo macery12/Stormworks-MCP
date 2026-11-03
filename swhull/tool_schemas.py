@@ -197,6 +197,7 @@ class PreflightReport(TypedDict):
     open_transmission_faces: list[dict[str, Any]]
     capped_unused_tank_faces: list[dict[str, Any]]
     non_driven_wheel_faces: list[dict[str, Any]]
+    blocked_faces: NotRequired[list[dict[str, Any]]]
     configuration_checks: list[dict[str, Any]]
     gearbox_configuration_checks: list[dict[str, Any]]
     wheel_direction_checks: list[dict[str, Any]]
@@ -344,6 +345,25 @@ class PrefabInfo(TypedDict):
     points: list[dict[str, Any]]
     notes: str
     cut: NotRequired[dict[str, Any]]
+
+
+class EngineResult(TypedDict):
+    """place_modular_engine: the engine placed, whether it touches the vehicle, and its
+    connection points as draft part IDs (for route_connections and edit_connections)."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    parts: int
+    bounds: list[list[int]]
+    size_blocks: list[int]
+    cylinders: int
+    starters: int
+    alternators: int
+    bridge_manifolds: int
+    attached: bool
+    loose_groups: list[dict[str, Any]]
+    points: list[dict[str, Any]]
+    notes: str
 
 
 class PasteResult(TypedDict):

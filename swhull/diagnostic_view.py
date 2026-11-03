@@ -18,7 +18,7 @@ def overlay(record, parts, report=None, proposed=None):
             if uid in by_id:
                 markers.append({"position": list(by_id[uid].origin), "label": f["explanation"],
                                 "color": COLORS["fault"], "part_id": uid, "kind": "fault"})
-    for row in report["issues"]:
+    for row in report.get("blocked_faces", []):
         if row["issue"] == "blocked transmission face":
             markers.append({"position": list(row["exit_cell"]), "label": "blocked port",
                             "color": COLORS["blocked"], "part_id": row["part_id"], "kind": "blocked"})

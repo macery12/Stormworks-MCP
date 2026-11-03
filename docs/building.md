@@ -72,7 +72,8 @@ and modular engines; it lists jet engines as unchecked.
 Reuse a finished piece with `create_prefab` (a whole vehicle, or a box cut out of one) and
 `paste_prefab`; the pasted parts keep their wires and microcontrollers. Make a tank with the
 `edit_parts` operation `{op:"tank", seed:[x,y,z]}` (a closed space) or `bounds` (a new box).
-[The start guide](start.md#prefabs) has the details.
+[The start guide](start.md#prefabs) has the details. Build a modular engine of any size and
+bank layout with `place_modular_engine` ([details](start.md#modular-engines)).
 
 ## Diagnose a result
 

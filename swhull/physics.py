@@ -228,7 +228,7 @@ class Model:
                               "saved_fill": _fill(p.settings), "cells": cells})
             elif p.piece.d.startswith("fluid_tank_"):
                 cells = p.voxels()
-                fluid = int(float(p.settings.get("fluid_type", 0) or 0))
+                fluid = definitions.spawner_fluid(p.settings)
                 tanks.append({"name": p.name or definitions.display_name(p.piece.d), "kind": "premade",
                               "body_id": self.body_of[id(p)], "litres": round(len(cells) * CELL_LITRES, 1),
                               "fluid": FLUIDS.get(fluid, "unknown"), "saved_fill": _fill(p.settings),

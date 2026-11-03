@@ -13,7 +13,8 @@ from .pieces import Piece
 
 # placeholder engines by size; the prebuilt engine parts in the game
 ENGINES = {"small": "engine", "medium": "aircraft_engine", "large": "engine_diesel"}
-# A Fluid Spawner saved without fluid_type fills with diesel (checked in game, "costal patrol v17 v2").
+# A Fluid Spawner or premade tank saved without fluid_type fills with diesel (checked in game,
+# "costal patrol v17 v2"; the player confirms every tank starts with diesel).
 SPAWNER_DEFAULT_FLUID = 1
 _REL = os.path.join("rom", "data", "definitions")
 
@@ -193,9 +194,9 @@ def metadata(d):
                                     "description": "Prebuilt engine power fraction; 1 = 100%. Written explicitly on placement."}
             } if d in PREBUILT_ENGINES else {}), **({
                 "gear_ratio_1": {"type": "integer", "min": 0, "default": 1,
-                                 "description": "Gear Switch off ratio index: 1 = 1:1 forward; 0 = 1:-1 reverse. Other indices select editor ratios."},
+                                 "description": "Gear Switch off ratio index (input:output from RPS A; RPS B inverts): 0 = 1:-1 reverse, 1 = 1:1, 2 = 6:5, 3 = 3:2, 4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1."},
                 "gear_ratio_2": {"type": "integer", "min": 0, "default": 0,
-                                 "description": "Gear Switch on ratio index: 0 = 1:-1 reverse; 1 = 1:1 forward. Other indices select editor ratios."}
+                                 "description": "Gear Switch on ratio index, same table as gear_ratio_1: 0 = 1:-1 reverse, 1 = 1:1, 2 = 6:5, 3 = 3:2, 4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1."}
             } if d in GEARBOXES else {}), **({
                 "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2},
                                "default": SPAWNER_DEFAULT_FLUID,
@@ -212,7 +213,7 @@ def catalogue(search="", offset=0, limit=50, category=""):
 
 
 def spawner_fluid(settings):
-    """Fluid type a Fluid Spawner fills its pocket with: the game uses diesel (1) when unset."""
+    """Fluid type a Fluid Spawner or premade tank holds: the game uses diesel (1) when unset."""
     try:
         return int(float(settings.get("fluid_type", SPAWNER_DEFAULT_FLUID)))
     except (TypeError, ValueError):
