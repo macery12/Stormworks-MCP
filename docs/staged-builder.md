@@ -6,7 +6,7 @@ or custom tanks. Save the draft at that point. Components are placed without aut
 ## Focused editing
 
 Store a procedural design with **store_design**, or copy an existing vehicle into a new draft
-with **import_vehicle(name, design)**. Version-3 single-body imports retain untouched component
+with **import_vehicle(name, design)**. Version-3 imports, single- or multi-body, retain untouched component
 XML, settings, colours, body data, and connections. Configured or linked original parts stay
 in place; they can be repainted. Multi-body and older-version imports are rejected.
 

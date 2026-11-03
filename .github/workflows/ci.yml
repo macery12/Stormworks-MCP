@@ -37,6 +37,12 @@ jobs:
       # Portable synthetic/rotation/motion tests always run; local catalogue/reference tests skip without assets.
       - run: uv run pytest -q --junitxml=out/pytest.xml
       - run: uv run python tools/package_test.py
+      # Tool definitions are graded by TDQS (https://tdqs.dev); keep the keyless lint free of findings.
+      - name: TDQS lint
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          npx -y mcp-tdqs@0.2.0 lint --command "uv run server.py" --format json --output out/tdqs.json --fail-on warning
+          uv run python -c "import json, sys; f = json.load(open('out/tdqs.json'))['findings']; print(*f, sep='\n'); sys.exit(bool(f))"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:

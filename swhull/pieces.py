@@ -108,6 +108,23 @@ def parse_r(r):
     return q
 
 
+def nearest_rotation(r):
+    """The grid rotation closest to an XML-edited (stretched or sheared) `r`, for geometry only;
+    the part's own XML is kept as saved. Raises ValueError when `r` is not a usable matrix."""
+    try:
+        values = [float(x) for x in r.split(",")]
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("r must contain nine numbers") from exc
+    if len(values) != 9 or any(not math.isfinite(x) or abs(x) > 1000 for x in values):
+        raise ValueError("r must contain nine finite numbers")
+    M = (values[0:3], values[3:6], values[6:9])
+    q = [[M[j][i] for j in range(3)] for i in range(3)]
+
+    def score(candidate):
+        return sum(candidate[i][j] * q[i][j] for i in range(3) for j in range(3))
+    return max(ROTATIONS, key=score)
+
+
 # Mirroring. The game stores a part placed in mirror mode as `t` on the component: a bit per
 # axis of the part's own frame, flipped before `r` rotates it (1 x, 2 y, 4 z; seen in game
 # 2026-10-01: a Pyramid 2x4 mirrored across the centreline is t="1" unrotated and t="4" when
@@ -278,6 +295,7 @@ class Placed:
     raw_xml: str = ""
     protected: bool = False
     faces: tuple = ()   # one colour per surface in `sc` order (see faces.py); () = all `color`
+    body: str = ""      # body unique_id; "" = the vehicle's main (first) body
 
     def __setattr__(self, name, value):
         # Repainting a part (edits, highlights) repaints every face: drop per-face colours.

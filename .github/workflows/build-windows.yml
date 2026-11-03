@@ -39,12 +39,29 @@ jobs:
           Copy-Item -LiteralPath dist/stormworks-mcp.exe -Destination (Join-Path $portable 'stormworks-mcp.exe')
           uv run python tools/desktop_test.py --exe (Join-Path $portable 'stormworks-mcp.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run python tools/build_installer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, upgrade over running copies and uninstall
+        run: uv run python tools/installer_test.py --installer dist/stormworks-mcp-setup.exe
       - name: Assemble release files and checksums
         shell: pwsh
         run: |
           $arguments = @('--commit', $env:GITHUB_SHA, '--repository', $env:GITHUB_REPOSITORY)
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('--tag', $env:GITHUB_REF_NAME) }
           uv run python tools/release_assets.py @arguments
+      - name: Write winget manifests for the assembled installer
+        run: uv run python tools/winget_manifest.py --out dist/winget
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: winget-manifests
+          path: dist/winget/*
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-release

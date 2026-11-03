@@ -399,7 +399,7 @@ def build(spec):
     from .components import place  # noqa: PLC0415
     from .tanks import place as place_tanks, verify as verify_tanks  # noqa: PLC0415
     base = {k: v for k, v in spec.items()
-            if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings", "mooring")}
+            if k not in ("edits", "components", "fitout", "tanks", "ballast", "railings", "mooring", "style")}
     if (spec.get("fitout") or {}).get("stage") in ("access", "propulsion", "tanks", "powertrain"):
         interior = merge({}, base.get("interior") or {})
         interior["door_parts"] = True
@@ -438,7 +438,9 @@ def build(spec):
         placed = apply_edits(placed, spec["edits"], reserved=info["interior"].reserved)
     if spec.get("tanks"):
         verify_tanks(placed, info)
-    info["warnings"] += propulsion_warnings(placed, info["region"]) + ballast_warnings(info["ballast"])
+    if "boat_engine_room" in (spec.get("style") or []):
+        info["warnings"] += propulsion_warnings(placed, info["region"])
+    info["warnings"] += ballast_warnings(info["ballast"])
     before = placed[0].origin
     centre(placed)
     info["shift"] = tuple(before[i] - placed[0].origin[i] for i in range(3))

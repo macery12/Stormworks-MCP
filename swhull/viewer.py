@@ -26,4 +26,4 @@ def geometry(text, body_id=None):
         rows.append({"d": d, "origin": list(p.origin), "M": [p.Q[i][j] for j in range(3) for i in range(3)],
                      "colour": p.color, "r": r_attr(rot), "mirror": flip})
     return {"parts": rows, "assets": assets, "coverage": coverage(parts),
-            "frame": "one body-local frame; articulated transforms are not solved"}
+            "frame": "every body at its editor rest pose (one shared grid); joints are not moved"}

@@ -39,6 +39,9 @@ def test_release_assets_match_binary_and_record_source(tmp_path, monkeypatch):
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "stormworks-mcp.exe").write_bytes(b"synthetic server bytes")
+    with pytest.raises(ValueError, match="missing installer"):
+        release_assets.assemble("v0.1.0", "source-commit", "owner/repo")
+    (dist / "stormworks-mcp-setup.exe").write_bytes(b"synthetic installer bytes")
     release_assets.assemble("v0.1.0", "source-commit", "owner/repo")
     output = dist / "release"
     metadata = json.loads((output / "build-info.json").read_text())
@@ -46,7 +49,9 @@ def test_release_assets_match_binary_and_record_source(tmp_path, monkeypatch):
     binary = output / "stormworks-mcp-0.1.0-windows-x64.exe"
     assert binary.read_bytes() == (dist / "stormworks-mcp.exe").read_bytes()
     assert metadata["client_mode"] == "--connect"
-    assert sorted(path.suffix for path in output.iterdir()) == [".exe", ".json", ".txt"]
+    setup = output / "stormworks-mcp-0.1.0-windows-x64-setup.exe"
+    assert setup.read_bytes() == (dist / "stormworks-mcp-setup.exe").read_bytes()
+    assert sorted(path.suffix for path in output.iterdir()) == [".exe", ".exe", ".json", ".txt"]
     for line in (output / "SHA256SUMS.txt").read_text().splitlines():
         digest, filename = line.split("  ", 1)
         assert hashlib.sha256((output / filename).read_bytes()).hexdigest() == digest

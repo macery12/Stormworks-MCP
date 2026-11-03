@@ -39,12 +39,16 @@ def assemble(tag, commit, repository):
     binary = dist / "stormworks-mcp.exe"
     if not binary.is_file():
         raise ValueError(f"missing build artifact: {binary}")
-    published_binary = output / f"stormworks-mcp-{version}-windows-x64.exe"
-    shutil.copyfile(binary, published_binary)
+    installer = dist / "stormworks-mcp-setup.exe"
+    if not installer.is_file():
+        raise ValueError(f"missing installer: {installer} (tools/build_installer.py)")
+    shutil.copyfile(binary, output / f"stormworks-mcp-{version}-windows-x64.exe")
+    shutil.copyfile(installer, output / f"stormworks-mcp-{version}-windows-x64-setup.exe")
     (output / "build-info.json").write_text(json.dumps({
         "version": version, "tag": tag, "commit": commit, "repository": repository,
         "platform": "windows-x64", "python": sys.version.split()[0],
         "entry_point": "launcher.py", "client_mode": "--connect", "default_mode": "desktop GUI",
+        "installer": "Inno Setup; per-user by default, all users optional; upgrades in place",
         "uv_lock_sha256": hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest(),
         "workflow": f"https://github.com/{repository}/actions/workflows/release.yml",
         "source": f"https://github.com/{repository}/tree/{commit}",

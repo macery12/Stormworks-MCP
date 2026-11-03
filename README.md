@@ -116,14 +116,25 @@ You need Windows 10 or 11 (x64), Stormworks installed through Steam, and Claude 
 ChatGPT / Codex Windows app on the same PC. The download includes Python and every dependency; you
 do not need to install Python, uv or Git.
 
-1. Download `stormworks-mcp-0.2.0-windows-x64.exe` from
-   [Releases](https://github.com/macery12/Stormworks-MCP/releases).
-2. Move it to a permanent folder and double-click it. There is no installer.
-3. Close your AI client. In the app, open **MCP > Set up Claude Desktop** or
+1. Download `stormworks-mcp-0.3.0-windows-x64-setup.exe` from
+   [Releases](https://github.com/macery12/Stormworks-MCP/releases) and run it. It installs for
+   you only by default (no admin); choose all users on the first page if you want, which asks
+   for admin. Pick another folder if you like. A newer installer finds the existing install and
+   offers to upgrade or repair it in place, or to uninstall it. Prefer no installer? Download
+   the portable `stormworks-mcp-0.3.0-windows-x64.exe` instead, move it to a permanent folder
+   and double-click it.
+   Coming from an older version? Remove the old Stormworks entry from your AI client first.
+2. Open **Stormworks MCP** from the Start menu (or let the installer launch it).
+3. If the installer did not add it to your client already ("Add to Claude Desktop" /
+   "Add to ChatGPT / Codex"), close your AI client. In the app, open **MCP > Set up Claude Desktop** or
    **MCP > Set up ChatGPT / Codex**, check the configuration path it shows, and press
    **Add to client**. Your other settings are kept, and the file is backed up first. To replace an
    existing Stormworks entry, tick the replacement checkbox.
 4. Press **Start server**, then open your client again.
+
+The app checks GitHub for a newer release when it starts and shows a download link if there is
+one (**Help > Check for updates**; untick **Check for updates at startup** to stop it). With
+winget: `winget install macery12.StormworksMCP`, once the package is accepted there.
 
 The window shows the server status and a live log. Keep it open while you build: every client
 connects to this one shared server, and closing the window stops it and disconnects them. After you
@@ -131,7 +142,8 @@ start the server again, reconnect or restart your client. A second copy of the a
 
 For other clients, **MCP > Custom client / raw configuration** copies MCP JSON, Codex TOML or a
 PowerShell add command. The **View** menu has diagnostics and log copy/clear. Setup records the
-EXE's current location, so if you move the file, reopen it and replace its client entries.
+EXE's current location; an installed copy keeps its folder across upgrades. If you move the
+portable file, reopen it and replace its client entries.
 
 The same configuration serves Codex CLI and the IDE extension on that PC. ChatGPT on the web and
 cloud tasks use a separate connection path that this app does not set up; see
@@ -171,13 +183,13 @@ uv run python launcher.py --config command   # codex mcp add command
 uv run python launcher.py --doctor           # check paths and game assets without changing files
 ```
 
-For Claude Desktop, open **Settings > Developer > Edit Config** and add a `stormworks-hulls` entry
+For Claude Desktop, open **Settings > Developer > Edit Config** and add a `stormworks` entry
 under `mcpServers`, using the folder you cloned into:
 
 ```json
 {
   "mcpServers": {
-    "stormworks-hulls": {
+    "stormworks": {
       "command": "C:\\path\\to\\Stormworks-MCP\\.venv\\Scripts\\python.exe",
       "args": ["C:\\path\\to\\Stormworks-MCP\\launcher.py", "--connect"]
     }
@@ -239,24 +251,24 @@ stages, units and exact edits.
 ## Tools
 
 You do not call these yourself: describe what you want, and the assistant picks the tools. Before
-building, it reads `hull_design_guide` for boats (`topic="workflow"` returns a short starting guide)
-or `land_vehicle_guide` for road vehicles. Hull dimensions are in metres; exact edits use integer
+building, it reads `get_guide` (`topic="start"` covers any vehicle; `hull_*` topics cover the boat
+hull generator and `land` the road presets). Hull dimensions are in metres; exact edits use integer
 blocks of 0.25 m. Saving refuses to overwrite a vehicle file the server did not create, and replacing
 one it did create needs `overwrite=true`.
 
 | Area | Tools | Guide |
 | --- | --- | --- |
-| Guides and setup | `hull_design_guide`, `land_vehicle_guide`, `get_runtime_status`, `list_workbenches` | [Building](docs/building.md) |
+| Guides and setup | `get_guide`, `get_runtime_status`, `list_workbenches` | [Start](docs/start.md) |
 | Hull design | `list_hull_presets`, `get_hull_spec`, `preview_hull`, `preview_interior`, `deck_profile`, `save_hull` | [Building](docs/building.md) |
-| Designs and drafts | `store_design`, `list_designs`, `load_design`, `import_vehicle`, `preview_vehicle`, `save_vehicle` | [Staged builder](docs/staged-builder.md) |
+| Designs and drafts | `create_vehicle`, `import_vehicle`, `store_design`, `list_designs`, `load_design`, `preview_vehicle`, `save_vehicle` | [Start](docs/start.md) |
 | Part editing | `query_parts`, `edit_parts`, `undo_edits` | [Staged builder](docs/staged-builder.md) |
-| Road vehicles | `create_land_vehicle`, `find_land_vehicles`, `search_land_parts`, `analyze_land_vehicle` | [Land vehicles](docs/land-vehicles.md) |
+| Road vehicles | `create_vehicle` land presets, `analyze_land_vehicle` | [Land vehicles](docs/land-vehicles.md) |
 | Wiring and pipes | `query_connections`, `edit_connections`, `route_connections`, `list_vehicle_assemblies`, `apply_vehicle_assembly` | [Vehicle repair](docs/vehicle-repair.md) |
 | Faults and repairs | `preflight_vehicle`, `plan_vehicle_repairs`, `repair_vehicle`, `preview_vehicle_diagnostics`, `check_seal` | [Vehicle repair](docs/vehicle-repair.md) |
 | In-game test records | `prepare_vehicle_validation`, `record_vehicle_validation`, `get_vehicle_validation`, `get_calibration_observations` | [In-game testing](docs/in-game-testing.md) |
-| Part catalogue | `search_parts`, `get_part_definition`, `get_part_orientation` | [Staged builder](docs/staged-builder.md) |
+| Part catalogue | `search_parts` (with a family filter), `get_part_definition`, `get_part_orientation` | [Start](docs/start.md) |
+| Physics estimates | `analyze_physics` | [Start](docs/start.md) |
 | Inspection and analysis | `inspect_view`, `open_in_viewer`, `list_game_vehicles`, `preview_game_vehicle`, `analyze_vehicle`, `analyze_hull`, `suggest_hull_blocks` | [Hull smoothing](docs/hull-smoothing.md) |
-| Reference builds | `study_references`, `score_vehicle` | [v0.2 plan](docs/v0.2-plan.md) |
 
 ## Configuration
 
@@ -270,7 +282,6 @@ environment variables before starting the desktop app:
 | `SW_DEFINITIONS_DIR` | `<game>\rom\data\definitions` | Part definitions directly. |
 | `SW_WORKSHOP_DIR` | Found through your Steam libraries | Installed workshop vehicles used as references. |
 | `SW_DESIGNS_DIR` | `%APPDATA%\stormworks-hull-mcp\designs` | Stored designs and drafts. |
-| `SW_REFERENCES_DIR` | `%APPDATA%\stormworks-hull-mcp\reference_sets` | Stored reference-set studies for `score_vehicle`. |
 | `SW_TOOL_TIMEOUT` | `300` | Seconds a build or render may run before the server stops it. |
 | `SW_BUILD_CACHE` | `1` | Set to `0` to turn off geometry caching. |
 | `SW_RENDERER` | `auto` | Preview lighting: `auto` (GPU, else CPU), `gpu`, `cpu`, or `flat` (unlit, fastest). |
@@ -353,16 +364,19 @@ uv run tools/diagnostic_milestone.py out/diagnostic-review  # three-fault repair
 uv run python tools/package_test.py # two clients, shared host, guide assets, workers, export and stop
 ```
 
-On Windows, build the portable desktop executable:
+On Windows, build the portable desktop executable and the installer (needs Inno Setup 6:
+`winget install JRSoftware.InnoSetup`):
 
 ```powershell
 uv sync --locked --group build
 uv run --group build python tools/build_windows.py
 uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
+uv run python tools/build_installer.py
+uv run python tools/installer_test.py   # refuses to run over a real install
 ```
 
-Tagging `v0.2.0` runs the tests, builds and tests the executable, and uploads it to a
+Tagging `v0.3.0` runs the tests, builds and tests the executable, and uploads it to a
 draft GitHub release with checksums and signed build provenance; see
 [releasing and verification](docs/releases.md). Changes must pass lint and tests. Geometry changes
 also need a rendered review and a specific in-game check, as described in [CLAUDE.md](CLAUDE.md).
@@ -389,7 +403,9 @@ and [surface design plan](docs/surface-design-plan.md).
 | [swhull/definitions.py](swhull/definitions.py), [benches.py](swhull/benches.py) | Game install detection, part definitions and workbench sizes |
 | [swhull/jobs.py](swhull/jobs.py), [cache.py](swhull/cache.py) | Killable worker processes; shared geometry cache |
 | [swhull/setup_gui.py](swhull/setup_gui.py), [desktop_runtime.py](swhull/desktop_runtime.py) | Desktop window and shared server |
-| [swhull/guide.md](swhull/guide.md) | Design guide served by `hull_design_guide` |
+| [docs/start.md](docs/start.md), [swhull/guide.md](swhull/guide.md) | Guides served by `get_guide` (any vehicle; hull generator) |
+| [swhull/physics.py](swhull/physics.py), [game_constants.py](swhull/game_constants.py) | Read-only physics estimates and the base-game constants they use |
+| [swhull/style.py](swhull/style.py) | Optional style rule sets checked by `preflight_vehicle(style=...)` |
 | [viewer/](viewer) | Standalone 3D viewer |
 | [tools/](tools) | Smoke, client, package and desktop tests; in-game calibration vehicles |
 

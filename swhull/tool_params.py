@@ -28,7 +28,7 @@ def _d(description, **constraints):
 Renderer = Literal["auto", "gpu", "cpu", "flat"]
 
 Spec = Annotated[dict[str, Any] | None, _d(
-    "Hull spec, partial or full (fields: hull_design_guide topic=spec); merged over preset or "
+    "Hull spec, partial or full (fields: get_guide topic=hull_spec); merged over preset or "
     "design. Lengths in metres.")]
 Preset = Annotated[str | None, _d(
     "Built-in hull preset to start from, e.g. 'runabout'; names from list_hull_presets.")]
@@ -44,10 +44,13 @@ RendererChoice = Annotated[Renderer | None, _d(
     'force one; "flat" is fastest and unlit, with block outlines for counting blocks.')]
 
 Draft = Annotated[str, _d(
-    "Stored draft name (from import_vehicle, create_land_vehicle, store_design or save_hull; "
+    "Stored draft name (from create_vehicle, import_vehicle, store_design or save_hull; "
     "see list_designs).")]
 Revision = Annotated[str, _d(
     "The draft's current revision from query_parts or query_connections; a stale one is rejected.")]
+EditRevision = Annotated[str | None, _d(
+    "The draft's current revision from query_parts or query_connections. Required with "
+    "commit=true; a preview may omit it. A stale one is rejected.")]
 Commit = Annotated[bool, _d(
     "false (default) previews without changing the draft; true applies it as one undo step.")]
 Offset = Annotated[int, _d("Rows to skip, for paging; use next_offset from the previous page.", ge=0)]
@@ -68,8 +71,14 @@ Source = Annotated[str, _d(
     '"vehicles" (default) reads the player\'s vehicles folder; "workshop" reads an installed '
     "Workshop item by numeric ID.")]
 BodyId = Annotated[str | None, _d(
-    "unique_id of one body of a multi-body vehicle; default is the largest body. Saved "
-    "vehicles only.")]
+    "unique_id of one body of a multi-body saved vehicle to show or measure alone; default shows "
+    "every body at its editor rest pose (analyze_hull and analyze_land_vehicle default to the "
+    "largest body).")]
+Bodies = Annotated[list[str] | None, _d(
+    "Body IDs to show (query_parts lists each part's body); default shows every body.")]
+View = Annotated[Literal["paint", "bodies"], _d(
+    '"paint" (default) shows the paint; "bodies" paints each body one fixed colour with a label, '
+    "like the game's bodies view, and lists them in the notes.")]
 NewVehicleName = Annotated[str, _d(
     "Name for the file in the vehicles folder and the game's Load menu: letters, digits, "
     "spaces, _ - ( ), at most 64 characters.")]

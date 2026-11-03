@@ -13,6 +13,9 @@ from .pieces import Piece
 
 # placeholder engines by size; the prebuilt engine parts in the game
 ENGINES = {"small": "engine", "medium": "aircraft_engine", "large": "engine_diesel"}
+# A Fluid Spawner or premade tank saved without fluid_type fills with diesel (checked in game,
+# "costal patrol v17 v2"; the player confirms every tank starts with diesel).
+SPAWNER_DEFAULT_FLUID = 1
 _REL = os.path.join("rom", "data", "definitions")
 
 
@@ -191,37 +194,27 @@ def metadata(d):
                                     "description": "Prebuilt engine power fraction; 1 = 100%. Written explicitly on placement."}
             } if d in PREBUILT_ENGINES else {}), **({
                 "gear_ratio_1": {"type": "integer", "min": 0, "default": 1,
-                                 "description": "Gear Switch off ratio index: 1 = 1:1 forward; 0 = 1:-1 reverse. Other indices select editor ratios."},
+                                 "description": "Gear Switch off ratio index (input:output from RPS A; RPS B inverts): 0 = 1:-1 reverse, 1 = 1:1, 2 = 6:5, 3 = 3:2, 4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1."},
                 "gear_ratio_2": {"type": "integer", "min": 0, "default": 0,
-                                 "description": "Gear Switch on ratio index: 0 = 1:-1 reverse; 1 = 1:1 forward. Other indices select editor ratios."}
+                                 "description": "Gear Switch on ratio index, same table as gear_ratio_1: 0 = 1:-1 reverse, 1 = 1:1, 2 = 6:5, 3 = 3:2, 4 = 9:5, 5 = 2:1, 6 = 5:2, 7 = 3:1."}
             } if d in GEARBOXES else {}), **({
-                "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2}},
+                "fluid_type": {"type": "integer", "supported": {"water": 0, "diesel": 1, "jet_fuel": 2},
+                               "default": SPAWNER_DEFAULT_FLUID,
+                               "description": "Omitted in a save = diesel (1), as the game fills it."},
                 "fluid_fill": {"type": "number", "min": 0, "max": 1, "default": 1},
                 "fluid_filter": {"type": "integer", "default": 4294967295}
             } if d == "water_spawner" else {})}}
 
 
-def catalogue(search="", offset=0, limit=50):
-    from .pieces import BY_NAME  # noqa: PLC0415
-    from .part_policy import allowed  # noqa: PLC0415
-    if not isinstance(offset, int) or offset < 0 or not isinstance(limit, int) or not 1 <= limit <= 200:
-        raise ValueError("offset must be nonnegative and limit must be 1-200")
-    base = definitions_dir()
-    names = sorted(p[:-4] for p in os.listdir(base) if p.endswith(".xml")) if base else sorted(BY_NAME)
-    rows = []
-    for d in names:
-        if not allowed(d):
-            continue
-        name = display_name(d)
-        if search.lower() not in f"{d} {name}".lower():
-            continue
-        piece = BY_NAME.get(d) or load(d)
-        if piece:
-            size = [max(v[i] for v in piece.footprint) - min(v[i] for v in piece.footprint) + 1
-                    for i in range(3)]
-            rows.append({"definition": d, "name": name, "size_blocks": size,
-                         "size_metres": [n / 4 for n in size], "mass": piece.mass})
-    return {"parts": rows[offset:offset + limit], "total": len(rows),
-            "next_offset": offset + limit if offset + limit < len(rows) else None,
-            "definitions_available": base is not None,
-            "equipment_policy": "Prebuilt diesel engines only; radiator cooling only. Restricted parts in imports remain readable."}
+def catalogue(search="", offset=0, limit=50, category=""):
+    """The installed part catalogue; see land.catalogue."""
+    from .land import catalogue as parts  # noqa: PLC0415
+    return parts(category, search, offset, limit)
+
+
+def spawner_fluid(settings):
+    """Fluid type a Fluid Spawner or premade tank holds: the game uses diesel (1) when unset."""
+    try:
+        return int(float(settings.get("fluid_type", SPAWNER_DEFAULT_FLUID)))
+    except (TypeError, ValueError):
+        return SPAWNER_DEFAULT_FLUID

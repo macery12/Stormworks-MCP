@@ -1,6 +1,6 @@
 # Diagnose, repair and verify a vehicle
 
-Start with a stored hull, land or single-body imported draft. Read installed node and face
+Start with a stored hull, part-by-part or imported draft. Read installed node and face
 indices using `query_connections`; exact edits and routes use integer blocks (0.25 m).
 New nested MCP schemas require operation-specific fields, reject unknown fields and expose
 coordinate shapes, port indices, colors, mirror masks, repeat counts and pipe style choices.
@@ -16,14 +16,15 @@ coordinate shapes, port indices, colors, mirror masks, repeat counts and pipe st
 3. Select **available** finding IDs and preview:
 
    ```json
-   {"design":"my vehicle", "revision":"<plan revision>", "plan_id":"<plan ID>",
+   {"design":"my vehicle", "plan_id":"<plan ID>",
     "finding_ids":["<available finding ID>"], "commit":false}
    ```
 
    Pass this object to `repair_vehicle`. It returns an image plus structured before/after
    preflight, resolved and remaining IDs, and revisions. Green lines show proposed wires;
    green markers show new pipes. The draft remains unchanged.
-4. Inspect the preview, then repeat with `commit:true` and the **original** plan/revision.
+4. Inspect the preview, then repeat with `commit:true` and the **original** plan ID (it is tied
+   to the draft revision the plan was made for).
    The combined batch must still resolve the selected findings without creating new ones.
    It commits once, with a fresh revision and one `undo_edits` step. Rerun preflight.
 
@@ -111,7 +112,7 @@ reverse, braking, at least five minutes of loaded cooling, and full-steer/compre
 clearance. Record game version, tester, observed evidence and numerical measurements:
 
 ```json
-{"run_id":"<run ID>", "export_sha256":"<manifest SHA-256>", "game_version":"<actual version>",
+{"run_id":"<run ID>", "game_version":"<actual version>",
  "tester":"<player>", "observations":[{"check":"starting", "result":"pass",
  "evidence":"<what you actually observed>", "measurements":{"idle_rps":7}}]}
 ```

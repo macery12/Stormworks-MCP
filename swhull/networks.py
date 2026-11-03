@@ -1,7 +1,7 @@
 """Typed wiring, physical subsystem preflight and lossless connection overlays."""
 import copy
 import re
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from itertools import combinations
 
 from . import definitions
@@ -89,6 +89,19 @@ def _source_links(record, parts):
     return result
 
 
+def _paste_links(record, parts):
+    """Wires that came with prefabs placed by paste operations."""
+    edits = record.get("edits") if record.get("kind") == "imported" else (record.get("spec") or {}).get("edits")
+    rows = []
+    for i, op in enumerate(edits or []):
+        if isinstance(op, dict) and op.get("op") == "paste" and isinstance(op.get("xml"), str):
+            from .editing import rotation, vector  # noqa: PLC0415
+            from .prefabs import moved_wires, resolve  # noqa: PLC0415
+            found = moved_wires(op["xml"], vector(op.get("position")), rotation(op.get("rotation")))
+            rows.extend(resolve(parts, found, f"paste:{i}"))
+    return rows
+
+
 def template_wires(record, parts):
     if record.get("kind") != "land" or record["spec"].get("preset") not in ("utility_4x4", "humvee_4x4"):
         return []
@@ -130,7 +143,7 @@ def template_wires(record, parts):
 def wires(record, parts):
     identify(parts)
     base = copy.deepcopy(record["base_connections"]) if "base_connections" in record else template_wires(record, parts)
-    result = [*_source_links(record, parts), *base]
+    result = [*_source_links(record, parts), *_paste_links(record, parts), *base]
     for i, op in enumerate(record.get("connection_edits", [])):
         if op.get("op") == "connect":
             if set(op) != {"op", "from", "to"}:
@@ -174,7 +187,7 @@ def edited(record, operations, parts):
 
 def write_xml(xml, record, parts):
     links = wires(record, parts)
-    if not record.get("connection_edits") and not any(r["link_id"].startswith("template:") for r in links):
+    if not record.get("connection_edits") and not any(r["link_id"].startswith(("template:", "paste:")) for r in links):
         return xml
     match = re.search(r"<logic_node_links\b[^>]*(?:/>|>.*?</logic_node_links>)", xml, re.S)
     if match is None:
@@ -241,6 +254,34 @@ def physical_graph(parts):
     return graph, faces
 
 
+# Parts that pass electric power between their two electric nodes: a breaker or relay either
+# way (when closed), a diode only from In to Out.
+ELECTRIC_THROUGH = {"electric_curcuit_breaker": ("Electric A", "Electric B", True),
+                    "electric_relay": ("Electric A", "Electric B", True),
+                    "electric_diode": ("Electric In", "Electric Out", False)}
+
+
+def powered_nodes(parts, links):
+    """Electric nodes (part_id, port) a battery reaches through wires and pass-through parts."""
+    electric = defaultdict(set)
+    for link in links:
+        if link.get("type") == 4 and "from" in link:
+            a, b = ((link[k]["part_id"], str(link[k]["port"])) for k in ("from", "to"))
+            electric[a].add(b)
+            electric[b].add(a)
+    for p in parts:
+        through = ELECTRIC_THROUGH.get(p.piece.d)
+        if through:
+            index = {n["label"]: (p.uid, str(n["index"])) for n in ports(p) if n["type"] == 4}
+            a, b = index.get(through[0]), index.get(through[1])
+            if a and b:
+                electric[a].add(b)
+                if through[2]:
+                    electric[b].add(a)
+    return _reachable(electric, [(p.uid, str(n["index"])) for p in parts if p.piece.d.startswith("battery")
+                                 for n in ports(p) if n["type"] == 4])
+
+
 def _reachable(graph, starts):
     visited, queue = set(starts), deque(starts)
     while queue:
@@ -304,13 +345,20 @@ def wheel_control_checks(parts, links):
     return rows
 
 
+def unchecked_parts(parts):
+    """Parts whose systems preflight does not model yet, grouped by definition."""
+    from .part_policy import unchecked  # noqa: PLC0415
+    counts = Counter(p.piece.d for p in parts if unchecked(p.piece.d))
+    return [{"definition": d, "count": n, "system": unchecked(d),
+             "note": "placed normally; preflight does not check this system yet"}
+            for d, n in sorted(counts.items())]
+
+
 def preflight(record, parts):
     identify(parts)
     links, issues, checks = wires(record, parts), [], []
     graph, faces = physical_graph(parts)
     by_id = {p.uid: p for p in parts}
-    if not any(p.piece.d in PREBUILT_ENGINES for p in parts):
-        issues.append({"issue": "no prebuilt diesel engine; powertrain completion is not assessed"})
     configuration = [engine_power(p) for p in parts if p.piece.d in PREBUILT_ENGINES]
     issues.extend({**row, "issue": "engine power is missing, zero or invalid"}
                   for row in configuration if row["status"] == "invalid")
@@ -333,27 +381,27 @@ def preflight(record, parts):
 
     wheeled = any(road_wheel(p.piece.d) and "spare" not in p.name.lower() for p in parts)
     # Driven wheels need a clutch and gearbox; propellers and carried spare wheels do not.
-    directed, electric = defaultdict(set), defaultdict(set)
+    directed = defaultdict(set)
     for link in links:
         if "from" not in link:
             issues.append({"link_id": link["link_id"], "issue": "unresolved original link"})
             continue
         a, b = ((link[k]["part_id"], str(link[k]["port"])) for k in ("from", "to"))
         directed[a].add(b)
-        if link["type"] == 4:
-            electric[a].add(b)
-            electric[b].add(a)
-    powered = _reachable(electric, [(p.uid, str(n["index"])) for p in parts if p.piece.d.startswith("battery")
-                                    for n in ports(p) if n["type"] == 4])
+    powered = powered_nodes(parts, links)
     targets = {b for values in directed.values() for b in values}
     for p in parts:
-        for n in ports(p):
+        nodes = ports(p)
+        # A gearbox with no Gear Switch wire is a fixed ratio (players tune generator speed this
+        # way); it needs no power. A switched one needs power to shift.
+        fixed_gearbox = p.piece.d in GEARBOXES and not any(
+            n["label"] == "Gear Switch" and (p.uid, str(n["index"])) in targets for n in nodes)
+        for n in nodes:
             key = (p.uid, str(n["index"]))
-            if n["type"] == 4 and not p.piece.d.startswith("battery"):
+            if n["type"] == 4 and not p.piece.d.startswith("battery") and not fixed_gearbox:
                 check(p, "electric", key in powered, n["label"])
             required = (p.piece.d in PREBUILT_ENGINES and n["label"] in ("Throttle", "Starter")
                         or p.piece.d == "torque_clutch" and n["label"] == "Clutch Pressure"
-                        or p.piece.d in GEARBOXES and n["label"] == "Gear Switch"
                         or road_wheel(p.piece.d) and "spare" not in p.name.lower() and (n["label"] == "Brake"
                             or "front" in p.name.lower() and n["label"] == "Steering")
                         or p.piece.d.startswith(("searchlight", "small_light")) and n["label"] in ("On/Off", "Light Switch")
@@ -402,17 +450,32 @@ def preflight(record, parts):
                     root = xml_root('<vehicle data_version="3"><bodies><body unique_id="1"><components>'
                                     + tank.raw_xml + '</components></body></bodies></vehicle>')
                     settings = root.find("bodies/body/components/c/o").attrib
-                diesel |= str(settings.get("fluid_type", "0")) == "1" and float(settings.get("fluid_fill", "1")) > 0
-            check(p, "diesel supply", diesel, "connected premade tank must select diesel and have nonzero fill")
+                diesel |= definitions.spawner_fluid(settings) == 1 and float(settings.get("fluid_fill", "1")) > 0
+            check(p, "diesel supply", diesel, "connected premade tank must hold diesel (the default) and have nonzero fill")
             inlet, outlet = circuits["In Coolant"], circuits["Out Coolant"]
             cooling = _reachable(graph, inlet)
             check(p, "cooling loop", bool(outlet & cooling), "engine return and supply must join through a radiator")
             radiators = {k for k in graph if by_id[k[0]].piece.d.startswith("fluid_radiator")}
             without = defaultdict(set, {k: neighbours - radiators for k, neighbours in graph.items() if k not in radiators})
             check(p, "cooling isolation", not bool(outlet & _reachable(without, inlet)), "no pipe bypass around the radiator")
+    from . import modular  # noqa: PLC0415
+    tank_cache = []
+
+    def tank_cells():
+        if not tank_cache:
+            from .physics import Model, grouped  # noqa: PLC0415
+            tank_cache.append({v: t for t in Model(grouped(parts)).tanks for v in t["cells"]})
+        return tank_cache[0]
+
+    holder = {"checks": checks}
+    fluid_graph = modular.through_valves(graph, parts, transmission_ports) if modular.engines(parts)[0] else graph
+    engines = modular.check(parts, holder, links, graph, by_id, ports, starts,
+                            lambda keys: _reachable(fluid_graph, keys), tank_cells)
     owner = {v: p for p in parts for v in p.voxels()}
     pairs, open_faces = adjacency(parts, "draft")
-    capped_unused, non_driven = [], []
+    # A pipe end butted against another part is usually decoration or a spare port; a needed
+    # line that is blocked already shows as a missing check, so these are notes, not faults.
+    capped_unused, non_driven, blocked = [], [], []
     for f in open_faces:
         v = add(f["position"], f["normal"])
         if v in owner:
@@ -424,7 +487,7 @@ def preflight(record, parts):
                 non_driven.append({**row, "role": "spare", "issue": "non-driven spare mounted against bodywork"})
                 continue
             destination = capped_unused if p.piece.d.startswith("fluid_tank_") and any(
-                graph[_key(port)] for port in transmission_ports(p) if _key(port) != _key(f)) else issues
+                graph[_key(port)] for port in transmission_ports(p) if _key(port) != _key(f)) else blocked
             destination.append(row)
     missing = sum(c["status"] == "missing" for c in checks)
     report = {"status": "incomplete" if missing or issues else "connected geometry", "missing_count": missing,
@@ -432,10 +495,13 @@ def preflight(record, parts):
             "physical_face_pairs": len(pairs), "open_transmission_faces": open_faces,
             "capped_unused_tank_faces": capped_unused,
             "non_driven_wheel_faces": non_driven,
+            "blocked_faces": blocked,
             "configuration_checks": configuration,
             "gearbox_configuration_checks": gearbox_checks,
             "wheel_direction_checks": wheel_checks,
-            "verification": "Topology, engine-power and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
+            "modular_engines": engines,
+            "unchecked": unchecked_parts(parts),
+            "verification": "Topology, engine-power, modular-engine coupling and saved gearbox-state checks only. Clutch state, overall drivetrain direction/ratio, fluid flow, starter timing, steering signs and engine operation require in-game checks."}
     from .repairs import findings  # noqa: PLC0415
     report["findings"] = findings(report, parts, links)
     return report

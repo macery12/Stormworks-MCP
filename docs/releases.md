@@ -1,8 +1,8 @@
 # Windows builds and releases
 
-The GitHub workflow builds the portable desktop EXE from a tag in this repository, using
-locked dependencies. It uploads that actual executable with checksums and signed build
-provenance. There is no installer or locally supplied binary input.
+The GitHub workflow builds the portable desktop EXE and its Inno Setup installer from a tag in
+this repository, using locked dependencies. It uploads both with checksums and signed build
+provenance. There is no locally supplied binary input.
 
 ## Publish a version
 
@@ -13,11 +13,11 @@ provenance. There is no installer or locally supplied binary input.
 3. Push that commit, then create and push its tag:
 
    ```powershell
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.3.0
+   git push origin v0.3.0
    ```
 
-   `v0.2` is also accepted for version `0.2.0`. A version mismatch fails packaging.
+   `v0.3` is also accepted for version `0.3.0`. A version mismatch fails packaging.
 4. Watch **Actions > Tagged release**. After successful checks, open the draft under
    **Releases**, paste the release description and publish it.
 
@@ -38,6 +38,8 @@ be replaced by this workflow; publish a new tag/version for a changed executable
 - The same protocol smoke against that frozen executable.
 - Real Tk menu/dialog construction and Start, Stop, restart and close-stop controls against
   a copy of the EXE in a path with spaces. Client settings are never changed by the smoke.
+- The installer: a silent per-user install into a path with spaces, the Start menu shortcut,
+  an upgrade over a running host and an orphaned `--connect` bridge, and uninstall.
 - Tag/version agreement, checksums and signed GitHub build attestations.
 
 Push/PR CI also builds the Windows EXE after tests. **Actions > CI > Run workflow** produces
@@ -48,28 +50,70 @@ vehicles, designs and caches in temporary folders.
 
 | Asset | Description |
 | --- | --- |
-| `stormworks-mcp-<version>-windows-x64.exe` | Double-click for the GUI; `--connect` is the quiet client connector |
+| `stormworks-mcp-<version>-windows-x64-setup.exe` | Installer: per-user by default, all users optional (admin); upgrades, repairs or uninstalls an existing install |
+| `stormworks-mcp-<version>-windows-x64.exe` | Portable: double-click for the GUI; `--connect` is the quiet client connector |
 | `build-info.json` | Version, source commit/tag, runtime, entry point and lockfile digest |
 | `SHA256SUMS.txt` | SHA256 digests of the executable and build metadata |
 | `provenance.sigstore.json` | GitHub's signed bundle tying the uploaded bytes to the workflow/tag |
 
-The single EXE is the user download; the other files provide source-build verification.
-It has no install/uninstall step or bundled game assets. Keep it in a permanent folder,
-use **MCP > Set up** for your client and press **Start server**. Closing the window stops
-the server. Moving the EXE requires updating its path in each client through the setup menu.
-Deleting the EXE preserves designs, vehicles and client settings; remove its client entry
-when you no longer use it.
+The installer and the portable EXE are the user downloads; the other files provide source-build
+verification. Neither bundles game assets.
+
+The installer puts the EXE in `%LOCALAPPDATA%\Programs\Stormworks MCP` (per user, no admin) or
+`Program Files\Stormworks MCP` (all users, admin), or a folder you choose, and adds a Start menu
+shortcut. Running a newer installer finds the earlier install and offers upgrade/repair (same
+folder, same client entries) or uninstall. It closes a running copy first, including `--connect`
+bridges left behind by clients. Uninstall (Settings > Apps) removes the program and shortcut and
+keeps designs, prefabs and client settings. Silent installs take Inno Setup's usual switches,
+for example `/VERYSILENT /CURRENTUSER` or `/ALLUSERS`.
+
+Keep the portable EXE in a permanent folder, use **MCP > Set up** for your client and press
+**Start server**. Closing the window stops the server. Moving the EXE requires updating its
+path in each client through the setup menu. Deleting the EXE preserves designs, vehicles and
+client settings; remove its client entry when you no longer use it.
 
 Attestations establish build origin. Windows Authenticode signing is not configured yet.
 Local rebuilds can differ byte-for-byte; the claim is a traceable source build rather than
 reproducible binary identity.
+
+## Client set-up from the installer
+
+When it finds Claude Desktop (`%APPDATA%\Claude`) or Codex (`CODEX_HOME` or `%USERPROFILE%\.codex`),
+the installer offers "Add to ..." tasks, ticked on a first install. Each runs
+`stormworks-mcp.exe --add-client claude|codex --replace` as the user who started setup, which
+replaces an existing `stormworks` entry and keeps a timestamped backup. Tell users upgrading from
+an older version to remove their old Stormworks MCP entry (and any `server.py` or extension
+setup) before adding the new one. Silent installs select tasks with `/TASKS=` or `/MERGETASKS=`.
+
+## Update check
+
+The app asks `api.github.com/repos/macery12/Stormworks-MCP/releases/latest` once at startup
+(no user data is sent) and shows a download link when that published release is newer. Drafts
+and pre-releases are never offered. **Help > Check for updates at startup** turns it off (stored
+in `%LOCALAPPDATA%\stormworks-hull-mcp\settings.json`); `SW_MCP_NO_UPDATE_CHECK=1` disables it.
+
+## winget
+
+CI writes winget manifests for the assembled installer (`tools/winget_manifest.py`, artifact
+`winget-manifests`): package `macery12.StormworksMCP`, per-user and all-users installers, and
+switches that skip client set-up (winget installs silently). After publishing a release,
+submit them to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs):
+
+```powershell
+winget validate --manifest .\0.3.0
+wingetcreate submit --token <personal access token> .\0.3.0
+```
+
+The first submission is reviewed by the winget maintainers; later versions update the same
+package. The manifests point at the release asset URL, so generate them from the exact
+installer the release uploads.
 
 ## Verify a download
 
 From the folder containing the downloaded executable:
 
 ```powershell
-Get-FileHash .\stormworks-mcp-0.2.0-windows-x64.exe -Algorithm SHA256
+Get-FileHash .\stormworks-mcp-0.3.0-windows-x64.exe -Algorithm SHA256
 gh attestation verify .\stormworks-mcp-0.1.0-windows-x64.exe --repo macery12/Stormworks-MCP
 ```
 
@@ -85,7 +129,9 @@ uv sync --locked --group build
 uv run --group build python tools/build_windows.py
 uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
-uv run python tools/release_assets.py --tag v0.2.0 --commit local
+uv run python tools/build_installer.py      # Inno Setup 6: winget install JRSoftware.InnoSetup
+uv run python tools/installer_test.py       # refuses to run over a real install
+uv run python tools/release_assets.py --tag v0.3.0 --commit local
 ```
 
 Python packages are resolved by `uv.lock`. GitHub actions are pinned to commits and maintained

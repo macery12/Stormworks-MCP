@@ -8,7 +8,8 @@ from .land_build import _part, _position
 from .orientation import solve
 from .pieces import BLOCK, BY_NAME, Placed, WEDGE, find_rotation, wedge_rotation
 
-PRESETS = {"utility_buggy": "Open utility buggy: suspension wheels, saddle, diesel engine, premade tanks, battery, radiator and lights.",
+PRESETS = {"empty": "Blank draft: one block at the origin to build any vehicle from.",
+           "utility_buggy": "Open utility buggy: suspension wheels, saddle, diesel engine, premade tanks, battery, radiator and lights.",
            "humvee_4x4": "Connected Humvee example: open custom-door bays, small windshields, sloped hood and enclosed chassis pipework.",
            "utility_4x4": "Connected utility 4x4: prebuilt diesel, radiator, premade tank, four seats, full side doors, larger suspension tyres and lights.",
            "chassis": "Bare configurable chassis for custom layouts; no finished body or power system."}
@@ -132,6 +133,15 @@ def build_land(spec=None):
     if not isinstance(spec, dict):
         raise ValueError("land vehicle spec must be an object")
     name = spec.get("preset", "utility_buggy")
+    if name == "empty":
+        if set(spec) - {"preset", "color", "bench", "edits"}:
+            raise ValueError("an empty draft takes only color and bench; add parts with edit_parts")
+        from .benches import parse_bench  # noqa: PLC0415
+        parse_bench(spec.get("bench"))
+        parts = [Placed(BLOCK, (0, 0, 0), color=color(spec.get("color", "C2C3C7")), name="start block")]
+        # The part-by-part placement rules, without the land presets' wheel and body layout.
+        return apply_edits(parts, spec.get("edits", []), prefix="land-edit",
+                           placement_context={"vehicle_kind": "land"})
     if name == "chassis":
         return build_chassis({k: v for k, v in spec.items() if k != "preset"})
     if name == "utility_buggy":

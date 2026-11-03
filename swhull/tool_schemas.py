@@ -2,7 +2,7 @@
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 Block = Annotated[int, Field(strict=True)]
 Vector = tuple[Block, Block, Block]
@@ -21,6 +21,7 @@ class Selection(Request):
     name: str | None = None
     definition: str | None = None
     bounds: Bounds | None = None
+    body: str | None = None
 
 
 class Part(Request):
@@ -31,6 +32,7 @@ class Part(Request):
     color: Hex = "C2C3C7"
     name: str = ""
     settings: dict[str, Scalar] = Field(default_factory=dict)
+    body: str | None = None
 
 
 class Add(Request):
@@ -51,6 +53,7 @@ class Fill(Request):
     op: Literal["fill"]
     bounds: Bounds
     color: Hex = "C2C3C7"
+    body: str | None = None
 
 
 class Selected(Request):
@@ -99,7 +102,23 @@ class Configure(Selected):
     settings: dict[str, Scalar]
 
 
-EditOperation = Annotated[Add | Fill | Remove | Replace | Translate | Repeat | Rotate | Paint | Mirror | Configure,
+class Tank(Request):
+    op: Literal["tank"]
+    seed: Vector | None = None
+    bounds: Bounds | None = None
+    fluid: Literal["water", "diesel", "jet_fuel"] = "diesel"
+    fill: Annotated[float, Field(ge=0, le=1)] = 1
+    name: Annotated[str, Field(min_length=1, max_length=64)] = "tank"
+    color: Hex = "7A5C2E"
+
+    @model_validator(mode="after")
+    def seed_or_bounds(self):
+        if (self.seed is None) == (self.bounds is None):
+            raise ValueError("tank needs exactly one of seed or bounds")
+        return self
+
+
+EditOperation = Annotated[Add | Fill | Remove | Replace | Translate | Repeat | Rotate | Paint | Mirror | Configure | Tank,
                           Field(discriminator="op")]
 EditBatch = Annotated[list[EditOperation], Field(min_length=1, max_length=100)]
 
@@ -178,9 +197,13 @@ class PreflightReport(TypedDict):
     open_transmission_faces: list[dict[str, Any]]
     capped_unused_tank_faces: list[dict[str, Any]]
     non_driven_wheel_faces: list[dict[str, Any]]
+    blocked_faces: NotRequired[list[dict[str, Any]]]
     configuration_checks: list[dict[str, Any]]
     gearbox_configuration_checks: list[dict[str, Any]]
     wheel_direction_checks: list[dict[str, Any]]
+    modular_engines: NotRequired[list[dict[str, Any]]]
+    unchecked: list[dict[str, Any]]
+    style_checks: NotRequired[list[dict[str, Any]]]
     verification: str
 
 
@@ -215,7 +238,7 @@ class AssemblyReport(TypedDict):
     verification: str
     committed: bool
     revision: str
-    base_revision: str
+    base_revision: str | None
 
 
 class AssemblyBindings(Request):
@@ -238,8 +261,122 @@ class AssemblyOptions(Request):
     reverse_hotkey: Annotated[int, Field(strict=True, ge=1, le=6)] = 3
 
 
-class ReferenceVehicle(Request):
+class PreviewResult(TypedDict):
+    """Returned beside the image by every render tool."""
+    title: str
+    notes: str
+
+
+class EditResult(TypedDict):
+    """Returned by the edit tools; the image comes too when preview=true."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    notes: str
+    operations: NotRequired[int]
+
+
+class DraftCreated(TypedDict):
+    design: str
+    kind: str
+    revision: str
+    notes: str
+
+
+class SealReport(TypedDict):
+    status: str
+    compartments: list[dict[str, Any]]
+    door_state: NotRequired[str]
+    tanks: NotRequired[list[dict[str, Any]]]
+    reason: NotRequired[str]
+    method: NotRequired[str]
+    verification: NotRequired[str]
+
+
+class VehicleList(TypedDict):
+    vehicles: list[dict[str, Any]]
+    total: int
+    next_offset: int | None
+    source: str
+    filter: str
+    files_considered: NotRequired[int]
+    skipped_count: NotRequired[int]
+    skipped_samples: NotRequired[list[dict[str, Any]]]
+    evidence_level: NotRequired[str]
+    limitations: NotRequired[list[str]]
+
+
+class PhysicsReport(TypedDict):
+    """analyze_physics: masses, volumes, tanks, flotation per loading, lift and thrust."""
+    frame: str
+    mass: dict[str, Any]
+    volume: dict[str, Any]
+    tanks: list[dict[str, Any]]
+    flotation: dict[str, dict[str, Any]]
+    lift: dict[str, Any] | None
+    thrust: dict[str, Any] | None
+    constants: dict[str, float]
+    provisional: dict[str, str]
+    verification: str
+    notes: str
+
+
+# Batches reach the tools as plain JSON objects so their input schemas stay shallow (the
+# operation fields are documented in the tool descriptions); plain() validates each batch
+# against these models before anything runs.
+Operations = Annotated[list[dict[str, Any]], Field(min_length=1, max_length=100)]
+
+
+class PrefabList(TypedDict):
+    """list_prefabs: registered prefabs; with a name, that prefab's connection points."""
+    prefabs: list[dict[str, Any]]
+    folder: str
+
+
+class PrefabInfo(TypedDict):
+    """create_prefab: the prefab as list_prefabs shows it, and what a cut kept."""
     name: str
-    source: Literal["vehicles", "workshop"] = "vehicles"
-    kind: Literal["boat", "land", "other"] | None = None
-    label: Annotated[str, Field(max_length=64)] | None = None
+    file: str
+    status: str
+    parts: int
+    bodies: int
+    size_blocks: list[int]
+    connection_points: int
+    points: list[dict[str, Any]]
+    notes: str
+    cut: NotRequired[dict[str, Any]]
+
+
+class EngineResult(TypedDict):
+    """place_modular_engine: the engine placed, whether it touches the vehicle, and its
+    connection points as draft part IDs (for route_connections and edit_connections)."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    parts: int
+    bounds: list[list[int]]
+    size_blocks: list[int]
+    cylinders: int
+    starters: int
+    alternators: int
+    bridge_manifolds: int
+    attached: bool
+    loose_groups: list[dict[str, Any]]
+    points: list[dict[str, Any]]
+    notes: str
+
+
+class PasteResult(TypedDict):
+    """paste_prefab: what was placed, whether it attaches, and its connection points as part IDs
+    in the draft (for edit_connections and route_connections)."""
+    committed: bool
+    revision: str
+    base_revision: str | None
+    prefab: str
+    parts: int
+    replaced: int
+    bodies: dict[str, str]
+    attached: bool
+    loose_groups: list[dict[str, Any]]
+    points: list[dict[str, Any]]
+    notes: str

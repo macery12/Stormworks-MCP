@@ -142,6 +142,11 @@ def summary(spec, parts):
     bench = fit_lines(spec.get("bench"), [lo[i] - centre[i] for i in range(3)],
                       [hi[i] - centre[i] for i in range(3)])
     preset = spec.get("preset", "chassis")
+    if preset == "empty":
+        return "\n".join(["Empty draft: one start block at (0, 0, 0).",
+                          "Build frame: x across, +y up, +z forward. Edits use 0.25 m blocks.", *bench,
+                          "Add parts with edit_parts (search_parts finds definitions), remove the start block "
+                          "once something else holds the vehicle together, and check with preflight_vehicle."])
     label = "Land chassis draft" if preset == "chassis" else f"Land vehicle draft ({preset})"
     inventory = [f"{p.name}: {definitions.display_name(p.piece.d)} ({p.piece.d})"
                  for p in parts if p.piece.d not in BY_NAME]

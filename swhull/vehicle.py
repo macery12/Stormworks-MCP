@@ -87,8 +87,14 @@ def hex6(value):
     return value.zfill(6).upper() if re.fullmatch(r"[0-9A-Fa-f]{1,6}", value or "") else None
 
 
+_MC_DEFINITION = re.compile(r"<microprocessor_definition\b.*?</microprocessor_definition>", re.S)
+
+
 def components_from_text(text):
     """Geometry view only; use editing.VehicleDocument for lossless rewriting."""
+    # A microcontroller saves its logic before its position: skip the logic so its `vp` is read.
+    if "<microprocessor_definition" in text:
+        text = _MC_DEFINITION.sub("", text)
     for m in _COMP.finditer(text):
         dm = re.search(r'\bd="([^"]*)"', m.group(1))
         d = dm.group(1) if dm else "01_block"
@@ -132,32 +138,85 @@ def component_xml(p):
 
 
 def to_xml(placed):
-    return _simple_xml([]).replace("<components></components>",
-                                  "<components>" + "".join(component_xml(p) for p in placed)
-                                  + "</components>")
+    """A new vehicle file; parts with a `body` go into that body (the first part's body is main)."""
+    main = (placed[0].body if placed else "") or "1"
+    groups = {}
+    for p in placed:
+        groups.setdefault(p.body or main, []).append(p)
+    if list(groups) in ([], ["1"]):
+        return _simple_xml([]).replace("<components></components>",
+                                      "<components>" + "".join(component_xml(p) for p in placed)
+                                      + "</components>")
+    ids = [int(b) for b in groups if b.isdigit()]
+    bodies = "".join(f'<body unique_id="{b}"><components>' + "".join(component_xml(p) for p in parts)
+                     + "</components></body>" for b, parts in groups.items())
+    return (_simple_xml([]).replace('bodies_id="1"', f'bodies_id="{max(ids or [1])}"')
+            .replace('<body unique_id="1"><components></components></body>', bodies))
 
 
 def load_placed(path, body_id=None):
-    """Read one selected body (largest by default), with settings for native previews.
+    """Read every body at its rest pose (or one with body_id), with settings for native previews.
     Placement footprints remain definition cubes; missing definitions are counted in `other`.
     This display reader accepts finite scaled transforms, unlike the editing parser."""
     with open(path, encoding="utf-8-sig") as f:
         return placed_from_text(f.read(), body_id)
 
 
+def bodies_from_text(text):
+    """Every body's read-only display parts, as (body_id, parts). Bodies share one build grid,
+    so together they show the vehicle at its editor rest pose."""
+    from .reference import xml_root  # noqa: PLC0415
+    out = []
+    from .pieces import _det  # noqa: PLC0415
+    for body, bid in _body_ids(xml_root(text).findall("bodies/body")):
+        parts, _ = _body_parts(body, bid, _det)
+        for n, p in enumerate(parts):
+            p.uid = f"{bid}:{n}"
+            q = tuple(tuple(int(round(c)) for c in row) for row in p.Q)
+            if any(abs(c - r) > 1e-6 for row, qrow in zip(p.Q, q) for c, r in zip(row, qrow)):
+                raise ValueError(f"part {p.piece.d} in body {bid} has a scaled or skewed transform; "
+                                 "only grid rotations are supported")
+            p.Q = q
+        if parts:
+            out.append((bid, parts))
+    if not out:
+        raise ValueError("vehicle has no parts")
+    return out
+
+
 def placed_from_text(text, body_id=None):
-    """One body's read-only display geometry; controller internals are never vehicle parts."""
+    """Read-only display geometry of every body at its editor rest pose (bodies share one
+    grid), or of one body with body_id. Controller internals are never vehicle parts."""
     from .reference import xml_root  # noqa: PLC0415
     from .pieces import _det  # noqa: PLC0415
     bodies = xml_root(text).findall("bodies/body")
     if not bodies:
         raise ValueError("vehicle has no bodies")
-    selected = ([b for b in bodies if b.get("unique_id") == body_id] if body_id is not None else
-                [max(bodies, key=lambda b: len(b.findall("components/c")))])
+    selected = [b for b in bodies if b.get("unique_id") == body_id] if body_id is not None else bodies
     if not selected:
-        raise ValueError(f"no body {body_id!r} in vehicle")
+        raise ValueError(f"no body {body_id!r} in vehicle; bodies are "
+                         + ", ".join(b.get("unique_id", "?") for b in bodies))
     out, other = [], {}
-    for component in selected[0].findall("components/c"):
+    for body, bid in _body_ids(selected):
+        out_body, other_body = _body_parts(body, bid, _det)
+        out.extend(out_body)
+        for d, n in other_body.items():
+            other[d] = other.get(d, 0) + n
+    return out, other
+
+
+def _body_ids(bodies):
+    """(body, id) pairs; a repeated unique_id gets an alias such as "1#2", as editing does."""
+    seen = {}
+    for i, body in enumerate(bodies):
+        bid = body.get("unique_id") or str(i + 1)
+        seen[bid] = seen.get(bid, 0) + 1
+        yield body, bid if seen[bid] == 1 else f"{bid}#{seen[bid]}"
+
+
+def _body_parts(body, bid, _det):
+    out, other = [], {}
+    for component in body.findall("components/c"):
         o = component.find("o")
         if o is None:
             continue
@@ -190,5 +249,6 @@ def placed_from_text(text, body_id=None):
         faces = tuple(hex6(c) or colour for c in colours)
         out.append(Placed(piece, origin, Q, colour, name=o.get("custom_name", ""),
                           settings={k: v for k, v in o.attrib.items() if k not in ("r", "sc")},
-                          faces=faces if len(faces) == piece.surfaces and len(set(faces)) > 1 else ()))
+                          faces=faces if len(faces) == piece.surfaces and len(set(faces)) > 1 else (),
+                          body=bid))
     return out, other

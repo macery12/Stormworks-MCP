@@ -9,7 +9,7 @@ from swhull.connections import transmission_ports
 from swhull.editing import VehicleDocument, part
 from swhull.land import catalogue
 from swhull.networks import physical_graph, preflight
-from swhull.part_policy import CURRENT_GEARBOXES, GEARBOXES, LEGACY_GEARBOXES, allowed
+from swhull.part_policy import CURRENT_GEARBOXES, GEARBOXES, LEGACY_GEARBOXES, allowed, unchecked
 from swhull.pieces import ROTATIONS, Placed, add, apply, r_attr
 from swhull.vehicle import to_xml
 from swhull.reference import xml_root
@@ -54,15 +54,18 @@ def test_new_current_gearboxes_export_forward_off_reverse_on_in_every_rotation(g
     assert "max_force_scale" not in schema
 
 
-def test_cube_gearboxes_are_offered_without_enabling_modular_engines_or_legacy_gearboxes(gearboxes):
+def test_cube_gearboxes_are_offered_and_only_the_deprecated_gearboxes_are_refused(gearboxes):
     expected = CURRENT_GEARBOXES
     assert {r["definition"] for r in catalogue("transmission", "gearbox")["parts"]} == expected
     assert {r["definition"] for r in definitions.catalogue("gearbox")["parts"]} == expected
-    for d in LEGACY_GEARBOXES | {"modular_engine_cylinder"}:
+    for d in LEGACY_GEARBOXES:
         assert not allowed(d)
-        with pytest.raises(ValueError, match="disabled"):
+        with pytest.raises(ValueError, match="deprecated"):
             part({"definition": d, "position": [0, 0, 0]})
-    assert allowed("engine")
+    assert allowed("engine") and allowed("modular_engine_cylinder") and allowed("jet_engine_compressor")
+    assert unchecked("jet_engine_compressor") == "jet engine" and unchecked("modular_engine_cylinder") is None
+    assert unchecked("engine") is None
+    assert all(unchecked(d) is None for d in CURRENT_GEARBOXES)
 
 
 def test_explicit_editor_ratio_choices_are_preserved(gearboxes):
@@ -71,8 +74,8 @@ def test_explicit_editor_ratio_choices_are_preserved(gearboxes):
     p = part({"definition": "modular_engine_gearbox_1x1", "position": [0, 0, 0], "settings": settings})
     assert p.settings == original and settings == original
     row = gearbox_ratios(p)
-    assert row["status"] == "configured" and row["off"]["direction"] == "unverified"
-    assert row["off"]["ratio"] is None and row["on"]["ratio"] == "1:1"
+    assert row["status"] == "configured" and row["off"]["direction"] == "forward"
+    assert row["off"]["ratio"] == "5:2" and row["on"]["ratio"] == "1:1"
 
 
 @pytest.mark.parametrize("value", [-1, True, 1.5, "1", None])
@@ -82,17 +85,20 @@ def test_new_ratio_indices_require_nonnegative_integers(gearboxes, key, value):
         part({"definition": "modular_engine_gearbox_1x1", "position": [0, 0, 0], "settings": {key: value}})
 
 
+# Modular gearboxes: the game omits default settings (off 1 = 1:1, on 5 = 2:1) and every
+# index 0-7 has a known ratio. Deprecated torque gearboxes keep strict, unguessed readings.
 @pytest.mark.parametrize("d", sorted(GEARBOXES))
-@pytest.mark.parametrize("attributes, direction, invalid", [
-    (' gear_ratio_1="0" gear_ratio_2="1"', "reverse", False),
-    (' gear_ratio_1="1" gear_ratio_2="0"', "forward", False),
-    (' gear_ratio_1="6" gear_ratio_2="0"', "unverified", False),
-    (' gear_ratio_1="garbage" gear_ratio_2="0"', "invalid", True),
-    (' gear_ratio_1="-1" gear_ratio_2="0"', "invalid", True),
-    (' gear_ratio_1="1"', "forward", True),
-    ('', "invalid", True),
+@pytest.mark.parametrize("attributes, modular, legacy", [
+    (' gear_ratio_1="0" gear_ratio_2="1"', ("reverse", False), ("reverse", False)),
+    (' gear_ratio_1="1" gear_ratio_2="0"', ("forward", False), ("forward", False)),
+    (' gear_ratio_1="6" gear_ratio_2="0"', ("forward", False), ("unverified", False)),
+    (' gear_ratio_1="garbage" gear_ratio_2="0"', ("invalid", True), ("invalid", True)),
+    (' gear_ratio_1="-1" gear_ratio_2="0"', ("invalid", True), ("invalid", True)),
+    (' gear_ratio_1="1"', ("forward", False), ("forward", True)),
+    ('', ("forward", False), ("invalid", True)),
 ])
-def test_imported_ratio_diagnostics_are_read_only_even_for_deprecated_parts(gearboxes, d, attributes, direction, invalid):
+def test_imported_ratio_diagnostics_are_read_only_even_for_deprecated_parts(gearboxes, d, attributes, modular, legacy):
+    direction, invalid = modular if d in CURRENT_GEARBOXES else legacy
     xml = to_xml([]).replace('<components></components>',
                             f'<components><c d="{d}"><o r="1,0,0,0,1,0,0,0,1"{attributes}>'
                             '<vp/></o></c></components>')
@@ -107,6 +113,27 @@ def test_imported_ratio_diagnostics_are_read_only_even_for_deprecated_parts(gear
     graph, _ = physical_graph(doc.parts)
     assert len(faces) == 2 and (doc.parts[0].uid, 1) in graph[(doc.parts[0].uid, 0)]
     assert doc.to_xml(doc.parts) == xml
+
+
+def test_modular_ratio_table_and_saved_defaults(gearboxes):
+    xml = to_xml([]).replace('<components></components>',
+                            '<components><c d="modular_engine_gearbox_1x1"><o r="1,0,0,0,1,0,0,0,1" gear_ratio_2="7">'
+                            '<vp/></o></c></components>')
+    doc = VehicleDocument.parse(xml)
+    row = gearbox_ratios(doc.parts[0])
+    assert row["off"]["ratio"] == "1:1" and row["off"]["saved_default"]
+    assert row["on"]["ratio"] == "3:1" and not row["on"]["saved_default"]
+    for index, ratio in {2: "6:5", 3: "3:2", 4: "9:5", 5: "2:1", 6: "5:2", 7: "3:1"}.items():
+        p = part({"definition": "modular_engine_gearbox_1x1", "position": [0, 0, 0],
+                  "settings": {"gear_ratio_1": index, "gear_ratio_2": 0}})
+        assert gearbox_ratios(p)["off"]["ratio"] == ratio
+
+
+def test_unwired_gearbox_is_a_fixed_ratio_without_power(gearboxes):
+    p = part({"definition": "modular_engine_gearbox_1x1", "position": [0, 0, 0]})
+    p.uid = "g"
+    report = preflight({"kind": "imported", "source_xml": to_xml([p])}, [p])
+    assert not [c for c in report["checks"] if c["part_id"] == "g" and c["status"] == "missing"]
 
 
 @pytest.mark.installed

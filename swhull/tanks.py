@@ -77,10 +77,8 @@ def place(parts, info, spec):
         outlet_pipe_q = find_rotation([((1, 0, 0), (0, 0, 1)), ((0, 1, 0), (0, 1, 0))])
         vent_q = ((1, 0, 0), (0, -1, 0), (0, 0, -1))
         kits = [
-            Placed(_load("water_spawner"), (lo[0] + 1, lo[1] + 1, lo[2] + 1), IDENTITY,
-                   "7A5C2E", f"tank:{name}:marker", f"{name} fluid marker",
-                   {"fluid_type": FLUIDS[cfg.get("fluid", "diesel")], "fluid_fill": cfg.get("fill", 1),
-                    "fluid_filter": 4294967295}),
+            spawner((lo[0] + 1, lo[1] + 1, lo[2] + 1), cfg.get("fluid", "diesel"), cfg.get("fill", 1),
+                    f"{name} fluid marker", f"tank:{name}:marker"),
             Placed(_load("fluid_intake"), (centre_x, lo[1] + 2, lo[2] + 1), outlet_q,
                    "7A5C2E", f"tank:{name}:outlet", f"{name} outlet"),
             Placed(_load("trans_block_straight"), (centre_x, lo[1] + 2, lo[2]), outlet_pipe_q,
@@ -177,3 +175,98 @@ def ensure_valid(info):
             paths = [r["escape_path"] for r in result.get("compartments", []) if r["escape_path"]]
             detail = f"; escape path in build blocks: {paths[0][:12]}" if paths else f"; {result.get('reason', 'unknown sealing geometry')}"
             raise ValueError(f"tank '{result['name']}' is {result['status']}; cannot export an invalid enclosure{detail}")
+
+
+def spawner(cell, fluid, fill, name, uid, colour="7A5C2E"):
+    """The Fluid Spawner that fills a block-built tank when the vehicle spawns; its base sits on
+    the tank floor at `cell`. Hull tanks and the edit_parts tank operation both use it."""
+    return Placed(_load("water_spawner"), cell, IDENTITY, colour, uid, name,
+                  {"fluid_type": FLUIDS[fluid], "fluid_fill": fill, "fluid_filter": 4294967295})
+
+
+MAX_POCKET = 200000
+TANK_FIELDS = frozenset(("op", "seed", "bounds", "fluid", "fill", "name", "color"))
+
+
+def _pocket(parts, seed):
+    """The empty cells reachable from seed without passing a sealing face. Raises when the air
+    reaches the outside of the vehicle."""
+    from collections import deque  # noqa: PLC0415
+    from .seal import Geometry  # noqa: PLC0415
+    geometry = Geometry(parts, "closed")
+    occupied = {v for p in parts for v in p.voxels()}
+    if seed in occupied:
+        raise ValueError(f"seed {list(seed)} is inside a part; choose an empty cell inside the closed space")
+    lo = tuple(min(v[i] for v in occupied) for i in range(3))
+    hi = tuple(max(v[i] for v in occupied) for i in range(3))
+    seen, queue = {seed}, deque([seed])
+    while queue:
+        cell = queue.popleft()
+        if any(not lo[i] < cell[i] < hi[i] for i in range(3)):
+            raise ValueError(f"the space at {list(seed)} is open to the outside (reached {list(cell)}); "
+                             "close it, or give bounds to build a box tank")
+        for d in DIRS:
+            n = add(cell, d)
+            if n not in seen and geometry.passable(cell, d):
+                seen.add(n)
+                queue.append(n)
+                if len(seen) > MAX_POCKET:
+                    raise ValueError(f"the space at {list(seed)} is over {MAX_POCKET} cells; is it closed?")
+    return seen - occupied
+
+
+def custom(parts, op, key):
+    """New parts for edit_parts {op:"tank"}: a Fluid Spawner set to the fluid and fill, in the
+    closed space around `seed`, or in a new box of blocks with outer `bounds`. Refused unless
+    the tank is sealed."""
+    if set(op) - TANK_FIELDS:
+        raise ValueError(f"tank takes {', '.join(sorted(TANK_FIELDS - {'op'}))}")
+    if ("seed" in op) == ("bounds" in op):
+        raise ValueError("tank needs seed (an empty cell inside a closed space) or bounds (outer corners of a new box)")
+    fluid, fill = op.get("fluid", "diesel"), op.get("fill", 1)
+    if fluid not in FLUIDS:
+        raise ValueError("tank fluid must be water, diesel or jet_fuel")
+    if isinstance(fill, bool) or not isinstance(fill, (int, float)) or not math.isfinite(fill) or not 0 <= fill <= 1:
+        raise ValueError("tank fill must be a fraction from 0 to 1")
+    name = op.get("name", "tank")
+    if not isinstance(name, str) or not name:
+        raise ValueError("tank name must be nonempty text")
+    colour = color(op.get("color", "7A5C2E"))
+    owner = owners(parts)
+    created, containment = [], None
+    if "bounds" in op:
+        from .editing import bounds as read_bounds  # noqa: PLC0415
+        lo, hi = read_bounds(op["bounds"])
+        if any(hi[i] - lo[i] < 2 for i in range(3)):
+            raise ValueError("a box tank is at least 3 blocks along each axis (walls plus one empty block)")
+        air = set(product(*(range(lo[i] + 1, hi[i]) for i in range(3))))
+        if any(v in owner for v in air):
+            raise ValueError("the inside of the tank box is not empty")
+        shell = set(product(*(range(lo[i], hi[i] + 1) for i in range(3)))) - air
+        created = [Placed(BLOCK, v, color=colour, uid=f"{key}:wall:{n}", name=f"{name} wall")
+                   for n, v in enumerate(sorted(v for v in shell if v not in owner))]
+        pocket = air
+        containment = [list(add(lo, (1, 1, 1))), list(sub(hi, (1, 1, 1)))]
+    else:
+        pocket = _pocket(parts, vector(op["seed"], "seed"))
+    trial = owners([*parts, *created])
+    for cell in sorted(pocket, key=lambda v: (v[1], v[0], v[2])):
+        if add(cell, (0, 1, 0)) not in pocket or add(cell, (0, -1, 0)) not in trial:
+            continue
+        unit = spawner(cell, fluid, fill, name, f"{key}:spawner", colour)
+        if mounted(unit, trial):
+            break
+    else:
+        raise ValueError(f"tank '{name}' has no floor cell for the Fluid Spawner (it needs a solid block "
+                         "below and one empty block above)")
+    created.append(unit)
+    rest = sorted(pocket - set(unit.voxels()))
+    if not rest:
+        raise ValueError(f"tank '{name}' has no room for fluid beside the spawner")
+    report = check([*parts, *created], [{"name": name, "position": rest[0]}], containment=containment)
+    if report["status"] != "sealed":
+        path = next((r["escape_path"] for r in report["compartments"] if r["escape_path"]), [])
+        raise ValueError(f"tank '{name}' is {report['status']}"
+                         + (f"; fluid escapes through {path[-1]}" if path else
+                            f"; {report.get('reason') or 'unknown sealing geometry'}"))
+    return created
