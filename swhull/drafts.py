@@ -11,7 +11,8 @@ def materialize(record, centred=False):
     from .routing import apply_routes  # noqa: PLC0415
     if record.get("kind") == "imported":
         document = VehicleDocument.parse(record["source_xml"])
-        return apply_routes(record, apply_edits(document.parts, record.get("edits", []))), None
+        return apply_routes(record, apply_edits(document.parts, record.get("edits", []),
+                                                body_floor=document.floor)), None
     if record.get("kind") == "land":
         from .land_presets import build_land  # noqa: PLC0415
         from .vehicle import centre  # noqa: PLC0415

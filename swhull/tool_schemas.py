@@ -21,6 +21,7 @@ class Selection(Request):
     name: str | None = None
     definition: str | None = None
     bounds: Bounds | None = None
+    body: str | None = None
 
 
 class Part(Request):
@@ -31,6 +32,7 @@ class Part(Request):
     color: Hex = "C2C3C7"
     name: str = ""
     settings: dict[str, Scalar] = Field(default_factory=dict)
+    body: str | None = None
 
 
 class Add(Request):
@@ -51,6 +53,7 @@ class Fill(Request):
     op: Literal["fill"]
     bounds: Bounds
     color: Hex = "C2C3C7"
+    body: str | None = None
 
 
 class Selected(Request):

@@ -113,7 +113,7 @@ To generate the original full sweeps again:
 | Symmetric skins and the three-wide stem nose | From the player's hand fix of "Slim Speedboat" (2026-10-21); rendered and tested, not yet loaded in game. Save the Slim Speedboat design again and check the nose from below and both sides: no holes, no one-wide stub, port and starboard alike |
 | Flat planing pad (`stern.flat_bottom`) | Rendered and tested; not yet run in game. Save a `runabout` and check it planes level at speed without the bow digging in, against the same hull with `flat_bottom: 0` |
 | Load-menu thumbnails | Drawn in the game's own layout (512 x 512, chevron backdrop); not yet seen in the Load menu |
-| `analyze_physics` flotation | Not yet checked. Spawn "costal patrol v17 v2" with its custom tank empty and full and note where the water meets the hull at bow and stern. The calculator predicts a 2.99 m draft empty and 3.01 m full (the hull is 4.5 m tall), trimmed 0.4 / 0.9 deg bow (+z) down. The buoyancy multiplier (10) and fluid mass (0.1 per litre) stay provisional until this matches |
+| `analyze_physics` flotation | Not yet checked. Spawn "costal patrol v17 v2" with its custom tank empty and full and note where the water meets the hull at bow and stern. The calculator predicts a 2.99 m draft empty and 3.01 m full (the hull is 4.5 m tall), trimmed 0.4 / 0.9 deg bow (+z) down. The buoyancy multiplier stays 10 (the player's choice); fluid mass (0.1 per litre) stays provisional until this matches |
 | Ballast (`ballast: "auto"`) and the flotation estimate | Not yet checked: save `patrol_boat` with wedge smoothing, compare where the water meets the hull with the estimated 1.4 m draft (paint ends at 1.0 m), and check it floats level |
 | Railings (`railings: "auto"`) | Written in the format the reference ships save (`bc`/`ac` paint, mirrored diagonal corners as `t`); not yet loaded in game. Check they attach, the transom diagonal corners meet, and the trawler's sheer-step incline lines up |
 | Mooring anchors (`mooring: "auto"`) | Not yet loaded in game. Check each Rope Anchor's plate sits flush in the deck with no hole or leak, and that a rope can be tied between two of them |
@@ -239,7 +239,7 @@ The calibration previews show runtime editor footprints rather than the game's a
   external pipe/pump to the aft enclosed outlet and check extraction. Connect/check the
   upper gas relief path for venting. Confirm that walls/roof and both penetrations keep the
   fluid separate from the neighbouring hull space.
-- **Imported copy**: choose a wired single-body v3 vehicle, import a draft, repaint a few
+- **Imported copy**: choose a wired v3 vehicle, import a draft, repaint a few
   structural blocks, add a small mounted part and save a different name. Load both versions
   and confirm the original is unchanged, and the copy retains switches, settings and wiring.
 

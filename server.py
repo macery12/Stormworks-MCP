@@ -42,7 +42,7 @@ from swhull.tool_params import (CREATE, EDIT, READ, REPLACE, VIEWER, BodyId, Com
                                 Draft, EditRevision, Focus, Layer, Limit, NewVehicleName, Offset, OptionalVehicleName,
                                 Overwrite,
                                 Patch, Pitch, Preset, Preview, RendererChoice, Revision, Source, Spec, SpecPath,
-                                VehicleName, Yaw, Zoom)
+                                VehicleName, View, Yaw, Zoom, Bodies)
 from swhull.validation import Observation, ValidationRun
 
 HERE = Path(__file__).resolve().parent
@@ -747,21 +747,23 @@ async def import_vehicle(name: VehicleName,
                          design: Annotated[str, Field(description=(
                              "Name for the new draft; must not exist yet (see list_designs)."))],
                          source: Source = "vehicles") -> str:
-    """Copy an existing single-body vehicle (data version 3) into a new editable draft; the
-    source file is never changed. Use it to modify a vehicle the player already has, then
-    query_parts/edit_parts, preview_vehicle, and save_vehicle under a different name. Configured
-    and wired parts are protected. Fails when the draft name exists, the vehicle has several
-    bodies or it uses an older data version. Returns the part count."""
+    """Copy an existing vehicle (data version 3), with all its bodies, into a new editable draft;
+    the source file is never changed. Use it to modify a vehicle the player already has, then
+    query_parts/edit_parts, preview_vehicle, and save_vehicle under a different name; unchanged
+    parts are written back byte for byte. Configured and wired parts are protected. Fails when
+    the draft name exists or the vehicle uses an older data version. Returns the part and body
+    counts."""
     _check_name(design)
     if _design_path(design).exists():
         raise ValueError("draft already exists; choose a new design name")
     path = _reference_path(name, source)
-    record, count = await run_job("import_draft", path.read_bytes().decode("utf-8"), name)
+    record, count, body_count = await run_job("import_draft", path.read_bytes().decode("utf-8"), name)
     with DESIGN_LOCK:
         if _design_path(design).exists():
             raise ValueError("draft already exists; choose a new design name")
         _atomic_design(design, record)
-    return f"Imported {count} parts into '{design}'. Source '{name}' remains untouched."
+    return (f"Imported {count} parts in {body_count} body(ies) into '{design}'. Source '{name}' remains "
+            "untouched.")
 
 
 @mcp.tool(annotations=READ)
@@ -773,9 +775,9 @@ async def query_parts(design: Draft,
                       offset: Offset = 0, limit: Limit(1000) = 100) -> dict[str, Any]:
     """List a draft's parts and its current revision for exact editing. Rows include id,
     definition, position, scalar settings, proper rotation plus a local mirror bitmask, and the
-    effective transform matrix. Coordinates are integer blocks (0.25 m): the uncentred build
-    frame for generated hulls and land drafts, the original body-local frame for imports. Call it
-    before edit_parts and pass its revision. A selection that cuts through a multi-voxel part is
+    effective transform matrix and body. Coordinates are integer blocks (0.25 m): the uncentred
+    build frame for generated drafts, the original grid for imports (every body shares it). Call
+    it before edit_parts and pass its revision. A selection that cuts through a multi-voxel part is
     rejected; select its id instead. Read-only."""
     return await run_job("query_draft", _read_design(design), plain(select, Selection) if select is not None else None, offset, limit)
 
@@ -794,10 +796,13 @@ async def edit_parts(design: Draft,
     rotation?: r string or 3x3 matrix, mirror?: bitmask 1=x 2=y 4=z, color?: RRGGBB, name?,
     settings?: {key: scalar}}; {op:"fill", bounds:[[lo],[hi]], color?} fills blocks;
     {op:"remove"|"paint"|"configure"|"replace"|"move"|"copy"|"repeat"|"rotate"|"mirror",
-    select:{ids|name|definition|bounds}, ...} with paint color, configure settings, replace part,
+    select:{ids|name|definition|bounds|body}, ...} with paint color, configure settings, replace part,
     move/copy delta:[dx,dy,dz], repeat delta and count (extra copies), rotate rotation and pivot,
-    mirror axis (x/y/z) and plane. Any installed part can be placed except the game's
-    deprecated gearboxes; prebuilt engines default to max_force_scale=1. Returns what changed
+    mirror axis (x/y/z) and plane. A part or fill may set body: an existing ID or "new";
+    otherwise a new part joins the one body it touches (touching two needs a body). Placing a
+    hinge, pivot or piston parent half (_a, base) adds its child half in a new body; an edit that
+    splits such a pair is refused. select also takes body. Any installed part can be placed except
+    the game's deprecated gearboxes; prebuilt engines default to max_force_scale=1. Returns what changed
     (new ids such as edit:0:0 next to the names you gave), warnings and the new revision;
     preview=true adds the image. commit=true applies it as one undo step (undo_edits). Wires and
     pipes use edit_connections and route_connections."""
@@ -1141,16 +1146,20 @@ async def preview_vehicle(design: Draft,
                           pitch: Pitch = 25, zoom: Zoom = 1, focus: Focus = None, layer: Layer = "all",
                           door_state: Annotated[Literal["closed", "open"], Field(description=(
                               "Show manual doors closed or open."))] = "closed",
-                          renderer: RendererChoice = None) -> PreviewResult:
+                          renderer: RendererChoice = None, view: View = "paint", bodies: Bodies = None,
+                          markers: Annotated[bool, Field(description=(
+                              "Draw the centres of mass, buoyancy and lift and the waterline (as-saved "
+                              "loading) from analyze_physics."))] = False) -> PreviewResult:
     """Render a stored draft (from create_vehicle, import_vehicle or an edited hull) with
-    installed component meshes and return the image plus notes. yaw/pitch/zoom/focus give a
-    close-up; layer=components hides bodywork to inspect seats, tanks and powertrain. Hull specs
-    use preview_hull and vehicles in the game folder use preview_game_vehicle. Paint and wheel
-    poses are approximate; the image is not an in-game screenshot. Read-only."""
+    installed component meshes and return the image plus notes. Every body is shown at its
+    editor rest pose; bodies filters them, view="bodies" colours each body, and markers adds
+    the physics centres. yaw/pitch/zoom/focus give a close-up; layer=components hides bodywork.
+    Hull specs use preview_hull and vehicles in the game folder use preview_game_vehicle. Paint
+    and wheel poses are approximate; the image is not an in-game screenshot. Read-only."""
     if focus is not None and len(focus) != 3:
         raise ValueError("focus must contain three fractions")
     png, note = await run_job("preview_draft", _read_design(design), design, yaw, pitch, zoom, focus, layer,
-                              door_state, renderer)
+                              door_state, renderer, view, bodies, markers)
     return _result(png, {"title": design, "notes": note})
 
 
@@ -1229,13 +1238,13 @@ async def list_game_vehicles(search: Annotated[str, Field(description=(
 @mcp.tool(annotations=READ)
 @_user_errors
 async def preview_game_vehicle(name: VehicleName, source: Source = "vehicles", body_id: BodyId = None,
-                               renderer: RendererChoice = None) -> PreviewResult:
+                               renderer: RendererChoice = None, view: View = "paint") -> PreviewResult:
     """Render a vehicle from the player's vehicles folder or an installed Workshop item and
-    return the image plus a size and part summary, e.g. to see how an existing vehicle is built.
-    Uses installed component meshes, reporting any footprint fallbacks. Articulated vehicles show
-    the largest body alone unless body_id is given. inspect_view points a camera at one detail;
-    drafts use preview_vehicle. Read-only."""
-    png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id, renderer)
+    return the image plus a size, part and body summary, e.g. to see how an existing vehicle is
+    built. Uses installed component meshes, reporting any footprint fallbacks. Shows every body
+    at its editor rest pose unless body_id picks one; view="bodies" colours each body.
+    inspect_view points a camera at one detail; drafts use preview_vehicle. Read-only."""
+    png, text = await run_job("game_vehicle", str(_reference_path(name, source)), name, body_id, renderer, view)
     return _result(png, {"title": name, "notes": text})
 
 
@@ -1300,8 +1309,8 @@ async def open_in_viewer(name: Annotated[str | None, Field(description=(
     """Open a vehicle or design in the interactive 3D viewer in the player's web browser so
     they can orbit and inspect it themselves. You cannot see that window: use inspect_view or
     the preview tools to look yourself. Writes one temporary HTML page, replaced on each call,
-    and changes nothing else. Uses installed component meshes with explicit fallbacks;
-    articulated vehicles show the largest body alone unless body_id is given."""
+    and changes nothing else. Uses installed component meshes with explicit fallbacks; shows
+    every body at its editor rest pose unless body_id picks one."""
     if diagnostics:
         if design is None or any(v is not None for v in (name, spec, preset, patch, spec_path, body_id)) or source != "vehicles":
             raise ValueError("diagnostics requires only a stored design")

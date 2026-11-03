@@ -164,7 +164,7 @@ proposed repairs. **prepare_vehicle_validation** exports a test copy with an exa
 and seven pending game checks; **record_vehicle_validation** records only actual player
 observations. A topology pass is never operating evidence. See docs/vehicle-repair.md.
 
-**import_vehicle(name, design)** copies a single-body v3 vehicle into a new draft.
+**import_vehicle(name, design)** copies a v3 vehicle, with all its bodies, into a new draft.
 Untouched XML, settings, paint, connections and body data stay intact. Configured/linked
 original parts remain in place and may be repainted; structural edits and new parts are
 supported. Unsupported versions and multi-body imports fail clearly. Use **preview_vehicle**
@@ -465,7 +465,7 @@ For precise local edits, use query_parts followed by edit_parts, passing its rev
 Those coordinates are integer blocks in the uncentred build frame. Batched operations include
 fills, copies, mirrors, arrays, moves and paint. preview=true adds the image;
 commit=true persists.
-Use undo_edits to revert a batch. import_vehicle supports safe copies of existing single-body
+Use undo_edits to revert a batch. import_vehicle supports safe copies of existing
 version-3 vehicles; use preview_vehicle and save_vehicle for those drafts.
 
 Add an `interior` object to lay out rooms inside the hull and superstructure. It is all plain

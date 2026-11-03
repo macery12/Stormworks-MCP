@@ -13,8 +13,8 @@ checks, never requirements.
    - `create_vehicle(design, preset="empty")` for a blank draft (one block at the origin).
    - `create_vehicle(design, preset=...)` with a land preset (`chassis`, `utility_buggy`,
      `humvee_4x4`, `utility_4x4`) as a starting point. `get_guide(topic="land")` explains them.
-   - `import_vehicle(name, design)` to copy any saved vehicle (single-body for now). The
-     original file is never changed.
+   - `import_vehicle(name, design)` to copy any saved vehicle, with all its bodies. The
+     original file is never changed; XML-edited (stretched) parts come along protected and unchanged.
    - The boat hull generator: `preview_hull`, `store_design`, `save_hull` (`topic="hull"`).
 3. **Find parts.** `search_parts(search, category)` lists installed parts by family (body,
    wheels, surfaces, propulsion, transmission, fuel, cooling, power, controls, lights, sensors,
@@ -62,6 +62,16 @@ Preflight follows wires and physical pipes for prebuilt engines (fuel, air, exha
 drivelines to wheels or propellers, electric power, gearbox ratios and wheel directions.
 Modular engines, jet engines, rockets, steam power and heat exchangers are placed normally but
 listed under `unchecked`, because preflight does not model them yet.
+
+## Bodies (hinges, pivots, pistons)
+
+A vehicle can have several bodies on one shared grid. `query_parts` shows each part's body and
+`select` takes `body`. A new part joins the one body it touches; give `body` (an ID or `"new"`)
+when it touches two, or to start a separate body such as a missile on a hardpoint. Placing the
+parent half of a hinge, pivot or piston (the `_a` or `base` part) adds its child half in a new
+body at the right spot; build the moving part onto that child half. Edits that would separate
+the two halves are refused. `preview_vehicle(view="bodies")` colours each body, like the game's
+bodies view; `bodies=[...]` shows only some.
 
 ## Physics estimates
 

@@ -71,8 +71,14 @@ Source = Annotated[str, _d(
     '"vehicles" (default) reads the player\'s vehicles folder; "workshop" reads an installed '
     "Workshop item by numeric ID.")]
 BodyId = Annotated[str | None, _d(
-    "unique_id of one body of a multi-body vehicle; default is the largest body. Saved "
-    "vehicles only.")]
+    "unique_id of one body of a multi-body saved vehicle to show or measure alone; default shows "
+    "every body at its editor rest pose (analyze_hull and analyze_land_vehicle default to the "
+    "largest body).")]
+Bodies = Annotated[list[str] | None, _d(
+    "Body IDs to show (query_parts lists each part's body); default shows every body.")]
+View = Annotated[Literal["paint", "bodies"], _d(
+    '"paint" (default) shows the paint; "bodies" paints each body one fixed colour with a label, '
+    "like the game's bodies view, and lists them in the notes.")]
 NewVehicleName = Annotated[str, _d(
     "Name for the file in the vehicles folder and the game's Load menu: letters, digits, "
     "spaces, _ - ( ), at most 64 characters.")]

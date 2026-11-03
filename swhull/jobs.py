@@ -62,22 +62,25 @@ def _mesh_note(parts):
             f"omitted moving geometry: {report['omitted_moving_geometry'] or 'none'}.\n{report['note']}")
 
 
-def game_vehicle(path, name, body_id=None, renderer=None):
-    from pathlib import Path  # noqa: PLC0415
-    from .reference import xml_root  # noqa: PLC0415
-    bodies = xml_root(Path(path).read_text(encoding="utf-8-sig")).findall("bodies/body")
-    if body_id is None:
-        body_id = max(bodies, key=lambda b: len(b.findall("components/c"))).get("unique_id")
+def game_vehicle(path, name, body_id=None, renderer=None, view="paint"):
+    from . import body_view  # noqa: PLC0415
     placed, other = load_placed(path, body_id=body_id)
     if not placed:
         raise ValueError(f"no components found in {name}")
     vox = [v for p in placed for v in p.voxels()]
     size = [(max(v[i] for v in vox) - min(v[i] for v in vox) + 1) / 4 for i in range(3)]
     top = ", ".join(f"{k} {v}" for k, v in sorted(other.items(), key=lambda kv: -kv[1])[:12])
+    bodies = body_view.counts(placed)
+    shown = body_view.recolour(placed) if view == "bodies" else placed
+    which = f"body {body_id} alone" if body_id is not None else f"{len(bodies)} body(ies) at their editor rest pose"
     text = (f"{name}: {len(placed)} parts, about {size[2]:.2f} m long x {size[0]:.2f} m wide x "
-            f"{size[1]:.2f} m tall. Body {body_id} of {len(bodies)} (body-local view).\n"
+            f"{size[1]:.2f} m tall; {which}.\n" + body_view.legend(placed) + "\n"
             f"Missing definitions: {top or 'none'}.\n" + _mesh_note(placed))
-    return render_png(placed, title=name, nautical=False, renderer=renderer), text
+    if view == "bodies":
+        png = render_view(shown, title=f"{name}: bodies", labels=body_view.labels(placed), renderer=renderer)
+    else:
+        png = render_png(shown, title=name, nautical=False, renderer=renderer)
+    return png, text
 
 
 def vehicle_xml(full):
@@ -102,23 +105,48 @@ def query_draft(record, selector, offset, limit):
 
 
 def preview_draft(record, title, yaw=None, pitch=25, zoom=1, focus=None, layer="all", door_state="closed",
-                  renderer=None):
+                  renderer=None, view="paint", bodies=None, markers=False):
+    from . import body_view  # noqa: PLC0415
     parts, info = materialize(record, centred=True)
     from .networks import wires  # noqa: PLC0415
     wires(record, parts)  # Fail before persisting edits that leave dangling generated connections.
     if layer not in ("all", "components", "structure"):
         raise ValueError("layer must be all, components or structure")
+    if view not in ("paint", "bodies"):
+        raise ValueError("view must be paint or bodies")
     from .pieces import BY_NAME  # noqa: PLC0415
-    shown = [p for p in parts if layer == "all" or (p.piece.d in BY_NAME) == (layer == "structure")]
+    main = body_view.main_body(parts)
+    chosen = body_view.only(parts, bodies)
+    shown = [p for p in chosen if layer == "all" or (p.piece.d in BY_NAME) == (layer == "structure")]
     if not shown:
         raise ValueError(f"no parts in {layer} layer")
     ruler = design_ruler(info, info["scale"]) if info else VEHICLE_RULER
     title = f"{title} [{layer}]" if layer != "all" else title
+    labels, segments, extra = [], [], []
+    if view == "bodies":
+        shown = body_view.recolour(shown, parts)
+        labels = body_view.labels(chosen, main)
+        title += " [bodies]"
+        extra.append(body_view.legend(chosen, parts))
+    if markers:
+        from .physics import analyze, grouped, overlay  # noqa: PLC0415
+        model, report = analyze(grouped(parts))
+        marks, marker_labels = overlay(model, report)
+        segments += marks
+        labels += marker_labels
+        extra.append("Markers (as saved): CoM red, CoB green, CoL orange, waterline blue; "
+                     + report["flotation"]["as_saved"]["summary"] + ". analyze_physics has the numbers.")
+    if yaw is None and (labels or segments):
+        yaw = 35
     png = (render_png(shown, title=title, ruler=ruler, nautical=record.get("kind") != "land", door_state=door_state,
                       renderer=renderer) if yaw is None else
            render_view(shown, title=title, ruler=ruler, yaw=yaw, pitch=pitch, zoom=zoom, focus=focus,
-                       door_state=door_state, renderer=renderer))
-    return png, describe(record, parts, info) + "\n" + _mesh_note(shown)
+                       door_state=door_state, renderer=renderer, labels=labels, segments=segments))
+    notes = describe(record, parts, info) + "\n" + _mesh_note(shown)
+    if len(body_view.counts(parts)) > 1 and view != "bodies":
+        extra.append(body_view.legend(parts).replace("Bodies (colour, parts)", "Bodies (preview colour in "
+                                                          "view=bodies, parts)"))
+    return png, "\n".join([notes, *extra])
 
 
 def change_summary(record, proposed):
@@ -173,8 +201,8 @@ def import_draft(xml, source):
     # Parse/validate in a cancellable worker; imports may contain hundreds of thousands of parts.
     from .editing import VehicleDocument  # noqa: PLC0415
     document = VehicleDocument.parse(xml)
-    return {"kind": "imported", "source": source, "source_xml": xml, "edits": [],
-            "vehicle": False, "generation": 0}, len(document.parts)
+    return ({"kind": "imported", "source": source, "source_xml": xml, "edits": [],
+             "vehicle": False, "generation": 0}, len(document.parts), len(document.bodies))
 
 
 def analyze_reference(path, search, offset, limit, section="parts"):
@@ -354,8 +382,9 @@ def physics(path, record, title, tank_fill=None, airspeed=None, lift_coefficient
         with open(path, encoding="utf-8-sig") as f:
             bodies = bodies_from_text(f.read())
     else:
+        from .physics import grouped  # noqa: PLC0415
         parts, _ = materialize(record)
-        bodies = [("1", parts)]
+        bodies = grouped(parts)
     model, report = analyze(bodies, tank_fill, airspeed, lift_coefficient)
     png = picture(model, report, title)
     for row in report["flotation"].values():

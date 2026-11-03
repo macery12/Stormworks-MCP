@@ -344,8 +344,8 @@ def test_fast_worker_exit_keeps_result_and_leaves_no_children():
     text = to_xml([Placed(BLOCK, (0, 0, 0))])
     async def repeated():
         for _ in range(12):
-            record, count = await run_job("import_draft", text, "original")
-            assert record["source_xml"] == text and count == 1
+            record, count, body_count = await run_job("import_draft", text, "original")
+            assert record["source_xml"] == text and count == 1 and body_count == 1
     anyio.run(repeated)
     assert not multiprocessing.active_children()
 

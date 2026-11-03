@@ -287,7 +287,7 @@ def test_default_buggy_and_workshop_tools_preserve_reference_files(buggy_definit
     report = call(server.analyze_land_vehicle, name="111", source="workshop")
     assert report["counts"]["wheels"] == 4 and report["link_count"] == 1
     image, note, _ = unpack(call(server.preview_game_vehicle, "111", source="workshop"))
-    assert image.startswith(b"\x89PNG") and "Body 1 of 1" in note
+    assert image.startswith(b"\x89PNG") and "1 body(ies)" in note
     call(server.open_in_viewer, name="111", source="workshop")
     call(server.import_vehicle, "111", "workshop study", source="workshop")
     report = call(server.analyze_land_vehicle, design="workshop study")

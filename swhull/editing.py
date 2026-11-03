@@ -126,61 +126,125 @@ def _components_content(text):
 
 @dataclass
 class VehicleDocument:
-    prefix: str
-    suffix: str
+    """A saved vehicle split so unchanged bytes are written back exactly.
+
+    Every body keeps the text around its components (`lead` before the body element, `open` up
+    to the component content, `tail` after the last component, `close` to the end of the body);
+    each original component keeps the text before it in `gaps`."""
+    prefix: str          # everything before the first body element
+    suffix: str          # from </bodies> on: wires and the rest
     gaps: dict
     parts: list
-    tail: str = ""
+    bodies: list
+    floor: int = 0       # the vehicle's bodies_id counter
+    stretched: int = 0   # XML-edited parts with a non-grid `r`, kept as saved
 
     @classmethod
     def parse(cls, text):
         head = re.search(r'<vehicle\b[^>]*\bdata_version="(\d+)"', text)
         if head is None or head[1] != "3":
             raise ValueError("editing requires data_version 3")
-        if len(re.findall(r"<body\b", text)) != 1:
-            raise ValueError("editing requires a single-body vehicle; multi-body editing is unsupported")
-        content_start, content_end = _components_content(text)
-        body = text[content_start:content_end]
-        gaps, parts, end = {}, [], 0
-        for i, (start, stop) in enumerate(_component_spans(body)):
-            raw = body[start:stop]
-            geom = next(components_from_text(raw), None)
-            if geom is None:
-                raise ValueError("unsupported component without readable geometry")
-            d, origin, q, paint = geom
-            piece = BY_NAME.get(d) or definitions.load(d)
-            if piece is None:
-                piece = type(BLOCK)(d, 6, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
-            uid = f"original:{i}"
-            extras = re.sub(r'<vp\b[^>]*/>|</?c\b[^>]*>|</?o\b[^>]*>', "", raw).strip()
-            attrs = re.search(r"<o\b([^>]*)>", raw)
-            attr_names = set(re.findall(r"\b(\w+)=", attrs[1])) if attrs else set()
-            protected = d not in BY_NAME or bool(extras) or bool(attr_names - {"r", "sc", "bc", "ac", "gc"})
-            named = re.search(r'\bcustom_name="([^"]*)"', raw)
-            from html import unescape  # noqa: PLC0415
-            parts.append(Placed(piece, origin, q, paint, uid,
-                                unescape(named[1]) if named else "", raw_xml=raw, protected=protected))
-            gaps[uid] = body[end:start]
-            end = stop
+        opening = re.search(r"<bodies\b[^>]*>", text)
+        closing = text.rfind("</bodies>")
+        if opening is None or closing < opening.end():
+            raise ValueError("vehicle has no bodies container")
+        gaps, parts, bodies, cursor, count, seen, stretched = {}, [], [], opening.end(), 0, {}, 0
+        from html import unescape  # noqa: PLC0415
+        for match in re.finditer(r"<body\b[^>]*?(/?)>", text[:closing]):
+            if match.start() < cursor:
+                continue
+            bid = (re.search(r'\bunique_id="([^"]*)"', match[0]) or [None, str(len(bodies) + 1)])[1]
+            # Some saves repeat a unique_id; keep such bodies apart under an alias (the tag is kept as saved).
+            seen[bid] = seen.get(bid, 0) + 1
+            if seen[bid] > 1:
+                bid = f"{bid}#{seen[bid]}"
+            lead = text[cursor:match.start()]
+            if match[1]:  # <body .../>: no components
+                bodies.append({"id": bid, "lead": lead, "raw": match[0], "open": f'<body unique_id="{bid}"><components>',
+                               "tail": "", "close": "</components></body>"})
+                cursor = match.end()
+                continue
+            end = text.index("</body>", match.end()) + len("</body>")
+            raw_element = element = text[match.start():end]
+            empty = re.search(r"<components\s*/>", element)
+            if empty and "</components>" not in element:
+                element = element[:empty.start()] + "<components></components>" + element[empty.end():]
+            content_start, content_end = _components_content(element)
+            content = element[content_start:content_end]
+            last = 0
+            for start, stop in _component_spans(content):
+                raw = content[start:stop]
+                geom, skewed = _geometry(raw)
+                stretched += skewed
+                d, origin, q, paint = geom
+                piece = BY_NAME.get(d) or definitions.load(d)
+                if piece is None:
+                    piece = type(BLOCK)(d, 6, 0.0, BLOCK.footprint, BLOCK.verts, BLOCK.faces)
+                uid = f"original:{count}"
+                count += 1
+                extras = re.sub(r'<vp\b[^>]*/>|</?c\b[^>]*>|</?o\b[^>]*>', "", raw).strip()
+                attrs = re.search(r"<o\b([^>]*)>", raw)
+                attr_names = set(re.findall(r"\b(\w+)=", attrs[1])) if attrs else set()
+                protected = (skewed or d not in BY_NAME or bool(extras)
+                             or bool(attr_names - {"r", "sc", "bc", "ac", "gc"}))
+                named = re.search(r'\bcustom_name="([^"]*)"', raw)
+                parts.append(Placed(piece, origin, q, paint, uid, unescape(named[1]) if named else "",
+                                    raw_xml=raw, protected=protected, body=bid))
+                gaps[uid] = content[last:start]
+                last = stop
+            bodies.append({"id": bid, "lead": lead, "raw": raw_element, "open": element[:content_start],
+                           "tail": content[last:], "close": element[content_end:]})
+            cursor = end
         if not parts:
             raise ValueError("vehicle has no readable components")
+        suffix = text[cursor:]
         endpoints = set()
-        for m in re.finditer(r"<voxel_pos_[01]\b([^>]*)/?>", text[content_end:]):
+        for m in re.finditer(r"<voxel_pos_[01]\b([^>]*)/?>", text[closing:]):
             attrs = dict(re.findall(r'\b([xyz])="(-?\d+)"', m[1]))
             endpoints.add(tuple(int(attrs.get(axis, 0)) for axis in "xyz"))
         for p in parts:
             p.protected |= p.origin in endpoints
-        return cls(text[:content_start], text[content_end:], gaps, parts, body[end:])
+        floor = re.search(r'<vehicle\b[^>]*\bbodies_id="(\d+)"', text)
+        return cls(text[:opening.end()], suffix, gaps, parts, bodies, int(floor[1]) if floor else 0, stretched)
+
+    @property
+    def main(self):
+        return self.bodies[0]["id"] if self.bodies else "1"
 
     def to_xml(self, parts):
+        main = self.main
         remaining = {p.uid: p for p in parts}
-        chunks = [self.prefix]
+        originals = {p.uid for p in self.parts}
+        added = {}
+        for p in parts:
+            if p.uid not in originals:
+                added.setdefault(p.body or main, []).append(p)
+        existing = {b["id"] for b in self.bodies}
+        new_ids = [int(b) for b in added if b.isdigit() and b not in existing]
+        # Only a new body moves the counter, so an unedited file is written back as saved.
+        prefix = re.sub(r'(<vehicle\b[^>]*\bbodies_id=")(\d+)(")',
+                        lambda m: f"{m[1]}{max([int(m[2]), *new_ids])}{m[3]}", self.prefix, count=1)
+        chunks = [prefix]
+        by_body = {}
         for original in self.parts:
-            chunks.append(self.gaps[original.uid])
-            if original.uid in remaining:
-                chunks.append(component_xml(remaining.pop(original.uid)))
-        chunks.extend(component_xml(p) for p in remaining.values())
-        chunks.extend((self.tail, self.suffix))
+            by_body.setdefault(original.body, []).append(original)
+        for body in self.bodies:
+            content = []
+            for original in by_body.get(body["id"], []):
+                if original.uid in remaining:
+                    content.append(self.gaps[original.uid] + component_xml(remaining.pop(original.uid)))
+            content.extend(component_xml(p) for p in added.pop(body["id"], []))
+            if not content:
+                if body["id"] not in by_body:
+                    chunks.append(body["lead"] + body["raw"])  # empty in the original: keep it as saved
+                elif body["id"] == main:
+                    chunks.append(body["lead"] + body["open"] + body["tail"] + body["close"])
+                continue  # otherwise every part of this body was removed: drop the body
+            chunks.append(body["lead"] + body["open"] + "".join(content) + body["tail"] + body["close"])
+        for bid in sorted(added, key=lambda b: (not b.isdigit(), int(b) if b.isdigit() else 0, b)):
+            chunks.append(f'<body unique_id="{bid}"><components>' + "".join(component_xml(p) for p in added[bid])
+                          + "</components></body>")
+        chunks.append(self.suffix)
         return "".join(chunks)
 
 
@@ -195,8 +259,8 @@ def bounds(value):
 
 def select(parts, selector):
     if not isinstance(selector, dict) or not selector:
-        raise ValueError("select needs ids, bounds, name or definition")
-    if set(selector) - {"ids", "bounds", "name", "definition"}:
+        raise ValueError("select needs ids, bounds, name, definition or body")
+    if set(selector) - {"ids", "bounds", "name", "definition", "body"}:
         raise ValueError("unknown selection field")
     ids = selector.get("ids")
     if ids is not None and (not isinstance(ids, list) or not ids):
@@ -204,8 +268,11 @@ def select(parts, selector):
     if ids is not None and set(ids) - {p.uid for p in parts}:
         raise ValueError("stale or missing part identifiers; query_parts again")
     extent = bounds(selector["bounds"]) if "bounds" in selector else None
+    main = parts[0].body if parts and parts[0].body else "1"
     out = []
     for p in parts:
+        if "body" in selector and (p.body or main) != str(selector["body"]):
+            continue
         if ids is not None and p.uid not in ids:
             continue
         if "name" in selector and p.name != selector["name"]:
@@ -229,11 +296,12 @@ def query(parts, selector=None, offset=0, limit=100):
     if not isinstance(offset, int) or offset < 0 or not isinstance(limit, int) or not 1 <= limit <= 1000:
         raise ValueError("offset must be nonnegative and limit must be 1-1000")
     chosen = select(parts, selector) if selector else parts
+    main = parts[0].body if parts and parts[0].body else "1"
     rows = []
     for p in chosen[offset:offset + limit]:
         cells = p.voxels()
         rot, mirror = component_transform(p)
-        rows.append({"id": p.uid, "body": 1, "name": p.name, "definition": p.piece.d,
+        rows.append({"id": p.uid, "body": p.body or main, "name": p.name, "definition": p.piece.d,
                      "position": p.origin, "rotation": r_attr(rot), "mirror": mirror,
                      "transform": p.Q, "color": p.color,
                      "settings": {k: v for k, v in settings_of(p).items()
@@ -279,6 +347,39 @@ def _move_raw(p):
         p.raw_xml = re.sub(r"<c\b", f'<c t="{mirror}"', p.raw_xml, count=1)
 
 
+def _geometry(raw):
+    """(definition, origin, Q, colour) of one saved component, and whether its `r` was XML-edited.
+
+    A stretched or sheared `r` (a community XML-editing trick) gets the nearest grid rotation for
+    geometry; the component itself stays protected and is written back exactly as saved."""
+    try:
+        geom = next(components_from_text(raw), None)
+        skewed = False
+    except ValueError:
+        tag = re.search(r'<o\b[^>]*?\br="([^"]*)"', raw)
+        if tag is None:
+            raise
+        from .pieces import nearest_rotation  # noqa: PLC0415
+        q = nearest_rotation(tag[1])
+        start, end = tag.span(1)
+        geom = next(components_from_text(raw[:start] + r_attr(q) + raw[end:]), None)
+        skewed = True
+    if geom is None:
+        raise ValueError("unsupported component without readable geometry")
+    return geom, skewed
+
+
+def _body_choice(value, known, fresh=None):
+    """An explicit body: an existing ID, or "new" for a new body shared by this operation."""
+    if value is None:
+        return None
+    if str(value) == "new" and fresh is not None:
+        return fresh
+    if str(value) not in known:
+        raise ValueError(f"no body {value!r}; bodies are {', '.join(sorted(known))}")
+    return str(value)
+
+
 def _collisions(parts):
     owner, pairs = {}, set()
     for p in parts:
@@ -289,8 +390,12 @@ def _collisions(parts):
     return pairs
 
 
-def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placement_context=None):
-    """Return a new list; failures never change the input or stored draft."""
+def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placement_context=None, body_floor=0):
+    """Return a new list; failures never change the input or stored draft.
+
+    New parts join a body (see bodies.assign); a new hinge, pivot or piston parent half adds its
+    child half in a new body; an edit that splits a pair or orphans a body is refused."""
+    from . import bodies  # noqa: PLC0415
     if not isinstance(operations, list) or any(not isinstance(op, dict) for op in operations):
         raise ValueError("operations must be a list of objects")
     out = []
@@ -302,19 +407,30 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
     original = {p.uid: (p.piece.d, p.origin, p.Q) for p in out}
     geometric = any(op.get("op") not in ("paint", "configure") for op in operations)
     previous = _collisions(out) if geometric else set()
+    broken = bodies.problems(out) if geometric else set()
     for index, op in enumerate(operations):
         kind, key = op.get("op"), f"{prefix}:{index}"
+        created, explicit = [], {}
+        main = bodies.root(out)
+        known = {p.body or main for p in out}
+        fresh = bodies.next_id(out, body_floor)
         if kind == "add":
             data = op.get("parts", [op.get("part")])
             if not isinstance(data, list) or len(data) > MAX_BATCH_PARTS:
                 raise ValueError("parts must be a bounded list")
-            out.extend(part(d, f"{key}:{i}") for i, d in enumerate(data))
+            for i, d in enumerate(data):
+                created.append(part(d, f"{key}:{i}"))
+                if isinstance(d, dict) and d.get("body") is not None:
+                    explicit[id(created[-1])] = _body_choice(d["body"], known, fresh)
         elif kind == "fill":
             lo, hi = bounds(op.get("bounds"))
             if math.prod(hi[i] - lo[i] + 1 for i in range(3)) > MAX_BATCH_PARTS:
                 raise ValueError(f"fill exceeds {MAX_BATCH_PARTS} parts")
+            body = _body_choice(op.get("body"), known, fresh)
             for i, v in enumerate(product(*(range(lo[a], hi[a] + 1) for a in range(3)))):
-                out.append(part({"position": v, "color": op.get("color", "C2C3C7")}, f"{key}:{i}"))
+                created.append(part({"position": v, "color": op.get("color", "C2C3C7")}, f"{key}:{i}"))
+                if body:
+                    explicit[id(created[-1])] = body
         elif kind in ("remove", "replace", "move", "rotate", "paint", "copy", "mirror", "repeat", "configure"):
             chosen = select(out, op.get("select"))
             if kind not in ("paint", "configure") and any(p.protected for p in chosen):
@@ -324,7 +440,9 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
                 out = [p for p in out if p.uid not in ids]
             elif kind == "replace":
                 for p in chosen:
-                    out[out.index(p)] = part(op.get("part"), p.uid, p.origin)
+                    replacement = part(op.get("part"), p.uid, p.origin)
+                    replacement.body = p.body
+                    out[next(i for i, q in enumerate(out) if q is p)] = replacement
             elif kind == "paint":
                 for p in chosen:
                     _paint(p, op.get("color"))
@@ -344,7 +462,9 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
                         p.origin = add(source.origin, tuple(k * d for d in delta))
                         if kind != "move":
                             p.uid, p.name = f"{key}:{k}:{i}", f"{source.name}_{k}" if source.name else ""
+                            p.body = ""
                             out.append(p)
+                            created.append(p)
                         _move_raw(p)
             elif kind == "rotate":
                 q, pivot = rotation(op.get("rotation")), vector(op.get("pivot", [0, 0, 0]), "pivot")
@@ -366,10 +486,18 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
                     p.Q = tuple(tuple(-v if k == a else v for v in row) for k, row in enumerate(p.Q))
                     p.uid = f"{key}:{i}"
                     p.name = f"{p.name}_mirror" if p.name else ""
+                    p.body = ""
                     _move_raw(p)
                     out.append(p)
+                    created.append(p)
         else:
             raise ValueError(f"unsupported edit operation {kind!r}")
+        if kind in ("add", "fill"):
+            bodies.assign(out + created, created, explicit)
+            out.extend(created)
+        elif kind in ("copy", "repeat", "mirror"):
+            bodies.assign(out, created)
+        out.extend(bodies.spawn_children(out, created, body_floor))
         if not out:
             raise ValueError("an edit cannot remove every part")
         if kind not in ("paint", "configure"):
@@ -377,10 +505,15 @@ def apply_edits(parts, operations, prefix="edit", reserved=frozenset(), placemen
             if collisions - previous:
                 raise ValueError(f"edit {index}: part footprint collision {next(iter(collisions - previous))}")
             previous = collisions
+    if geometric:
+        new_problems = bodies.problems(out) - broken
+        if new_problems:
+            raise ValueError(sorted(new_problems)[0])
     # Validate the completed batch so a caller can add a component before its mounting blocks.
     # Untouched configured imports remain in place; their game settings are not reinterpreted.
     from .components import owners, validate_placement  # noqa: PLC0415
-    changed = [p for p in out if p.piece.d not in BY_NAME
+    # A child half hangs on its parent half's joint, which bodies.problems already checked.
+    changed = [p for p in out if p.piece.d not in BY_NAME and p.piece.d not in bodies.CHILDREN
                and original.get(p.uid) != (p.piece.d, p.origin, p.Q)]
     owner = owners(out) if changed else {}
     for p in changed:

@@ -517,10 +517,10 @@ def notes(title, report):
     return "\n".join(lines)
 
 
-def picture(model, report, title, scenario="as_saved"):
-    """Side view with the waterline and the centres of mass, buoyancy and lift."""
+def overlay(model, report, scenario="as_saved"):
+    """Segments and labels (display coordinates) for the waterline and the centres of mass,
+    buoyancy and lift, for render_view."""
     from .diagnostic_view import display  # noqa: PLC0415
-    from .render import VEHICLE_RULER, render_view  # noqa: PLC0415
     row = report["flotation"][scenario]
     segments, labels = [], []
 
@@ -529,7 +529,7 @@ def picture(model, report, title, scenario="as_saved"):
 
     def cross(v, colour, text):
         b = blocks(v)
-        for axis in (1, 2):
+        for axis in (0, 1, 2):
             a, c = list(b), list(b)
             a[axis] -= 0.6
             c[axis] += 0.6
@@ -537,7 +537,7 @@ def picture(model, report, title, scenario="as_saved"):
         labels.append((display((b[0], b[1] + 1.5, b[2])), text))
 
     pts = model.points
-    if row.get("floats"):
+    if row.get("floats") and "waterline" in row:
         water = row["waterline"]
         rot, g, h = np.array(water["rotation"]), np.array(water["origin_m"]), water["height_m"]
         x = float(row["centre_of_mass_m"][0])
@@ -552,5 +552,21 @@ def picture(model, report, title, scenario="as_saved"):
     cross(row["centre_of_mass_m"], "E74C3C", "CoM")
     if report["lift"] and report["lift"].get("centre_of_lift_m"):
         cross(report["lift"]["centre_of_lift_m"], "F39C12", "CoL")
+    return segments, labels
+
+
+def picture(model, report, title, scenario="as_saved"):
+    """Side view with the waterline and the centres of mass, buoyancy and lift."""
+    from .render import VEHICLE_RULER, render_view  # noqa: PLC0415
+    segments, labels = overlay(model, report, scenario)
     return render_view(model.parts, yaw=0, pitch=0, title=f"{title}: {scenario} loading", labels=labels,
                        segments=segments, ruler=VEHICLE_RULER)
+
+
+def grouped(parts):
+    """(body_id, parts) pairs for a draft's parts."""
+    main = (parts[0].body if parts else "") or "1"
+    out = {}
+    for p in parts:
+        out.setdefault(p.body or main, []).append(p)
+    return list(out.items())

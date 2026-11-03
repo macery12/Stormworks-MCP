@@ -26,7 +26,7 @@ def test_round_trip(tmp_path):
     assert (d, origin, Q, colour) == ("05_wedge_2", (3, -2, 5), placed[0].Q, "123456")
 
 
-def test_preview_selects_one_body_and_ignores_controller_internals(tmp_path):
+def test_preview_shows_every_body_and_ignores_controller_internals(tmp_path):
     nested = '<c d="microcontroller"><o><vp x="3"/><group><components><c><o><vp x="99"/></o></c></components></group></o></c>'
     text = ('<vehicle data_version="3"><bodies><body unique_id="1"><components>'
             '<c><o r="2,0,0,0,1,0,0,0,1" wheel_size="1.5"><vp/></o></c>' + nested +
@@ -34,8 +34,9 @@ def test_preview_selects_one_body_and_ignores_controller_internals(tmp_path):
     path = tmp_path / "v.xml"
     path.write_text(text)
     parts, _ = load_placed(path)
-    assert len(parts) == 2 and parts[0].Q[0][0] == 2
+    assert len(parts) == 3 and parts[0].Q[0][0] == 2
     assert parts[0].settings["wheel_size"] == "1.5" and parts[1].origin == (3, 0, 0)
+    assert [p.body for p in parts] == ["1", "1", "2"] and parts[2].origin == (10, 0, 0)
     selected, _ = load_placed(path, body_id="2")
     assert len(selected) == 1 and selected[0].origin == (10, 0, 0)
     with pytest.raises(ValueError, match="no body"):

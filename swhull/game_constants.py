@@ -57,9 +57,11 @@ CELL_M3 = BLOCK_METRES ** 3            # 0.015625 m3 per block
 CELL_LITRES = CELL_M3 * 1000           # 15.625 L per block
 FLUID_MASS_PER_LITRE = 0.1             # game mass units per litre of tank fluid
 
+# Settled by the player (2026-11-03): use game_constants.xml's 10, not general_debug.txt's 12.
+BUOYANCY_MULTIPLIER_NOTE = ("10, from game_constants.xml and matching the community flotation formula; "
+                            "general_debug.txt's 12 is not used.")
+
 PROVISIONAL = {
-    "buoyancy_mass_multiplier": "10 from game_constants.xml; general_debug.txt lists 12. The community "
-                                "flotation formula matches 10. Not yet measured in game.",
     "buoyancy_mass_modifier_range": "the modifier ramps over (mass - lower) / upper, capped at 1, as the "
                                     "community formula does; (mass - lower) / (upper - lower) is also possible.",
     "fluid_mass": "0.1 mass per litre for every fluid; not yet measured in game.",

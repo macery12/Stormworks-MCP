@@ -17,11 +17,10 @@ references are numeric item IDs, not file paths. Discovery checks every Steam li
 content without downloading, modifying or copying it into the repository.
 
 Use `analyze_land_vehicle(name="example")` for the actual body-local layout. Preview with
-`preview_game_vehicle` or `inspect_view`. Multi-body analysis keeps each body's coordinates
-separate; the current general saved-vehicle renderer does not solve articulated transforms.
-For an existing single-body v3 vehicle, use `import_vehicle` to make a separate editable draft.
+`preview_game_vehicle` or `inspect_view`; previews show every body at its editor rest pose.
+For an existing v3 vehicle, single- or multi-body, use `import_vehicle` to make a separate editable draft.
 `import_vehicle(name="3812797708", source="workshop", design="quad study")` preserves the
-original component settings, nested controllers and links. Multi-body editing is unsupported.
+original component settings, nested controllers, links and bodies.
 Configured or linked original components remain protected from geometric edits.
 
 For a new vehicle, call `create_vehicle(design="road draft", preset="chassis", spec={...})`, then
@@ -54,8 +53,8 @@ opened without MCP cannot read the installed assets; it reports its component fa
 `open_in_viewer(design="buggy")` supports land drafts and `source="workshop"` supports references.
 
 `preview_game_vehicle(name="3812797708", source="workshop")` and `inspect_view` also read
-installed workshop items. For an articulated vehicle, previews show its largest body alone
-unless `body_id` selects another body; they do not concatenate unrelated body-local frames.
+installed workshop items. Previews show every body at its editor rest pose (bodies share one
+grid) unless `body_id` selects one; joints are not moved.
 Read-only previews display finite XML-scaled component transforms. Analysis reports these
 components as omitted from footprint/mounting checks; editing still requires standard rotations.
 

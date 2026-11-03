@@ -69,8 +69,9 @@ def test_import_version_body_and_link_guards():
     source = to_xml(blocks())
     with pytest.raises(ValueError, match="version"):
         VehicleDocument.parse(source.replace('data_version="3"', 'data_version="2"'))
-    with pytest.raises(ValueError, match="single-body"):
-        VehicleDocument.parse(source.replace("</bodies>", '<body unique_id="2"/></bodies>'))
+    extra = source.replace("</bodies>", '<body unique_id="2"/></bodies>')
+    multi = VehicleDocument.parse(extra)   # several bodies, even an empty one, import and write back as saved
+    assert [b["id"] for b in multi.bodies] == ["1", "2"] and multi.to_xml(multi.parts) == extra
     source = source.replace("<logic_node_links/>", '<logic_node_links><link><voxel_pos_0/></link></logic_node_links>')
     doc = VehicleDocument.parse(source)
     assert doc.parts[0].protected

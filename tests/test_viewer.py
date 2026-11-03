@@ -5,14 +5,14 @@ from swhull.vehicle import to_xml
 from swhull.viewer import geometry
 
 
-def test_viewer_does_not_concatenate_bodies_or_controller_internals():
+def test_viewer_shows_every_body_at_rest_but_not_controller_internals():
     nested = '<c d="controller"><o><vp x="5"/><group><components><c><o><vp x="99"/></o></c></components></group></o></c>'
     text = ('<vehicle data_version="3"><bodies><body unique_id="1"><components>' + nested +
             '<c><o r="1,0,0,0,1,0,0,0,1"><vp/></o></c></components></body>'
             '<body unique_id="2"><components><c><o><vp x="20"/></o></c></components></body></bodies></vehicle>')
     payload = geometry(text)
-    assert len(payload["parts"]) == 2
-    assert {tuple(p["origin"]) for p in payload["parts"]} == {(5, 0, 0), (0, 0, 0)}
+    assert len(payload["parts"]) == 3
+    assert {tuple(p["origin"]) for p in payload["parts"]} == {(5, 0, 0), (0, 0, 0), (20, 0, 0)}
     assert len(geometry(text, body_id="2")["parts"]) == 1
     assert payload["coverage"]["footprint_fallbacks"] == {"controller": 1}
 

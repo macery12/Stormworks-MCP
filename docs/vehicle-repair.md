@@ -1,6 +1,6 @@
 # Diagnose, repair and verify a vehicle
 
-Start with a stored hull, land or single-body imported draft. Read installed node and face
+Start with a stored hull, part-by-part or imported draft. Read installed node and face
 indices using `query_connections`; exact edits and routes use integer blocks (0.25 m).
 New nested MCP schemas require operation-specific fields, reject unknown fields and expose
 coordinate shapes, port indices, colors, mirror masks, repeat counts and pipe style choices.

@@ -56,7 +56,7 @@ batch with `commit: false`, inspect it, then commit the same batch with the same
 If another change made the revision stale, query again. Use `undo_edits` for the last ten
 committed batches. Editing part footprints partially is rejected; select the complete part.
 
-Use `import_vehicle` to create a separate draft from an existing single-body version-3
+Use `import_vehicle` to create a separate draft from an existing version-3
 vehicle. Repaint configured originals in place and edit supported structural/new parts.
 Save under a new vehicle name. Use explicit interior seed coordinates for imported seal
 checks; automatic generated-room seeds do not apply to imports.
