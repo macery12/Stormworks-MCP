@@ -67,7 +67,7 @@ def main():
             assert not (Path(folder) / "runtime" / "connection.json").exists()
             window = tk.Tk()
             window.withdraw()
-            app = DesktopApp(window, ServerController(command))
+            app = DesktopApp(window, ServerController(command), check_updates=False)
             try:
                 menu = window.nametowidget(window.cget("menu"))
                 assert [menu.entrycget(index, "label") for index in range(menu.index("end") + 1)

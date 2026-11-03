@@ -2,19 +2,23 @@
 
 import json
 import queue
+import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from ._version import __version__
 from .client_config import add_client, default_config_path, raw_config, server_entry
 from .desktop_runtime import InstanceLock, ServerController, port
 from .diagnostics import runtime_status
+from . import updates
 
 
 class DesktopApp:
-    def __init__(self, window, controller=None):
+    def __init__(self, window, controller=None, check_updates=True):
         self.window = window
+        self.update_results = queue.Queue()
         self.controller = controller if controller is not None else ServerController()
         self.closing = False
         self.dialogs = {}
@@ -40,6 +44,11 @@ class DesktopApp:
         view_menu.add_command(label="Diagnostics...", command=lambda: self.configuration(diagnostics=True))
         menu.add_cascade(label="View", menu=view_menu)
         help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label="Check for updates", command=lambda: self.check_updates(manual=True))
+        self.auto_update = tk.BooleanVar(value=updates.check_at_startup())
+        help_menu.add_checkbutton(label="Check for updates at startup", variable=self.auto_update,
+                                  command=lambda: updates.set_check_at_startup(self.auto_update.get()))
+        help_menu.add_separator()
         help_menu.add_command(label="About", command=lambda: messagebox.showinfo(
             "Stormworks MCP", f"Stormworks MCP {__version__}\nLocal vehicle-building tools for Stormworks.\n"
             "MIT license. Unofficial fan project.\n\nUse MCP > Set up to connect your client, then press Start.", parent=window))
@@ -60,8 +69,12 @@ class DesktopApp:
         self.status = tk.StringVar(value="Stopped")
         ttk.Label(controls, textvariable=self.status, font=("Segoe UI", 11, "bold")).pack(side="left")
         ttk.Label(frame, text=f"Local endpoint: http://127.0.0.1:{port()}/mcp", foreground="#555555").pack(anchor="w", pady=8)
+        # Shown only when a newer release exists; clicking opens its download page.
+        self.update_url = updates.RELEASES
+        self.update_link = ttk.Label(frame, text="", foreground="#1a5fb4", cursor="hand2")
+        self.update_link.bind("<Button-1>", lambda _: webbrowser.open(self.update_url))
 
-        log_frame = ttk.LabelFrame(frame, text="Server logs", padding=8)
+        log_frame = self.log_frame = ttk.LabelFrame(frame, text="Server logs", padding=8)
         log_frame.pack(fill="both", expand=True, pady=(4, 8))
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap="word", height=14, font=("Consolas", 10),
                                                 state="disabled", background="#171d26", foreground="#e0e7ef")
@@ -70,7 +83,38 @@ class DesktopApp:
                   wraplength=810).pack(anchor="w")
         self.controller.log(f"Stormworks MCP {__version__} ready to start.")
         self.controller.log(f"Executable: {server_entry()['command']}")
+        if check_updates and self.auto_update.get() and not updates.disabled_by_environment():
+            self.check_updates()
         self._poll()
+
+    def check_updates(self, manual=False):
+        """Ask GitHub in the background; _poll shows the answer (Tk stays on this thread)."""
+        def work():
+            try:
+                self.update_results.put((manual, updates.latest(), None))
+            except (OSError, ValueError) as exc:
+                self.update_results.put((manual, None, exc))
+
+        threading.Thread(target=work, daemon=True, name="update check").start()
+
+    def _show_update(self, manual, found, error):
+        if error is not None:
+            self.controller.log(f"Update check failed: {error}")
+            if manual:
+                messagebox.showwarning("Check for updates", f"Could not reach GitHub: {error}", parent=self.window)
+            return
+        if updates.newer(found["version"]):
+            self.update_url = found["url"]
+            self.update_link.configure(text=f"Update available: Stormworks MCP {found['version']} (you have "
+                                            f"{__version__}). Click to download; the installer upgrades in place.")
+            self.update_link.pack(anchor="w", before=self.log_frame)
+            self.controller.log(f"Stormworks MCP {found['version']} is available: {found['url']}")
+            if manual and messagebox.askyesno("Check for updates", f"Stormworks MCP {found['version']} is available "
+                                              f"(you have {__version__}). Open the download page?", parent=self.window):
+                webbrowser.open(found["url"])
+        elif manual:
+            messagebox.showinfo("Check for updates", f"Stormworks MCP {__version__} is the latest version.",
+                                parent=self.window)
 
     def _append(self, line):
         self.log_text.configure(state="normal")
@@ -82,6 +126,11 @@ class DesktopApp:
         self.log_text.configure(state="disabled")
 
     def _poll(self):
+        while True:
+            try:
+                self._show_update(*self.update_results.get_nowait())
+            except queue.Empty:
+                break
         for _ in range(200):
             try:
                 self._append(self.controller.logs.get_nowait())
@@ -249,7 +298,7 @@ def main(smoke=False):
         window.destroy()
         return
     try:
-        app = DesktopApp(window)
+        app = DesktopApp(window, check_updates=not smoke)
         errors = _smoke(app) if smoke else []
         if not smoke:
             window.deiconify()

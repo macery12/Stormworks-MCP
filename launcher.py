@@ -22,12 +22,27 @@ def main():
     mode.add_argument("--gui-smoke", action="store_true", help=argparse.SUPPRESS)
     mode.add_argument("--config", choices=("json", "toml", "command"), help="print client configuration")
     mode.add_argument("--doctor", action="store_true", help="report runtime paths without modifying files")
+    mode.add_argument("--add-client", choices=("claude", "codex"),
+                      help="add this EXE to a client's MCP settings (the installer uses this)")
+    parser.add_argument("--replace", action="store_true",
+                        help="with --add-client: replace an existing Stormworks entry (a backup is kept)")
     parser.add_argument("--parent-pid", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.config:
         from swhull.client_config import raw_config  # noqa: PLC0415
 
         print(raw_config(args.config))
+    elif args.add_client:
+        import sys  # noqa: PLC0415
+
+        from swhull.client_config import add_client  # noqa: PLC0415
+
+        try:
+            target, backup = add_client(args.add_client, replace=args.replace)
+        except (OSError, ValueError) as exc:
+            print(f"Could not set up {args.add_client}: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        print(f"Configured {target}; backup: {backup or 'new file'}")
     elif args.doctor:
         from swhull.diagnostics import runtime_status  # noqa: PLC0415
 

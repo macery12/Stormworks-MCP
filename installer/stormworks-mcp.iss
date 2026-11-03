@@ -52,6 +52,12 @@ SetupLogging=yes
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
+[Tasks]
+; Offered only for clients found on this account. checkedonce: preselected on a first install,
+; not on upgrades (the entry already points at this folder).
+Name: "clientclaude"; Description: "Add to Claude Desktop (close Claude first)"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasClaude; Flags: checkedonce
+Name: "clientcodex"; Description: "Add to ChatGPT / Codex"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasCodex; Flags: checkedonce
+
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Build Stormworks vehicles with your AI client"
 
@@ -132,6 +138,43 @@ procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
   if Leaving then
     Confirm := False;
+end;
+
+{ The EXE reads the same variables when it writes the settings, so these agree with it. }
+function HasClaude(): Boolean;
+begin
+  Result := DirExists(AddBackslash(GetEnv('APPDATA')) + 'Claude');
+end;
+
+function HasCodex(): Boolean;
+begin
+  if GetEnv('CODEX_HOME') <> '' then
+    Result := DirExists(GetEnv('CODEX_HOME'))
+  else
+    Result := DirExists(AddBackslash(GetEnv('USERPROFILE')) + '.codex');
+end;
+
+procedure AddClient(Task, Client, Name: String);
+var
+  Code: Integer;
+begin
+  if not WizardIsTaskSelected(Task) then
+    Exit;
+  WizardForm.StatusLabel.Caption := 'Adding Stormworks MCP to ' + Name + '...';
+  { As the user who started setup, so an all-users install still writes their own settings. }
+  if not ExecAsOriginalUser(ExpandConstant('{app}\{#AppExe}'), '--add-client ' + Client + ' --replace', '',
+      SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    SuppressibleMsgBox('Could not add Stormworks MCP to ' + Name + '. Open Stormworks MCP and use MCP > Set up instead.',
+      mbInformation, MB_OK, IDOK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    AddClient('clientclaude', 'claude', 'Claude Desktop');
+    AddClient('clientcodex', 'codex', 'ChatGPT / Codex');
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

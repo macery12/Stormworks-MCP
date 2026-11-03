@@ -54,6 +54,14 @@ jobs:
           $arguments = @('--commit', $env:GITHUB_SHA, '--repository', $env:GITHUB_REPOSITORY)
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('--tag', $env:GITHUB_REF_NAME) }
           uv run python tools/release_assets.py @arguments
+      - name: Write winget manifests for the assembled installer
+        run: uv run python tools/winget_manifest.py --out dist/winget
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: winget-manifests
+          path: dist/winget/*
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-release

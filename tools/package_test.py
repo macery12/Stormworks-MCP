@@ -8,8 +8,9 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import socket
+import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,6 +22,60 @@ from mcp.client.stdio import stdio_client
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from swhull.desktop_runtime import request, running_connection  # noqa: E402
+
+
+def alive(pid):
+    if sys.platform == "win32":
+        import ctypes  # noqa: PLC0415
+
+        kernel = ctypes.WinDLL("kernel32")
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            return False
+        try:
+            return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def wait_gone(pid, seconds):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if not alive(pid):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def orphaned_bridge(command, args, env, cwd):
+    """A client that dies without closing the bridge's stdin (another process still holds the
+    pipe) must not leave the bridge running: it exits when its parent does."""
+    code = ("import subprocess, sys, time; "
+            "child = subprocess.Popen(sys.argv[1:], stdin=sys.stdin, stdout=subprocess.DEVNULL); "
+            "print(child.pid, flush=True); "
+            "time.sleep(600)")
+    # The base interpreter, so the stand-in client is one process (a venv's python.exe is a
+    # launcher plus a child, and killing the launcher would leave the client running).
+    client = getattr(sys, "_base_executable", None) or sys.executable
+    parent = subprocess.Popen([client, "-c", code, command, *args, "--connect"], env=env, cwd=cwd,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    pid = int(parent.stdout.readline())
+    try:
+        time.sleep(3)
+        assert alive(pid), "the bridge exited before its client did"
+        parent.kill()
+        parent.wait()
+        assert wait_gone(pid, 15), "the bridge outlived its client"
+    finally:
+        parent.stdin.close()
+        if alive(pid):
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)] if sys.platform == "win32" else ["kill", "-9", str(pid)],
+                           capture_output=True, check=False)
 
 
 def available_port():
@@ -131,8 +186,21 @@ async def exercise(command, args):
                     # Disconnecting one client must leave the shared host and another client alive.
                     assert not (await second.call_tool("get_runtime_status", {})).is_error
                     assert running_connection()["instance"] == record["instance"]
+                await asyncio.to_thread(orphaned_bridge, command, args, env, temporary)
+                # An idle bridge must exit when the desktop host stops (the GUI was closed).
+                idle = subprocess.Popen([command, *args, "--connect"], env=env, cwd=temporary,
+                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                await asyncio.sleep(3)
+                assert idle.poll() is None, "the idle bridge exited early"
                 request(record, "/shutdown", method="POST")
                 await asyncio.to_thread(host.wait, timeout=15)
+                try:
+                    await asyncio.to_thread(idle.wait, timeout=15)
+                except subprocess.TimeoutExpired:
+                    idle.kill()
+                    raise AssertionError("an idle bridge kept running after the host stopped") from None
+                finally:
+                    idle.stdin.close()
                 assert not (temporary / "runtime" / "connection.json").exists()
                 stopped = await asyncio.to_thread(subprocess.run, [command, *args, "--connect"], env=env,
                                                   input="", capture_output=True, text=True, timeout=60)
@@ -151,7 +219,8 @@ async def exercise(command, args):
                     except subprocess.TimeoutExpired:
                         host.kill()
                         host.wait()
-        print("Shared MCP smoke passed: two clients, one host, workers, cache/export, duplicate rejection, logs, stop")
+        print("Shared MCP smoke passed: two clients, one host, workers, cache/export, duplicate rejection, logs, stop, "
+          "no bridge left behind by a dead client or a stopped host")
 
 
 def main():

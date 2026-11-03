@@ -18,6 +18,14 @@ from pathlib import Path
 from ._version import __version__
 
 LOG = logging.getLogger("stormworks.desktop")
+# Seconds a bridge waits after its relay ends before forcing its exit (the stdin reader thread
+# cannot be cancelled); long enough to flush the last message to the client.
+BRIDGE_EXIT_GRACE = 2.0
+# An idle bridge checks the host this often and leaves after this many failed checks in a row
+# (or at once if a different host instance answers: its session is gone).
+BRIDGE_HEARTBEAT = 3.0
+BRIDGE_MISSES = 3
+BRIDGE_HEALTH_TIMEOUT = 5.0
 HOST = "127.0.0.1"
 DEFAULT_PORT = 38473
 
@@ -135,6 +143,75 @@ def _watch_parent(parent_pid, stop):
         stop()
 
 
+def _windows_process_info():
+    """{pid: parent pid} for every process, from a Toolhelp snapshot."""
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", wintypes.LONG), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", wintypes.WCHAR * 260)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snapshot = kernel.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    parents = {}
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        return parents
+    try:
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        ok = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            ok = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snapshot)
+    return parents
+
+
+def _windows_image(pid):
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        size = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return None
+        return buffer.value
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def client_pid():
+    """The process that started this connector. A frozen one-file EXE runs as a bootloader plus
+    a child, and a venv's python.exe as a launcher plus a child; both layers run the same
+    executable as we do and wait for us, so skip them and watch the client above them."""
+    pid = os.getppid()
+    if sys.platform != "win32":
+        return pid
+    me = os.path.normcase(os.path.abspath(sys.executable))
+    parents = None
+    for _ in range(4):
+        image = _windows_image(pid)
+        if image is None or os.path.normcase(os.path.abspath(image)) != me:
+            return pid
+        parents = parents if parents is not None else _windows_process_info()
+        if not parents.get(pid):
+            return pid
+        pid = parents[pid]
+    return pid
+
+
 def run_server(parent_pid=None):
     """Bind only loopback, authenticate all requests, and publish ephemeral connection details."""
     import uvicorn  # noqa: PLC0415
@@ -207,6 +284,37 @@ async def bridge():
     from mcp_types import JSONRPCRequest, JSONRPCResponse  # noqa: PLC0415
 
     record = await anyio.to_thread.run_sync(running_connection)
+    # The relay reads stdin in a thread that cannot be cancelled, so a bridge whose client died
+    # without closing the pipe, or whose host stopped, used to wait forever (players found
+    # stray connectors after closing the app). Leave when the client process is gone, and
+    # shortly after either direction of the relay ends.
+    threading.Thread(target=_watch_parent, args=(client_pid(), lambda: os._exit(0)), daemon=True,
+                     name="client watcher").start()
+
+    def leave_soon():
+        timer = threading.Timer(BRIDGE_EXIT_GRACE, os._exit, args=(0,))
+        timer.daemon = True
+        timer.start()
+
+    def watch_host():
+        # An idle relay never notices the host stopping, so check it like a heartbeat.
+        misses = 0
+        while True:
+            time.sleep(BRIDGE_HEARTBEAT)
+            try:
+                # A busy host answers slowly; only a refused connection or a missing record
+                # means it stopped, so allow a generous timeout.
+                current = read_connection()
+                status = request(current, "/health", timeout=BRIDGE_HEALTH_TIMEOUT)
+                same = current["instance"] == status.get("instance") == record["instance"]
+                misses = 0 if same else BRIDGE_MISSES
+            except (OSError, ValueError, KeyError):
+                misses += 1
+            if misses >= BRIDGE_MISSES:
+                os._exit(0)
+
+    threading.Thread(target=watch_host, daemon=True, name="host watcher").start()
+
     url = f"http://{HOST}:{record['port']}/mcp"
     protocol_version, initialize_id = None, None
     async with (
@@ -228,6 +336,7 @@ async def bridge():
                         item.metadata = ClientMessageMetadata(headers={"MCP-Protocol-Version": protocol_version})
                     await remote_write.send(item)
             finally:
+                leave_soon()
                 group.cancel_scope.cancel()
 
         async def to_client():
@@ -240,6 +349,7 @@ async def bridge():
                         protocol_version = item.message.result.get("protocolVersion")
                     await local_write.send(item)
             finally:
+                leave_soon()
                 group.cancel_scope.cancel()
 
         group.start_soon(to_host)

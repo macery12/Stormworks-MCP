@@ -3,6 +3,7 @@ upgrade over a running copy (the desktop host and an orphaned --connect bridge),
 uninstall. Refuses to run when Stormworks MCP is already installed, so a real install is
 never replaced; CI runners start clean."""
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -26,8 +27,9 @@ def installed():
     return None
 
 
-def run(installer, target, log):
-    subprocess.run([str(installer), *QUIET, f"/DIR={target}", f"/LOG={log}"], check=True, timeout=300)
+def run(installer, target, log, tasks="", env=None):
+    subprocess.run([str(installer), *QUIET, f"/DIR={target}", f"/LOG={log}", f"/TASKS={tasks}"],
+                   check=True, timeout=300, env=env)
 
 
 def wait(condition, seconds, what):
@@ -49,7 +51,13 @@ def main():
     with tempfile.TemporaryDirectory() as scratch:
         target = Path(scratch) / "Stormworks MCP install"
         exe = target / "stormworks-mcp.exe"
-        run(installer, target, Path(scratch) / "install.log")
+        # Client set-up writes to stand-in client folders: the installer and the EXE both read
+        # APPDATA and CODEX_HOME, so the real client settings are never touched.
+        clients = Path(scratch) / "clients"
+        (clients / "Claude").mkdir(parents=True)
+        (clients / "codex").mkdir()
+        client_env = {**os.environ, "APPDATA": str(clients), "CODEX_HOME": str(clients / "codex")}
+        run(installer, target, Path(scratch) / "install.log", "clientclaude,clientcodex", client_env)
         record = installed()
         if not exe.is_file() or not record or Path(record["InstallLocation"]).resolve() != target.resolve():
             raise SystemExit(f"install did not land in {target}: {record}")
@@ -57,6 +65,12 @@ def main():
                                  check=True).stdout.strip()
         if version != record["DisplayVersion"]:
             raise SystemExit(f"installed EXE reports {version!r}, the uninstall entry {record['DisplayVersion']!r}")
+        claude = json.loads((clients / "Claude" / "claude_desktop_config.json").read_text(encoding="utf-8"))
+        entry = claude["mcpServers"]["stormworks"]
+        if Path(entry["command"]).resolve() != exe.resolve() or entry["args"] != ["--connect"]:
+            raise SystemExit(f"Claude Desktop entry does not run the installed EXE: {entry}")
+        if str(exe) not in (clients / "codex" / "config.toml").read_text(encoding="utf-8").replace("\\\\", "\\"):
+            raise SystemExit("the Codex entry does not run the installed EXE")
         shortcut = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Stormworks MCP.lnk"
         if not shortcut.is_file():
             raise SystemExit(f"no Start menu shortcut at {shortcut}")
@@ -79,6 +93,7 @@ def main():
         if shortcut.exists():
             raise SystemExit("uninstall left the Start menu shortcut")
     print(f"Installer smoke passed: install to a path with spaces, version {version}, Start menu shortcut, "
+          f"Claude Desktop and Codex entries, "
           f"upgrade over {len(running)} running copies, uninstall")
 
 

@@ -116,19 +116,25 @@ You need Windows 10 or 11 (x64), Stormworks installed through Steam, and Claude 
 ChatGPT / Codex Windows app on the same PC. The download includes Python and every dependency; you
 do not need to install Python, uv or Git.
 
-1. Download `stormworks-mcp-0.2.0-windows-x64-setup.exe` from
+1. Download `stormworks-mcp-0.3.0-windows-x64-setup.exe` from
    [Releases](https://github.com/macery12/Stormworks-MCP/releases) and run it. It installs for
    you only by default (no admin); choose all users on the first page if you want, which asks
    for admin. Pick another folder if you like. A newer installer finds the existing install and
    offers to upgrade or repair it in place, or to uninstall it. Prefer no installer? Download
-   the portable `stormworks-mcp-0.2.0-windows-x64.exe` instead, move it to a permanent folder
+   the portable `stormworks-mcp-0.3.0-windows-x64.exe` instead, move it to a permanent folder
    and double-click it.
+   Coming from an older version? Remove the old Stormworks entry from your AI client first.
 2. Open **Stormworks MCP** from the Start menu (or let the installer launch it).
-3. Close your AI client. In the app, open **MCP > Set up Claude Desktop** or
+3. If the installer did not add it to your client already ("Add to Claude Desktop" /
+   "Add to ChatGPT / Codex"), close your AI client. In the app, open **MCP > Set up Claude Desktop** or
    **MCP > Set up ChatGPT / Codex**, check the configuration path it shows, and press
    **Add to client**. Your other settings are kept, and the file is backed up first. To replace an
    existing Stormworks entry, tick the replacement checkbox.
 4. Press **Start server**, then open your client again.
+
+The app checks GitHub for a newer release when it starts and shows a download link if there is
+one (**Help > Check for updates**; untick **Check for updates at startup** to stop it). With
+winget: `winget install macery12.StormworksMCP`, once the package is accepted there.
 
 The window shows the server status and a live log. Keep it open while you build: every client
 connects to this one shared server, and closing the window stops it and disconnects them. After you
@@ -370,7 +376,7 @@ uv run python tools/build_installer.py
 uv run python tools/installer_test.py   # refuses to run over a real install
 ```
 
-Tagging `v0.2.0` runs the tests, builds and tests the executable, and uploads it to a
+Tagging `v0.3.0` runs the tests, builds and tests the executable, and uploads it to a
 draft GitHub release with checksums and signed build provenance; see
 [releasing and verification](docs/releases.md). Changes must pass lint and tests. Geometry changes
 also need a rendered review and a specific in-game check, as described in [CLAUDE.md](CLAUDE.md).
