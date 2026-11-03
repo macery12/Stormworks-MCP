@@ -116,9 +116,14 @@ You need Windows 10 or 11 (x64), Stormworks installed through Steam, and Claude 
 ChatGPT / Codex Windows app on the same PC. The download includes Python and every dependency; you
 do not need to install Python, uv or Git.
 
-1. Download `stormworks-mcp-0.2.0-windows-x64.exe` from
-   [Releases](https://github.com/macery12/Stormworks-MCP/releases).
-2. Move it to a permanent folder and double-click it. There is no installer.
+1. Download `stormworks-mcp-0.2.0-windows-x64-setup.exe` from
+   [Releases](https://github.com/macery12/Stormworks-MCP/releases) and run it. It installs for
+   you only by default (no admin); choose all users on the first page if you want, which asks
+   for admin. Pick another folder if you like. A newer installer finds the existing install and
+   offers to upgrade or repair it in place, or to uninstall it. Prefer no installer? Download
+   the portable `stormworks-mcp-0.2.0-windows-x64.exe` instead, move it to a permanent folder
+   and double-click it.
+2. Open **Stormworks MCP** from the Start menu (or let the installer launch it).
 3. Close your AI client. In the app, open **MCP > Set up Claude Desktop** or
    **MCP > Set up ChatGPT / Codex**, check the configuration path it shows, and press
    **Add to client**. Your other settings are kept, and the file is backed up first. To replace an
@@ -131,7 +136,8 @@ start the server again, reconnect or restart your client. A second copy of the a
 
 For other clients, **MCP > Custom client / raw configuration** copies MCP JSON, Codex TOML or a
 PowerShell add command. The **View** menu has diagnostics and log copy/clear. Setup records the
-EXE's current location, so if you move the file, reopen it and replace its client entries.
+EXE's current location; an installed copy keeps its folder across upgrades. If you move the
+portable file, reopen it and replace its client entries.
 
 The same configuration serves Codex CLI and the IDE extension on that PC. ChatGPT on the web and
 cloud tasks use a separate connection path that this app does not set up; see
@@ -352,13 +358,16 @@ uv run tools/diagnostic_milestone.py out/diagnostic-review  # three-fault repair
 uv run python tools/package_test.py # two clients, shared host, guide assets, workers, export and stop
 ```
 
-On Windows, build the portable desktop executable:
+On Windows, build the portable desktop executable and the installer (needs Inno Setup 6:
+`winget install JRSoftware.InnoSetup`):
 
 ```powershell
 uv sync --locked --group build
 uv run --group build python tools/build_windows.py
 uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
+uv run python tools/build_installer.py
+uv run python tools/installer_test.py   # refuses to run over a real install
 ```
 
 Tagging `v0.2.0` runs the tests, builds and tests the executable, and uploads it to a

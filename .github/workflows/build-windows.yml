@@ -39,6 +39,15 @@ jobs:
           Copy-Item -LiteralPath dist/stormworks-mcp.exe -Destination (Join-Path $portable 'stormworks-mcp.exe')
           uv run python tools/desktop_test.py --exe (Join-Path $portable 'stormworks-mcp.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run python tools/build_installer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, upgrade over running copies and uninstall
+        run: uv run python tools/installer_test.py --installer dist/stormworks-mcp-setup.exe
       - name: Assemble release files and checksums
         shell: pwsh
         run: |

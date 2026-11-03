@@ -1,8 +1,8 @@
 # Windows builds and releases
 
-The GitHub workflow builds the portable desktop EXE from a tag in this repository, using
-locked dependencies. It uploads that actual executable with checksums and signed build
-provenance. There is no installer or locally supplied binary input.
+The GitHub workflow builds the portable desktop EXE and its Inno Setup installer from a tag in
+this repository, using locked dependencies. It uploads both with checksums and signed build
+provenance. There is no locally supplied binary input.
 
 ## Publish a version
 
@@ -38,6 +38,8 @@ be replaced by this workflow; publish a new tag/version for a changed executable
 - The same protocol smoke against that frozen executable.
 - Real Tk menu/dialog construction and Start, Stop, restart and close-stop controls against
   a copy of the EXE in a path with spaces. Client settings are never changed by the smoke.
+- The installer: a silent per-user install into a path with spaces, the Start menu shortcut,
+  an upgrade over a running host and an orphaned `--connect` bridge, and uninstall.
 - Tag/version agreement, checksums and signed GitHub build attestations.
 
 Push/PR CI also builds the Windows EXE after tests. **Actions > CI > Run workflow** produces
@@ -48,17 +50,27 @@ vehicles, designs and caches in temporary folders.
 
 | Asset | Description |
 | --- | --- |
-| `stormworks-mcp-<version>-windows-x64.exe` | Double-click for the GUI; `--connect` is the quiet client connector |
+| `stormworks-mcp-<version>-windows-x64-setup.exe` | Installer: per-user by default, all users optional (admin); upgrades, repairs or uninstalls an existing install |
+| `stormworks-mcp-<version>-windows-x64.exe` | Portable: double-click for the GUI; `--connect` is the quiet client connector |
 | `build-info.json` | Version, source commit/tag, runtime, entry point and lockfile digest |
 | `SHA256SUMS.txt` | SHA256 digests of the executable and build metadata |
 | `provenance.sigstore.json` | GitHub's signed bundle tying the uploaded bytes to the workflow/tag |
 
-The single EXE is the user download; the other files provide source-build verification.
-It has no install/uninstall step or bundled game assets. Keep it in a permanent folder,
-use **MCP > Set up** for your client and press **Start server**. Closing the window stops
-the server. Moving the EXE requires updating its path in each client through the setup menu.
-Deleting the EXE preserves designs, vehicles and client settings; remove its client entry
-when you no longer use it.
+The installer and the portable EXE are the user downloads; the other files provide source-build
+verification. Neither bundles game assets.
+
+The installer puts the EXE in `%LOCALAPPDATA%\Programs\Stormworks MCP` (per user, no admin) or
+`Program Files\Stormworks MCP` (all users, admin), or a folder you choose, and adds a Start menu
+shortcut. Running a newer installer finds the earlier install and offers upgrade/repair (same
+folder, same client entries) or uninstall. It closes a running copy first, including `--connect`
+bridges left behind by clients. Uninstall (Settings > Apps) removes the program and shortcut and
+keeps designs, prefabs and client settings. Silent installs take Inno Setup's usual switches,
+for example `/VERYSILENT /CURRENTUSER` or `/ALLUSERS`.
+
+Keep the portable EXE in a permanent folder, use **MCP > Set up** for your client and press
+**Start server**. Closing the window stops the server. Moving the EXE requires updating its
+path in each client through the setup menu. Deleting the EXE preserves designs, vehicles and
+client settings; remove its client entry when you no longer use it.
 
 Attestations establish build origin. Windows Authenticode signing is not configured yet.
 Local rebuilds can differ byte-for-byte; the claim is a traceable source build rather than
@@ -85,6 +97,8 @@ uv sync --locked --group build
 uv run --group build python tools/build_windows.py
 uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
 uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
+uv run python tools/build_installer.py      # Inno Setup 6: winget install JRSoftware.InnoSetup
+uv run python tools/installer_test.py       # refuses to run over a real install
 uv run python tools/release_assets.py --tag v0.2.0 --commit local
 ```
 
