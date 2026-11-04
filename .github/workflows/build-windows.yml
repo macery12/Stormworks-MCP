@@ -1,4 +1,4 @@
-name: Build Windows desktop executable
+name: Build the Windows server and installer
 
 on:
   workflow_call:
@@ -29,15 +29,12 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: uv run --group build python tools/build_windows.py
-      - name: Exercise two clients against one frozen shared server
-        run: uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
-      - name: Test portable GUI controls from a path with spaces
+      - name: Exercise clients against the frozen server from a path with spaces
         shell: pwsh
         run: |
           $portable = Join-Path $env:RUNNER_TEMP 'Stormworks MCP portable smoke'
-          New-Item -ItemType Directory -Force -Path $portable | Out-Null
-          Copy-Item -LiteralPath dist/stormworks-mcp.exe -Destination (Join-Path $portable 'stormworks-mcp.exe')
-          uv run python tools/desktop_test.py --exe (Join-Path $portable 'stormworks-mcp.exe')
+          Copy-Item -Recurse -LiteralPath dist/stormworks-mcp -Destination $portable
+          uv run python tools/package_test.py --exe (Join-Path $portable 'stormworks-mcp.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the installer
         shell: pwsh

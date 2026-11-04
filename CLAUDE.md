@@ -66,7 +66,8 @@ verified.
   (multi-body pairs), `physics` (read-only mass, flotation, thrust and lift estimates),
   `paint` (paint items), `faces` (which `sc` colour paints which face), `liveries` (named paint
   schemes), `jobs` (heavy tool work in a child process the server kills on cancel or
-  timeout), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays,
+  timeout), `runtime` (each client starts its own `--stdio` server; shared log.txt),
+  `design_lock` (design writes locked across those servers), `console_menu` (double-click menu), `pieces` (geometry and rotations), `vehicle` (XML), `render` (framing, overlays,
   flat painting), `raster` (lit rendering: GPU or CPU rasterizing, one shared NumPy lighting
   pass), `definitions` (game install detection).
 - `get_guide` serves `docs/start.md` (any vehicle), `swhull/guide.md` (hull generator) and the

@@ -82,10 +82,26 @@ def test_replace_requires_explicit_opt_in_and_unique_backups(tmp_path, client):
 def test_frozen_config_uses_installed_executable(monkeypatch):
     monkeypatch.setattr(client_config.sys, "frozen", True, raising=False)
     monkeypatch.setattr(client_config.sys, "executable", ENTRY["command"])
-    assert client_config.server_entry() == {"command": str(Path(ENTRY["command"]).resolve()), "args": ["--connect"]}
+    assert client_config.server_entry() == {"command": str(Path(ENTRY["command"]).resolve()), "args": ["--stdio"]}
     data = tomlkit.parse(client_config.raw_config("toml", ENTRY))
     assert data["mcp_servers"]["stormworks"]["command"] == ENTRY["command"]
     assert json.loads(client_config.raw_config("json", ENTRY))["mcpServers"]["stormworks"] == ENTRY
+
+
+def test_configured_tells_this_copy_from_another(monkeypatch, tmp_path):
+    monkeypatch.setattr(client_config.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(client_config.sys, "executable", str(tmp_path / "mine" / "stormworks-mcp.exe"))
+    path = tmp_path / "claude.json"
+    assert client_config.configured("claude", path) == "no"
+    client_config.add_client("claude", path, entry={"command": str(tmp_path / "other.exe"), "args": []})
+    assert client_config.configured("claude", path) == "other"
+    client_config.add_client("claude", path, replace=True)
+    assert client_config.configured("claude", path) == "yes"
+    toml = tmp_path / "config.toml"
+    # A v0.3 entry (--connect) for this copy still counts as set up.
+    toml.write_text(client_config.raw_config("toml", {"command": client_config.server_entry()["command"],
+                                                       "args": ["--connect"]}))
+    assert client_config.configured("codex", toml) == "yes"
 
 
 def test_client_paths_honor_appdata_and_codex_home(monkeypatch, tmp_path):

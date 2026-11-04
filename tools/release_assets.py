@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 import tomlkit
@@ -29,6 +30,15 @@ def validate_version(tag=None):
     return version
 
 
+def portable(folder, target):
+    """Zip the server folder under one top folder, so extracting it never scatters files."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for path in sorted(folder.rglob("*")):
+            if path.is_file():
+                archive.write(path, Path("Stormworks MCP") / path.relative_to(folder))
+        archive.write(ROOT / "LICENSE", "Stormworks MCP/LICENSE")
+
+
 def assemble(tag, commit, repository):
     version = validate_version(tag)
     dist = ROOT / "dist"
@@ -36,18 +46,18 @@ def assemble(tag, commit, repository):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("dist/release must be empty; move the previous artifacts before assembling")
-    binary = dist / "stormworks-mcp.exe"
-    if not binary.is_file():
-        raise ValueError(f"missing build artifact: {binary}")
+    folder = dist / "stormworks-mcp"
+    if not (folder / "stormworks-mcp.exe").is_file():
+        raise ValueError(f"missing build artifact: {folder / 'stormworks-mcp.exe'}")
     installer = dist / "stormworks-mcp-setup.exe"
     if not installer.is_file():
         raise ValueError(f"missing installer: {installer} (tools/build_installer.py)")
-    shutil.copyfile(binary, output / f"stormworks-mcp-{version}-windows-x64.exe")
+    portable(folder, output / f"stormworks-mcp-{version}-windows-x64-portable.zip")
     shutil.copyfile(installer, output / f"stormworks-mcp-{version}-windows-x64-setup.exe")
     (output / "build-info.json").write_text(json.dumps({
         "version": version, "tag": tag, "commit": commit, "repository": repository,
         "platform": "windows-x64", "python": sys.version.split()[0],
-        "entry_point": "launcher.py", "client_mode": "--connect", "default_mode": "desktop GUI",
+        "entry_point": "launcher.py", "client_mode": "--stdio", "default_mode": "console setup menu",
         "installer": "Inno Setup; per-user by default, all users optional; upgrades in place",
         "uv_lock_sha256": hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest(),
         "workflow": f"https://github.com/{repository}/actions/workflows/release.yml",

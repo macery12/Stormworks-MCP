@@ -22,7 +22,7 @@ uv run tools/smoke_test.py out    # build and render every hull preset, blocks a
 uv run tools/client_test.py       # drive the server over MCP stdio, like a desktop client does
 uv run tools/staged_builder_test.py out/staged-builder --benchmark
 uv run tools/diagnostic_milestone.py out/diagnostic-review   # fault, repair and validation export
-uv run python tools/package_test.py   # two clients, shared host, guide assets, workers, export and stop
+uv run python tools/package_test.py   # two clients with their own servers, guides, workers, export, log, menu
 ```
 
 Tool definitions are graded by Glama (TDQS). Check them without an API key:
@@ -45,19 +45,18 @@ changed. Some images need game definitions (the Humvee, the engines and the diag
 
 ## Windows builds
 
-Build the portable desktop executable and the installer (needs Inno Setup 6:
+Build the Windows server folder and the installer (needs Inno Setup 6:
 `winget install JRSoftware.InnoSetup`):
 
 ```powershell
 uv sync --locked --group build
 uv run --group build python tools/build_windows.py
-uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
-uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
+uv run python tools/package_test.py --exe dist/stormworks-mcp/stormworks-mcp.exe
 uv run python tools/build_installer.py
 uv run python tools/installer_test.py   # refuses to run over a real install
 ```
 
-Pushing a version tag (`vX.Y.Z`) runs the tests, builds and tests the executable and installer,
+Pushing a version tag (`vX.Y.Z`) runs the tests, builds and tests the server and installer,
 and uploads them to a draft GitHub release with checksums and signed build provenance. See
 [releases](releases.md).
 
@@ -66,7 +65,7 @@ and uploads them to a draft GitHub release with checksums and signed build prove
 | Path | Contents |
 | --- | --- |
 | [server.py](../server.py) | MCP tool definitions |
-| [launcher.py](../launcher.py) | Desktop app entry point and the `--connect` client relay |
+| [launcher.py](../launcher.py) | EXE entry point: `--stdio` server for clients, setup menu on double-click, CLI flags |
 | [swhull/hull.py](../swhull/hull.py), [presets.py](../swhull/presets.py) | Hull spec to solid voxels; the hull archetypes |
 | [swhull/smooth.py](../swhull/smooth.py), [habits.py](../swhull/habits.py) | Watertight skin and slope-piece fitting; veteran finishing (chamfers, ballast, railings) |
 | [swhull/paint.py](../swhull/paint.py), [liveries.py](../swhull/liveries.py), [faces.py](../swhull/faces.py) | Paint items, named paint schemes, per-face colours |
@@ -85,10 +84,11 @@ and uploads them to a draft GitHub release with checksums and signed build prove
 | [swhull/render.py](../swhull/render.py), [raster.py](../swhull/raster.py), [meshes.py](../swhull/meshes.py) | Preview framing and overlays; lit GPU/CPU rendering; installed part meshes |
 | [swhull/definitions.py](../swhull/definitions.py), [benches.py](../swhull/benches.py) | Game install detection, part definitions and workbench sizes |
 | [swhull/jobs.py](../swhull/jobs.py), [cache.py](../swhull/cache.py) | Killable worker processes; shared geometry cache |
-| [swhull/setup_gui.py](../swhull/setup_gui.py), [desktop_runtime.py](../swhull/desktop_runtime.py) | Desktop window and shared server |
+| [swhull/runtime.py](../swhull/runtime.py), [design_lock.py](../swhull/design_lock.py) | Stdio server lifetime and the shared log; the design lock held across servers |
+| [swhull/console_menu.py](../swhull/console_menu.py), [client_config.py](../swhull/client_config.py), [updates.py](../swhull/updates.py) | Double-click menu; client settings; the daily update check |
 | [docs/start.md](start.md), [swhull/guide.md](../swhull/guide.md) | Guides served by `get_guide` (any vehicle; hull generator) |
 | [viewer/](../viewer) | Standalone 3D viewer |
-| [tools/](../tools) | Smoke, client, package and desktop tests; in-game calibration vehicles; README images |
+| [tools/](../tools) | Smoke, client, package and installer tests; in-game calibration vehicles; README images |
 
 ## How it works
 

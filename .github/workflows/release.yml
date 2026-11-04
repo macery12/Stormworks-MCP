@@ -38,6 +38,7 @@ jobs:
         with:
           subject-path: |
             release/*.exe
+            release/*.zip
             release/build-info.json
             release/SHA256SUMS.txt
       - name: Include the signed provenance bundle
@@ -58,10 +59,9 @@ jobs:
             cat > release-notes.md <<'NOTES'
           Windows packages built by GitHub Actions from the release tag with locked Python dependencies.
 
-          Download the installer (`-setup.exe`, installs for you only by default; choose all users if you want, which asks for admin) or the portable `.exe`. Running a newer installer upgrades the existing install in place.
-          Use the MCP menu to set up Claude Desktop or the ChatGPT / Codex Windows app (the installer can do it for you).
-          Upgrading from an older version: remove the old Stormworks MCP entry from your client (and any older server.py or extension setup) before adding the new one.
-          Press Start to run one shared server for all clients. Closing the window stops the server.
+          Download the installer (`-setup.exe`, installs for you only by default; choose all users if you want, which asks for admin) or the portable `-portable.zip`. Running a newer installer upgrades the existing install in place.
+          The installer can add Stormworks MCP to Claude Desktop and the ChatGPT / Codex Windows app; for the portable zip, double-click `stormworks-mcp.exe` and use its menu.
+          Your AI client then starts the server by itself in the background and stops it when it closes. Nothing needs to be open first.
 
           `SHA256SUMS.txt`, `build-info.json`, and `provenance.sigstore.json` record checksums and build provenance.
           Add the release description and publish this draft when ready.

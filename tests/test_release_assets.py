@@ -1,5 +1,6 @@
 import hashlib
 import json
+import zipfile
 
 import pytest
 
@@ -38,7 +39,9 @@ def test_release_assets_match_binary_and_record_source(tmp_path, monkeypatch):
     (tmp_path / "LICENSE").write_text("MIT")
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "stormworks-mcp.exe").write_bytes(b"synthetic server bytes")
+    (dist / "stormworks-mcp" / "_internal").mkdir(parents=True)
+    (dist / "stormworks-mcp" / "stormworks-mcp.exe").write_bytes(b"synthetic server bytes")
+    (dist / "stormworks-mcp" / "_internal" / "python312.dll").write_bytes(b"synthetic library")
     with pytest.raises(ValueError, match="missing installer"):
         release_assets.assemble("v0.1.0", "source-commit", "owner/repo")
     (dist / "stormworks-mcp-setup.exe").write_bytes(b"synthetic installer bytes")
@@ -46,12 +49,14 @@ def test_release_assets_match_binary_and_record_source(tmp_path, monkeypatch):
     output = dist / "release"
     metadata = json.loads((output / "build-info.json").read_text())
     assert metadata["commit"] == "source-commit" and metadata["tag"] == "v0.1.0"
-    binary = output / "stormworks-mcp-0.1.0-windows-x64.exe"
-    assert binary.read_bytes() == (dist / "stormworks-mcp.exe").read_bytes()
-    assert metadata["client_mode"] == "--connect"
+    with zipfile.ZipFile(output / "stormworks-mcp-0.1.0-windows-x64-portable.zip") as archive:
+        assert sorted(archive.namelist()) == ["Stormworks MCP/LICENSE", "Stormworks MCP/_internal/python312.dll",
+                                              "Stormworks MCP/stormworks-mcp.exe"]
+        assert archive.read("Stormworks MCP/stormworks-mcp.exe") == b"synthetic server bytes"
+    assert metadata["client_mode"] == "--stdio"
     setup = output / "stormworks-mcp-0.1.0-windows-x64-setup.exe"
     assert setup.read_bytes() == (dist / "stormworks-mcp-setup.exe").read_bytes()
-    assert sorted(path.suffix for path in output.iterdir()) == [".exe", ".exe", ".json", ".txt"]
+    assert sorted(path.suffix for path in output.iterdir()) == [".exe", ".json", ".txt", ".zip"]
     for line in (output / "SHA256SUMS.txt").read_text().splitlines():
         digest, filename = line.split("  ", 1)
         assert hashlib.sha256((output / filename).read_bytes()).hexdigest() == digest

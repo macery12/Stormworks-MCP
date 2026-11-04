@@ -11,7 +11,6 @@ import logging
 import os
 import re
 import tempfile
-import threading
 import time
 import webbrowser
 from pathlib import Path
@@ -27,7 +26,8 @@ from swhull._version import __version__
 from swhull.build import deck_profile as _deck_profile, resolve_spec
 from swhull.hull import merge
 from swhull.editing import revision as _revision
-from swhull import definitions
+from swhull import definitions, updates
+from swhull.design_lock import DesignLock
 from swhull.jobs import run_job
 from swhull.presets import PRESETS
 from swhull.vehicle import vehicles_dir
@@ -49,7 +49,6 @@ from swhull.validation import Observation, ValidationRun
 HERE = Path(__file__).resolve().parent
 GUIDE = (HERE / "swhull" / "guide.md").read_text(encoding="utf-8")
 NAME_RE = re.compile(r"^[A-Za-z0-9 _\-()]{1,64}$")
-DESIGN_LOCK = threading.RLock()
 LOG = logging.getLogger("stormworks.tools")
 
 
@@ -59,6 +58,10 @@ def designs_dir():
         return Path(os.environ["SW_DESIGNS_DIR"])
     base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
     return Path(base) / "stormworks-hull-mcp" / "designs"
+
+
+# Each client starts its own server, so the lock must hold across processes.
+DESIGN_LOCK = DesignLock(designs_dir)
 
 
 INSTRUCTIONS = """\
@@ -82,7 +85,9 @@ matters. Report every automatic choice and skipped placement. Only the game prov
 works: prepare_vehicle_validation exports a test copy with a checklist, and
 record_vehicle_validation stores what the player saw."""
 
-mcp = MCPServer("stormworks", instructions=INSTRUCTIONS, version=__version__)
+_UPDATE = updates.notice()
+mcp = MCPServer("stormworks", instructions=INSTRUCTIONS + (f"\n\n{_UPDATE}" if _UPDATE else ""),
+                version=__version__)
 
 
 def _user_errors(fn):
@@ -328,7 +333,10 @@ def get_guide(topic: Annotated[Literal[tuple(GUIDE_TOPICS)], Field(description=(
     if topic == "hull":
         return GUIDE
     if topic in _GUIDE_FILES:
-        return (HERE / "docs" / _GUIDE_FILES[topic]).read_text(encoding="utf-8")
+        text = (HERE / "docs" / _GUIDE_FILES[topic]).read_text(encoding="utf-8")
+        # The background check may have found a release after this session started.
+        notice = updates.notice() if topic == "start" else None
+        return f"> {notice}\n\n{text}" if notice else text
     if topic not in _GUIDE_SECTIONS:
         raise ValueError(f"unknown guide topic; choose one of {', '.join(GUIDE_TOPICS)}")
     heading = _GUIDE_SECTIONS[topic]
@@ -340,9 +348,10 @@ def get_guide(topic: Annotated[Literal[tuple(GUIDE_TOPICS)], Field(description=(
 @_user_errors
 def get_runtime_status() -> dict[str, Any]:
     """Report the server version and the paths it uses: Stormworks vehicles folder, game part
-    definitions, stored designs, build cache, and the tool timeout, with notes on anything missing.
-    Use it when a tool cannot find the game, its parts or the player's vehicles. Read-only; it
-    never creates folders."""
+    definitions, stored designs, build cache, the tool timeout and the log file, with notes on
+    anything missing, plus a download note when a newer release is out. Use it when a tool
+    cannot find the game, its parts or the player's vehicles, or to tell the player where the
+    log is. Read-only; it never creates folders."""
     from swhull.diagnostics import runtime_status  # noqa: PLC0415
     return runtime_status()
 
@@ -1548,4 +1557,5 @@ async def open_in_viewer(name: Annotated[str | None, Field(description=(
 if __name__ == "__main__":
     import multiprocessing  # noqa: PLC0415
     multiprocessing.freeze_support()
-    mcp.run()
+    from swhull.runtime import run_stdio  # noqa: PLC0415
+    run_stdio(mcp)

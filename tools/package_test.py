@@ -1,27 +1,23 @@
-"""Exercise two stdio connectors against one source or frozen shared desktop host."""
+"""Exercise the source or frozen server the way clients use it: each client starts its own
+server over stdio, servers share one log file and one design lock, and no server outlives its
+client. Also drives the double-click console menu."""
 
 import argparse
 import asyncio
 import base64
-import contextlib
 import json
 import os
 import subprocess
 import sys
-import socket
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from unittest.mock import patch
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import Implementation
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-from swhull.desktop_runtime import request, running_connection  # noqa: E402
 
 
 def alive(pid):
@@ -52,9 +48,9 @@ def wait_gone(pid, seconds):
     return False
 
 
-def orphaned_bridge(command, args, env, cwd):
-    """A client that dies without closing the bridge's stdin (another process still holds the
-    pipe) must not leave the bridge running: it exits when its parent does."""
+def orphaned_server(command, args, env, cwd):
+    """A client that dies without closing the server's stdin (another process still holds the
+    pipe) must not leave the server running: it exits when its parent does."""
     code = ("import subprocess, sys, time; "
             "child = subprocess.Popen(sys.argv[1:], stdin=sys.stdin, stdout=subprocess.DEVNULL); "
             "print(child.pid, flush=True); "
@@ -62,15 +58,15 @@ def orphaned_bridge(command, args, env, cwd):
     # The base interpreter, so the stand-in client is one process (a venv's python.exe is a
     # launcher plus a child, and killing the launcher would leave the client running).
     client = getattr(sys, "_base_executable", None) or sys.executable
-    parent = subprocess.Popen([client, "-c", code, command, *args, "--connect"], env=env, cwd=cwd,
+    parent = subprocess.Popen([client, "-c", code, command, *args, "--stdio"], env=env, cwd=cwd,
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     pid = int(parent.stdout.readline())
     try:
         time.sleep(3)
-        assert alive(pid), "the bridge exited before its client did"
+        assert alive(pid), "the server exited before its client did"
         parent.kill()
         parent.wait()
-        assert wait_gone(pid, 15), "the bridge outlived its client"
+        assert wait_gone(pid, 15), "the server outlived its client"
     finally:
         parent.stdin.close()
         if alive(pid):
@@ -78,149 +74,129 @@ def orphaned_bridge(command, args, env, cwd):
                            capture_output=True, check=False)
 
 
-def available_port():
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
+def menu(command, args, env, cwd, keys):
+    result = subprocess.run([command, *args, "--menu"], input=keys, capture_output=True, text=True,
+                            env=env, cwd=cwd, timeout=60, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "Stormworks MCP" in result.stdout and "starts this server" in result.stdout, result.stdout
+    return result.stdout
 
 
-async def wait_ready(process):
-    for _ in range(200):
-        if process.poll() is not None:
-            raise RuntimeError(f"Shared server exited: {process.returncode}")
-        try:
-            return await asyncio.to_thread(running_connection)
-        except ValueError:
-            await asyncio.sleep(0.15)
-    raise TimeoutError("Shared server did not become ready")
+async def full_session(session, second, temporary):
+    init = await session.initialize()
+    assert init.instructions and init.server_info.version
+    descriptors = {tool.name: tool for tool in (await session.list_tools()).tools}
+    tools = set(descriptors)
+    assert {"preview_hull", "save_hull", "get_runtime_status", "get_guide",
+            "analyze_hull", "suggest_hull_blocks", "create_vehicle", "search_parts", "query_connections",
+            "edit_connections", "route_connections", "preflight_vehicle", "plan_vehicle_repairs",
+            "repair_vehicle", "apply_vehicle_assembly", "preview_vehicle_diagnostics",
+            "prepare_vehicle_validation", "record_vehicle_validation"} <= tools
+    assert descriptors["repair_vehicle"].output_schema["type"] == "object"
+    assert all(tool.output_schema for tool in descriptors.values())
+    for topic in ("start", "hull_workflow", "hull_staged", "edits", "testing", "hull_smoothing",
+                  "style_rules", "topics"):
+        response = await session.call_tool("get_guide", {"topic": topic})
+        assert not response.is_error and response.content[0].text
+    response = await session.call_tool("get_guide", {"topic": "land"})
+    assert not response.is_error and "humvee_4x4" in response.content[0].text
+    assert "through_blocks" in response.content[0].text
+    response, status = await asyncio.gather(
+        session.call_tool("preview_hull", {"preset": "rowboat"}),
+        second.call_tool("get_runtime_status", {}))
+    assert not response.is_error and not status.is_error
+    assert status.structured_content["log_file"].endswith("log.txt")
+    image = next(part for part in response.content if part.type == "image")
+    assert base64.b64decode(image.data).startswith(b"\x89PNG\r\n\x1a\n")
+    response = await session.call_tool("save_hull", {"name": "packaged smoke test", "preset": "rowboat"})
+    assert not response.is_error, response.content
+    assert "cache reused" in response.content[0].text
+    assert (temporary / "vehicles" / "packaged smoke test.xml").is_file()
+    diagnosis = await session.call_tool("plan_vehicle_repairs", {"design": "packaged smoke test"})
+    assert not diagnosis.is_error and diagnosis.structured_content["plan_id"]
+    preflight = await session.call_tool("preflight_vehicle", {"design": "packaged smoke test"})
+    # A boat without an engine is not a fault: preflight checks what is there.
+    assert not preflight.is_error and preflight.structured_content["status"] == "connected geometry"
+    assert preflight.structured_content["unchecked"] == []
+    diagnostics = await session.call_tool("preview_vehicle_diagnostics", {"design": "packaged smoke test", "layer": "all"})
+    assert not diagnostics.is_error and diagnostics.structured_content["overlay"]["legend"]
+    assert any(part.type == "image" for part in diagnostics.content)
+    validation = await session.call_tool("prepare_vehicle_validation", {"design": "packaged smoke test", "name": "validation copy"})
+    assert not validation.is_error and validation.structured_content["status"] == "pending"
+    invalid = await session.call_tool("edit_parts", {"design": "packaged smoke test",
+        "revision": diagnosis.structured_content["revision"],
+        "operations": [{"op": "move", "select": {"ids": ["bad"]}}]})
+    assert invalid.is_error
+    choices = await session.call_tool("suggest_hull_blocks", {"normal": [0, 1, 0.25]})
+    assert not choices.is_error and "08_wedge_4" in choices.content[0].text
+    analysis = await session.call_tool("analyze_hull", {"preset": "rowboat", "stations": [8],
+                                                      "spec": {"smoothing": "wedges_v2"}})
+    assert not analysis.is_error and "material_y_blocks" in analysis.content[0].text
+    response = await session.call_tool("preview_hull", {"spec": {"length": 500}})
+    assert response.is_error
+    # Two servers write the same design at once; the shared lock keeps both writes.
+    await asyncio.gather(*(s.call_tool("store_design", {"name": "shared", "preset": "rowboat"})
+                           for s in (session, second)))
+    stored = json.loads((temporary / "designs" / "shared.json").read_text(encoding="utf-8"))
+    assert stored["generation"] == 2, stored
 
 
 async def exercise(command, args):
     with tempfile.TemporaryDirectory(prefix="stormworks-package-test-") as folder:
         temporary = Path(folder)
+        clients = temporary / "clients"
+        (clients / "Claude").mkdir(parents=True)
         env = {**os.environ, "SW_VEHICLES_DIR": str(temporary / "vehicles"),
                "SW_DESIGNS_DIR": str(temporary / "designs"),
                "SW_BUILD_CACHE_DIR": str(temporary / "cache"), "SW_DEFINITIONS_DIR": str(temporary / "no-game"),
-               "SW_MCP_RUNTIME_DIR": str(temporary / "runtime"), "SW_MCP_PORT": str(available_port())}
-        # Prove configuration targets the actual executable, also when invoked from another cwd.
+               "SW_MCP_DATA_DIR": str(temporary / "data"), "SW_MCP_NO_UPDATE_CHECK": "1",
+               "APPDATA": str(clients), "CODEX_HOME": str(clients / "codex")}
+        log = temporary / "data" / "logs" / "log.txt"
+        # Configuration targets the actual executable, also when invoked from another cwd.
         config = subprocess.run([command, *args, "--config", "json"], check=True, capture_output=True,
                                 text=True, env=env, cwd=temporary, timeout=60)
         entry = json.loads(config.stdout)["mcpServers"]["stormworks"]
         assert Path(entry["command"]).resolve() == Path(command).resolve()
-        assert entry["args"][-1] == "--connect"
-        parameters = StdioServerParameters(command=command, args=[*args, "--connect"], env=env, cwd=str(temporary))
-        with patch.dict(os.environ, env), (temporary / "server.log").open("w", encoding="utf-8") as logs:
-            host = subprocess.Popen([command, *args, "--serve", "--parent-pid", str(os.getpid())], env=env,
-                                    cwd=temporary, stdin=subprocess.DEVNULL, stdout=logs, stderr=logs)
-            try:
-                record = await wait_ready(host)
-                # Unauthenticated or foreign-origin callers cannot inspect or stop the host.
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                for route, method, headers in (("/health", "GET", {}), ("/shutdown", "POST", {}),
-                                                ("/health", "GET", {"Authorization": f"Bearer {record['token']}",
-                                                                      "Origin": "https://example.com"})):
-                    req = urllib.request.Request(f"http://127.0.0.1:{record['port']}{route}", method=method, headers=headers)
-                    try:
-                        opener.open(req, timeout=2)
-                    except urllib.error.HTTPError as exc:
-                        assert exc.code == 403
-                    else:
-                        raise AssertionError("Unauthenticated/cross-origin request was accepted")
-                duplicate = await asyncio.to_thread(subprocess.run, [command, *args, "--serve"], env=env,
-                                                    capture_output=True, text=True, timeout=60)
-                assert duplicate.returncode != 0 and "already running" in duplicate.stderr
-                assert running_connection()["instance"] == record["instance"]
-                async with stdio_client(parameters) as (read2, write2), ClientSession(read2, write2) as second:
-                    await second.initialize()
-                    async with stdio_client(parameters) as (read, write), ClientSession(read, write) as session:
-                        init = await session.initialize()
-                        assert init.instructions and init.server_info.version
-                        descriptors = {tool.name: tool for tool in (await session.list_tools()).tools}
-                        tools = set(descriptors)
-                        assert {"preview_hull", "save_hull", "get_runtime_status", "get_guide",
-                                "analyze_hull", "suggest_hull_blocks", "create_vehicle", "search_parts", "query_connections",
-                                "edit_connections", "route_connections", "preflight_vehicle", "plan_vehicle_repairs",
-                                "repair_vehicle", "apply_vehicle_assembly", "preview_vehicle_diagnostics",
-                                "prepare_vehicle_validation", "record_vehicle_validation"} <= tools
-                        assert descriptors["repair_vehicle"].output_schema["type"] == "object"
-                        assert all(tool.output_schema for tool in descriptors.values())
-                        for topic in ("start", "hull_workflow", "hull_staged", "edits", "testing", "hull_smoothing",
-                                      "style_rules", "topics"):
-                            response = await session.call_tool("get_guide", {"topic": topic})
-                            assert not response.is_error and response.content[0].text
-                        response = await session.call_tool("get_guide", {"topic": "land"})
-                        assert not response.is_error and "humvee_4x4" in response.content[0].text
-                        assert "through_blocks" in response.content[0].text
-                        response, status = await asyncio.gather(
-                            session.call_tool("preview_hull", {"preset": "rowboat"}),
-                            second.call_tool("get_runtime_status", {}))
-                        assert not response.is_error and not status.is_error
-                        image = next(part for part in response.content if part.type == "image")
-                        assert base64.b64decode(image.data).startswith(b"\x89PNG\r\n\x1a\n")
-                        response = await session.call_tool("save_hull", {"name": "packaged smoke test", "preset": "rowboat"})
-                        assert not response.is_error, response.content
-                        assert "cache reused" in response.content[0].text
-                        assert (temporary / "vehicles" / "packaged smoke test.xml").is_file()
-                        diagnosis = await session.call_tool("plan_vehicle_repairs", {"design": "packaged smoke test"})
-                        assert not diagnosis.is_error and diagnosis.structured_content["plan_id"]
-                        preflight = await session.call_tool("preflight_vehicle", {"design": "packaged smoke test"})
-                        # A boat without an engine is not a fault: preflight checks what is there.
-                        assert not preflight.is_error and preflight.structured_content["status"] == "connected geometry"
-                        assert preflight.structured_content["unchecked"] == []
-                        diagnostics = await session.call_tool("preview_vehicle_diagnostics", {"design": "packaged smoke test", "layer": "all"})
-                        assert not diagnostics.is_error and diagnostics.structured_content["overlay"]["legend"]
-                        assert any(part.type == "image" for part in diagnostics.content)
-                        validation = await session.call_tool("prepare_vehicle_validation", {"design": "packaged smoke test", "name": "validation copy"})
-                        assert not validation.is_error and validation.structured_content["status"] == "pending"
-                        invalid = await session.call_tool("edit_parts", {"design": "packaged smoke test",
-                            "revision": diagnosis.structured_content["revision"],
-                            "operations": [{"op": "move", "select": {"ids": ["bad"]}}]})
-                        assert invalid.is_error
-                        choices = await session.call_tool("suggest_hull_blocks", {"normal": [0, 1, 0.25]})
-                        assert not choices.is_error and "08_wedge_4" in choices.content[0].text
-                        analysis = await session.call_tool("analyze_hull", {"preset": "rowboat", "stations": [8],
-                                                                          "spec": {"smoothing": "wedges_v2"}})
-                        assert not analysis.is_error and "material_y_blocks" in analysis.content[0].text
-                        response = await session.call_tool("preview_hull", {"spec": {"length": 500}})
-                        assert response.is_error
-                    # Disconnecting one client must leave the shared host and another client alive.
-                    assert not (await second.call_tool("get_runtime_status", {})).is_error
-                    assert running_connection()["instance"] == record["instance"]
-                await asyncio.to_thread(orphaned_bridge, command, args, env, temporary)
-                # An idle bridge must exit when the desktop host stops (the GUI was closed).
-                idle = subprocess.Popen([command, *args, "--connect"], env=env, cwd=temporary,
-                                        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                await asyncio.sleep(3)
-                assert idle.poll() is None, "the idle bridge exited early"
-                request(record, "/shutdown", method="POST")
-                await asyncio.to_thread(host.wait, timeout=15)
-                try:
-                    await asyncio.to_thread(idle.wait, timeout=15)
-                except subprocess.TimeoutExpired:
-                    idle.kill()
-                    raise AssertionError("an idle bridge kept running after the host stopped") from None
-                finally:
-                    idle.stdin.close()
-                assert not (temporary / "runtime" / "connection.json").exists()
-                stopped = await asyncio.to_thread(subprocess.run, [command, *args, "--connect"], env=env,
-                                                  input="", capture_output=True, text=True, timeout=60)
-                assert stopped.returncode != 0 and not stopped.stdout and "press Start" in stopped.stderr
-                log_content = (temporary / "server.log").read_text(encoding="utf-8")
-                assert "preview_hull completed" in log_content and "Stop requested" in log_content
-            except BaseException:
-                print((temporary / "server.log").read_text(encoding="utf-8"), file=sys.stderr)
-                raise
-            finally:
-                if host.poll() is None:
-                    with contextlib.suppress(OSError, ValueError):
-                        request(running_connection(), "/shutdown", method="POST")
-                    try:
-                        await asyncio.to_thread(host.wait, timeout=10)
-                    except subprocess.TimeoutExpired:
-                        host.kill()
-                        host.wait()
-        print("Shared MCP smoke passed: two clients, one host, workers, cache/export, duplicate rejection, logs, stop, "
-          "no bridge left behind by a dead client or a stopped host")
+        assert entry["args"][-1] == "--stdio"
+        try:
+            # Each client starts its own server; neither needs anything else running first.
+            first = StdioServerParameters(command=command, args=[*args, "--stdio"], env=env, cwd=str(temporary))
+            # v0.3 entries ran --connect; that now starts the server too.
+            legacy = StdioServerParameters(command=command, args=[*args, "--connect"], env=env, cwd=str(temporary))
+            async with (stdio_client(legacy) as (read2, write2),
+                        ClientSession(read2, write2, client_info=Implementation(name="legacy-client", version="1"))
+                        as second):
+                await second.initialize()
+                async with (stdio_client(first) as (read, write),
+                            ClientSession(read, write, client_info=Implementation(name="first-client", version="1"))
+                            as session):
+                    await full_session(session, second, temporary)
+                # Closing one client leaves the other's server working.
+                assert not (await second.call_tool("get_runtime_status", {})).is_error
+            # A client that gives no arguments but a pipe still gets the server.
+            bare = StdioServerParameters(command=command, args=args, env=env, cwd=str(temporary))
+            async with stdio_client(bare) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
+                assert (await session.list_tools()).tools
+            await asyncio.to_thread(orphaned_server, command, args, env, temporary)
+            await asyncio.sleep(1)
+            text = log.read_text(encoding="utf-8")
+            for expected in ("first-client[", "legacy-client[", "Tool preview_hull completed",
+                             "Connected to first-client", "Server stopped (client disconnected)",
+                             "Server stopped (client exited)"):
+                assert expected in text, f"log.txt lacks {expected!r}"
+            # The double-click menu: exit, then add Claude Desktop through it.
+            menu(command, args, env, temporary, "5\n")
+            output = menu(command, args, env, temporary, "1\ny\n5\n")
+            claude = json.loads((clients / "Claude" / "claude_desktop_config.json").read_text(encoding="utf-8"))
+            assert claude["mcpServers"]["stormworks"]["args"][-1] == "--stdio", claude
+            assert "Done." in output and "Add to Claude Desktop (set up)" in output, output
+        except BaseException:
+            if log.is_file():
+                print(log.read_text(encoding="utf-8"), file=sys.stderr)
+            raise
+        print("Stdio MCP smoke passed: two clients with their own servers, legacy --connect entries, bare "
+              "pipe start, shared log and design lock, no server left behind by a dead client, console menu")
 
 
 def main():
@@ -228,7 +204,7 @@ def main():
     parser.add_argument("--exe", type=Path)
     args = parser.parse_args()
     command, argv = (str(args.exe.resolve()), []) if args.exe else (sys.executable, [str(ROOT / "launcher.py")])
-    asyncio.run(asyncio.wait_for(exercise(command, argv), timeout=180))
+    asyncio.run(asyncio.wait_for(exercise(command, argv), timeout=240))
 
 
 if __name__ == "__main__":

@@ -17,10 +17,31 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def server_entry():
-    """Use the final executable location, never a working directory or temporary extraction path."""
+    """The client starts this exact executable with --stdio, from wherever it is installed."""
     if getattr(sys, "frozen", False):
-        return {"command": str(Path(sys.executable).resolve()), "args": ["--connect"]}
-    return {"command": str(Path(sys.executable).resolve()), "args": [str(ROOT / "launcher.py"), "--connect"]}
+        return {"command": str(Path(sys.executable).resolve()), "args": ["--stdio"]}
+    return {"command": str(Path(sys.executable).resolve()), "args": [str(ROOT / "launcher.py"), "--stdio"]}
+
+
+def configured(client, path=None):
+    """'yes' when the client's Stormworks entry runs this copy, 'other' when it runs another
+    copy, 'no' when there is no entry or no readable config."""
+    try:
+        path = Path(path) if path is not None else default_config_path(client)
+        text = path.read_text(encoding="utf-8-sig")
+        data = json.loads(text) if client == "claude" else tomlkit.parse(text)
+        servers = data.get("mcpServers" if client == "claude" else "mcp_servers") or {}
+        entry = servers.get(SERVER_NAME) or next((servers[n] for n in LEGACY_NAMES if n in servers), None)
+    except (OSError, ValueError, ParseError, AttributeError):
+        return "no"
+    if not isinstance(entry, dict) or "command" not in entry:
+        return "no"
+    mine = server_entry()["command"]
+    try:
+        same = Path(str(entry["command"])).resolve() == Path(mine).resolve()
+    except OSError:
+        same = False
+    return "yes" if same else "other"
 
 
 def default_config_path(client):

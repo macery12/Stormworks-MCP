@@ -21,7 +21,8 @@ def _renderer():
 
 
 def runtime_status():
-    from .desktop_runtime import port, runtime_dir  # noqa: PLC0415
+    from . import updates  # noqa: PLC0415
+    from .runtime import log_path  # noqa: PLC0415
 
     appdata = Path(os.environ.get("APPDATA") or Path.home() / ".local" / "share")
     definitions = definitions_dir()
@@ -30,8 +31,8 @@ def runtime_status():
         "packaged": bool(getattr(sys, "frozen", False)),
         "executable": sys.executable,
         "python": sys.version.split()[0],
-        "desktop_runtime_dir": str(runtime_dir()),
-        "shared_endpoint": f"http://127.0.0.1:{port()}/mcp",
+        "log_file": str(log_path()),
+        "update_available": updates.notice(),
         "vehicles_dir": str(vehicles_dir()),
         "designs_dir": str(Path(os.environ.get("SW_DESIGNS_DIR", appdata / "stormworks-hull-mcp" / "designs"))),
         "definitions_dir": definitions,

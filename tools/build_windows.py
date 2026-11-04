@@ -1,4 +1,10 @@
-"""Build the portable desktop MCP executable from locked dependencies."""
+"""Build the Windows server from locked dependencies into dist/stormworks-mcp/.
+
+A folder build, not one file: a one-file EXE unpacks Python and every library into a temporary
+folder on each start, which is slow enough for clients to give up on it. The EXE is windowed
+(no console), so a client starting it never flashes a console window; launcher.py opens one
+only for the double-click menu.
+"""
 
 import argparse
 import os
@@ -17,8 +23,9 @@ def main():
     if sys.platform != "win32":
         parser.error("Windows executables must be built on Windows")
     subprocess.run([
-        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--console",
-        "--hide-console", "hide-early",
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
+        # A crash must reach the log and the client, never a message box nobody is watching.
+        "--disable-windowed-traceback", "--exclude-module", "tkinter",
         "--name", "stormworks-mcp", "--distpath", str(args.distpath.resolve()),
         "--workpath", str(ROOT / "build"), "--specpath", str(ROOT / "build"),
         "--collect-submodules", "mcp.server", "--exclude-module", "mcp.cli",

@@ -1,5 +1,5 @@
 """Smoke-test the Windows installer: silent per-user install into a folder with spaces,
-upgrade over a running copy (the desktop host and an orphaned --connect bridge), then
+upgrade over running copies (two servers started the way clients start them), then
 uninstall. Refuses to run when Stormworks MCP is already installed, so a real install is
 never replaced; CI runners start clean."""
 import argparse
@@ -60,6 +60,8 @@ def main():
         client_env = {**os.environ, "APPDATA": str(clients), "CODEX_HOME": str(clients / "codex")}
         run(installer, target, Path(scratch) / "install.log", "clientclaude,clientcodex", client_env)
         record = installed()
+        if not (target / "_internal").is_dir():
+            raise SystemExit(f"the server's libraries are missing from {target}")
         if not exe.is_file() or not record or Path(record["InstallLocation"]).resolve() != target.resolve():
             raise SystemExit(f"install did not land in {target}: {record}")
         version = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=60,
@@ -68,7 +70,7 @@ def main():
             raise SystemExit(f"installed EXE reports {version!r}, the uninstall entry {record['DisplayVersion']!r}")
         claude = json.loads((clients / "Claude" / "claude_desktop_config.json").read_text(encoding="utf-8"))
         entry = claude["mcpServers"]["stormworks"]
-        if Path(entry["command"]).resolve() != exe.resolve() or entry["args"] != ["--connect"]:
+        if Path(entry["command"]).resolve() != exe.resolve() or entry["args"] != ["--stdio"]:
             raise SystemExit(f"Claude Desktop entry does not run the installed EXE: {entry}")
         codex = tomllib.loads((clients / "codex" / "config.toml").read_text(encoding="utf-8"))
         command = codex["mcp_servers"]["stormworks"]["command"]
@@ -78,22 +80,23 @@ def main():
         shortcut = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Stormworks MCP.lnk"
         if not shortcut.is_file():
             raise SystemExit(f"no Start menu shortcut at {shortcut}")
-        # A running host and a bridge whose client has gone must not block an upgrade.
-        env = {**os.environ, "SW_MCP_RUNTIME_DIR": str(Path(scratch) / "runtime"), "SW_MCP_PORT": "38491"}
-        host = subprocess.Popen([str(exe), "--serve"], env=env, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Servers that clients left running (one from a v0.3 --connect entry) must not block an upgrade.
+        env = {**os.environ, "SW_MCP_DATA_DIR": str(Path(scratch) / "data"), "SW_MCP_NO_UPDATE_CHECK": "1"}
+        servers = [subprocess.Popen([str(exe), mode], env=env, stdin=subprocess.PIPE,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                   for mode in ("--stdio", "--connect")]
         time.sleep(5)
-        bridge = subprocess.Popen([str(exe), "--connect"], env=env, stdin=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2)
-        running = [p for p in (host, bridge) if p.poll() is None]
+        running = [p for p in servers if p.poll() is None]
+        if len(running) != len(servers):
+            raise SystemExit("a server started like a client starts it exited on its own")
         run(installer, target, Path(scratch) / "upgrade.log")
         wait(lambda: all(p.poll() is not None for p in running), 30, "running copies to stop during the upgrade")
-        if not exe.is_file():
-            raise SystemExit("upgrade removed the EXE")
+        if not exe.is_file() or not (target / "_internal").is_dir():
+            raise SystemExit("upgrade removed the server")
         subprocess.run([str(target / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
                        check=True, timeout=300)
-        wait(lambda: not exe.exists() and installed() is None, 60, "the uninstaller to remove the EXE and its entry")
+        wait(lambda: not exe.exists() and not (target / "_internal").exists() and installed() is None, 60,
+             "the uninstaller to remove the server and its entry")
         if shortcut.exists():
             raise SystemExit("uninstall left the Start menu shortcut")
     print(f"Installer smoke passed: install to a path with spaces, version {version}, Start menu shortcut, "

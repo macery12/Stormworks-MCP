@@ -117,13 +117,14 @@ Edits go in batches that can be previewed first and undone afterwards.
 
 You need Windows 10 or 11, Stormworks installed through Steam, and an MCP client on the same PC.
 
-1. Download the installer (`-setup.exe`) from the
+1. Close your AI client.
+2. Download the installer (`-setup.exe`) from the
    [latest release](https://github.com/macery12/Stormworks-MCP/releases/latest) and run it. It
    can add itself to Claude Desktop and the ChatGPT / Codex app for you.
-2. Open **Stormworks MCP** from the Start menu and press **Start server**.
-3. Restart your AI client. Keep the Stormworks MCP window open while you build.
+3. Open your AI client. It starts Stormworks MCP by itself in the background; there is no
+   window to keep open.
 
-The [install guide](docs/install.md) covers the portable version, running from source, setting
+The [install guide](docs/install.md) covers the portable zip, running from source, setting
 up other clients by hand, upgrading, troubleshooting and configuration.
 
 ## Your first boat

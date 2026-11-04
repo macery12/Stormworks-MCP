@@ -1,11 +1,11 @@
 ; Inno Setup script for the Stormworks MCP Windows installer.
-; Build with tools/build_installer.py, which passes the version and the built EXE.
+; Build with tools/build_installer.py, which passes the version and the built server folder.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
-#ifndef SourceExe
-  #define SourceExe "..\dist\stormworks-mcp.exe"
+#ifndef SourceDir
+  #define SourceDir "..\dist\stormworks-mcp"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\dist"
@@ -32,7 +32,7 @@ DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
 UsePreviousAppDir=yes
 UsePreviousPrivileges=yes
-; Close a running copy (the desktop app or a client's --connect bridge) before replacing it.
+; Close running copies (servers the AI clients started, or the setup menu) before replacing them.
 CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
@@ -48,21 +48,24 @@ UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\{#AppExe}
 SetupLogging=yes
 
+[InstallDelete]
+; Each version ships its own Python libraries; never mix them with an older version's.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
-Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 ; Offered only for clients found on this account. checkedonce: preselected on a first install,
 ; not on upgrades (the entry already points at this folder).
-Name: "clientclaude"; Description: "Add to Claude Desktop (close Claude first)"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasClaude; Flags: checkedonce
-Name: "clientcodex"; Description: "Add to ChatGPT / Codex"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasCodex; Flags: checkedonce
+Name: "clientclaude"; Description: "Add to Claude Desktop (close Claude first; it then starts the server by itself)"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasClaude; Flags: checkedonce
+Name: "clientcodex"; Description: "Add to ChatGPT / Codex (close it first)"; GroupDescription: "Connect your AI client (replaces an existing Stormworks entry and keeps a backup; remove any older Stormworks MCP setup first):"; Check: HasCodex; Flags: checkedonce
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Build Stormworks vehicles with your AI client"
-
-[Run]
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Opens the setup menu (add to a client, open the log, check for updates). The server itself
+; never needs it: the AI client starts the EXE with --stdio.
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Set up Stormworks MCP for your AI client"
 
 [Code]
 const
@@ -92,8 +95,9 @@ begin
     end;
 end;
 
-{ Stop any copy running from the install folder: the desktop app and the --connect bridges
-  MCP clients start. Restart Manager covers most cases; this catches orphaned bridges. }
+{ Stop any copy running from the install folder: the servers MCP clients start and the setup
+  menu. Restart Manager covers most cases; this catches the rest. A client loses its tools until
+  it is restarted, which is why the tasks ask to close clients first. }
 procedure StopRunning(Dir: String);
 var
   Code: Integer;

@@ -1,4 +1,4 @@
-"""Build the Windows installer (Inno Setup) around dist/stormworks-mcp.exe.
+"""Build the Windows installer (Inno Setup) around the dist/stormworks-mcp server folder.
 
 Needs Inno Setup 6: set ISCC to its ISCC.exe, put it on PATH, or install it in the default
 folder (winget install JRSoftware.InnoSetup). Writes dist/stormworks-mcp-setup.exe.
@@ -27,10 +27,10 @@ def iscc():
 
 
 def main():
-    exe = ROOT / "dist" / "stormworks-mcp.exe"
-    if not exe.is_file():
-        raise SystemExit(f"build the EXE first (tools/build_windows.py): {exe} is missing")
-    subprocess.run([iscc(), "/Qp", f"/DAppVersion={__version__}", f"/DSourceExe={exe}",
+    folder = ROOT / "dist" / "stormworks-mcp"
+    if not (folder / "stormworks-mcp.exe").is_file():
+        raise SystemExit(f"build the server first (tools/build_windows.py): {folder} is missing")
+    subprocess.run([iscc(), "/Qp", f"/DAppVersion={__version__}", f"/DSourceDir={folder}",
                     f"/DOutputDir={ROOT / 'dist'}", str(ROOT / "installer" / "stormworks-mcp.iss")], check=True)
     print(ROOT / "dist" / "stormworks-mcp-setup.exe")
 
