@@ -8,6 +8,7 @@ How to work on Stormworks MCP itself. To use it, see the [README](../README.md) 
 ```bash
 uv sync --locked                  # install locked dependencies, including pytest and ruff
 uv run pytest                     # unit tests; engine tests skip when the game is not installed
+uv run pytest -n auto             # the same on every CPU core (CI runs this)
 uv run ruff check .               # lint
 ```
 

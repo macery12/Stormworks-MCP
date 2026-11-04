@@ -7,7 +7,7 @@ MCP server (Python, `mcp` SDK 2.x `MCPServer`, managed with uv) that builds any 
 
 ```bash
 uv sync
-uv run pytest            # must pass; engine tests skip without a Stormworks install
+uv run pytest            # must pass; engine tests skip without a Stormworks install (-n auto: parallel)
 uv run ruff check .      # must pass
 uv run tools/smoke_test.py out   # renders every preset to ./out; look at the PNGs after geometry changes
 uv run tools/readme_images.py    # re-renders the README screenshots into docs/images
