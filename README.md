@@ -1,229 +1,143 @@
 # Stormworks MCP
 
-Describe a vehicle to your AI assistant and get a file you can load in
-[Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/). Stormworks MCP is a
-local [MCP](https://modelcontextprotocol.io) server for Claude Desktop and the ChatGPT / Codex
-Windows app. It gives the assistant tools to shape boat hulls, lay out interiors, assemble road
-vehicles from your installed parts, wire and plumb them, and find faults. The assistant checks its
-own work in rendered previews, then saves the vehicle to your Stormworks vehicles folder, ready to
-load at a workbench.
+Describe a vehicle to your AI assistant and get a file you can load at a workbench in
+[Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/).
 
-Everything runs on your PC. The server reads part definitions from your own game install and never
-modifies the game.
+Stormworks MCP is a local [MCP](https://modelcontextprotocol.io) server for Claude Desktop, the
+ChatGPT / Codex Windows app and other MCP clients. It gives the assistant tools to shape boat
+hulls, lay out rooms and engine rooms, place any part installed in your game, wire and plumb
+them, and find faults. The assistant looks at a render after every change, fixes what is off,
+and saves the result to your Stormworks vehicles folder.
 
-**[Download for Windows](https://github.com/macery12/Stormworks-MCP/releases)** ·
-[Run from source](#run-from-source) · [Building walkthrough](docs/building.md) ·
+Everything runs on your PC. Part definitions are read from your own game install, and game files
+are never changed.
+
+**[Download for Windows](https://github.com/macery12/Stormworks-MCP/releases/latest)** ·
+[Install guide](docs/install.md) · [Building walkthrough](docs/building.md) ·
 [What is verified in game](docs/in-game-testing.md)
 
-<p>
-  <img src="docs/images/preview-battleship.png" width="49%" alt="A 50 m battleship designed with this server: 3/4 views from above and below, front, side and top">
-  <img src="docs/images/land-humvee.png" width="49%" alt="The four-seat Humvee-shaped 4x4 preset seen from the front: sloped hood, recessed grille, headlights and raked windshield">
-</p>
+![A 32 m coast guard cutter built with the hull generator: white hull with a red and navy bow flash and hull number 47, a two-level deckhouse and bridge, a lattice mast with a radar dome, railings and a painted helideck aft](docs/images/hero.png)
+
+## How it works
+
+1. **Describe it.** "A 30 m coast guard cutter with a helideck aft", "a four-seat 4x4", "a
+   six-cylinder boxer engine". Rough ideas are fine; the assistant asks about size and which
+   workbench you build at.
+2. **The assistant builds and checks it.** It works in stages, renders each one, compares the
+   picture with your request and fixes what is wrong. You see the previews too.
+3. **Load it in game.** The vehicle is saved with a Load-menu thumbnail. Open a workbench, press
+   **Load** and pick it.
+
+Every image on this page is a render of something the server built.
 
 ## What you can build
 
-Every change comes back as a picture. The assistant compares it with your request, fixes what is
-off, and shows you the next version before anything is saved.
-
 ### Boats and ships
 
-Pick one of 10 hull archetypes (runabout, rowboat, fishing trawler, tugboat, motor yacht, landing
-craft, lifeboat, patrol boat, catamaran or barge) and adjust its length, beam, deadrise, bow shape,
-sheer and flare. Add superstructure from boxes, cylinders, domes and lattice masts; each shape can be
-pitched, yawed, mirrored to both sides, repeated in rows, or stacked on another by name. Bulbous
-bows and skegs are also available. Paint is per face, like a hand-built ship: pick a livery (navy,
-coast guard, workboat, research, yacht, dazzle or splinter camouflage) or design your own with
-hull numbers, bow flashes, stripes, panels, deck markings and camouflage. To model a real
-ship, enter its dimensions with `scale: "1:4"`, or use `scale: "fit"` to size a design to your
-workbench.
+Start from a hull archetype (runabout, rowboat, fishing trawler, tugboat, motor yacht, landing
+craft, lifeboat, patrol boat, catamaran, barge) or describe a hull from scratch: length, beam,
+depth, bow shape, rake, flare, deadrise, sheer, bulbous bow, skegs, and one to three hulls.
+Superstructure is built from boxes, cylinders, domes, spheres and lattice masts that can be
+stacked, mirrored, repeated, raked and rotated.
 
-The battleship above took four passes:
+![Nine hull presets rendered from above: runabout, fishing trawler, tugboat, motor yacht, patrol boat, catamaran, lifeboat, landing craft and barge](docs/images/hull-presets.png)
 
-![Four 3/4 previews of the same battleship: bare hull, first superstructure, tower and turrets, final](docs/images/battleship-iterations.png)
+Railings, mooring points and ballast are added the way experienced builders place them, and
+every build reports its estimated waterline, trim and stability. Set a workbench size and the
+summary tells you whether the design fits; enter a real ship's dimensions with a scale such as
+`1:4`, or let it scale the design to fill your workbench.
 
-Hulls are plain blocks by default. `smoothing: "wedges"` skins them with the game's slope pieces
-(Wedge, Pyramid and Inverse Pyramid in every size). `smoothing: "wedges_v2"` adds a refinement pass
-and keeps the original fit when the refined one adds seams or drifts too far from the shape.
-Neither mode has been confirmed in game yet; see [hull smoothing](docs/hull-smoothing.md).
+Hulls are plain blocks by default. Optional smoothing skins them with the game's wedge and
+pyramid pieces; it is still being refined, so check the preview before you save
+([hull smoothing](docs/hull-smoothing.md)).
 
-![A fishing boat hull smoothed with wedges](docs/images/preview-fishing-boat-wedges.png)
+### Paint and liveries
 
-### Interiors
+Paint is per face, like a hand-built ship. Pick a named livery (navy, coast guard, workboat,
+research, yacht, dazzle or splinter camouflage) or design your own with hull numbers, bow
+flashes, stripes, hazard markings, panels, deck markings and camouflage.
 
-Add decks, bulkheads and rooms with 0.75 m × 2 m doorways. `preview_interior` draws a section down
-the centreline and a labelled plan of every level. It reports each room's clear size, floor width,
-headroom and doors, and warns when something does not fit, such as an engine too tall for its room.
-In the access stage, the builder fits real manual doors and complete hatch-and-ladder assemblies
-wherever the whole part fits. A request that cannot fit leaves the wall or floor sealed; the builder
-never cuts an unfinished hole for you to fill later.
+![The same cutter in six liveries: navy, coast guard, workboat, research, yacht and dazzle](docs/images/liveries.png)
 
-![Interior cutaway of the battleship: a centreline section with 20 labelled rooms and six deck plans](docs/images/interior-battleship.png)
+### Interiors and engine rooms
 
-### Road vehicles
+Add decks, bulkheads and rooms. The assistant gets a centreline section and a labelled plan of
+every level, with each room's size, headroom and doors. Doors and hatch-and-ladder assemblies
+are real game parts, fitted only where the whole part fits; a request that cannot fit leaves the
+wall sealed instead of cutting a hole.
 
-Start a land vehicle from a preset or a bare chassis, assembled from the parts installed in your
-game:
+![Interior of the patrol boat preset: a section down the centreline with labelled rooms, and plans of the lower deck and the main deck](docs/images/interior-plan.png)
 
-| Preset | What you get |
-| --- | --- |
-| `utility_buggy` | Saddle-seat buggy with four suspension wheels, lights, an engine, premade fuel tanks, a battery and a radiator. The parts are mounted but not connected. |
-| `utility_4x4` | Four-seat 4x4 with sliding doors and a prebuilt diesel, radiator, fuel tank and battery, all piped and wired. Includes steering, throttle, brake, starter, light and reverse controls. |
-| `humvee_4x4` | Four-seat, Humvee-shaped 4x4 with the same connected systems, open bays for your own doors, and enclosed pipes under the floor. |
-| `chassis` | A bare chassis at your own dimensions, to extend part by part. |
+The powertrain stage puts a diesel engine low in the hull with its radiator and fuel tank,
+routes the pipes, and sets the propeller and rudder into the transom. Air comes in through a
+deck port and the exhaust leaves through the transom. Exposed pipes are colour-coded by what
+they carry.
 
-The assistant can also read your saved vehicles for wheel and track layouts to learn from. Previews
-use the game's own part models, and can hide the bodywork to check seats, tanks and the powertrain.
+![Cutaway of a fishing trawler's engine room: the diesel engine, radiator, black exhaust pipes running aft to the transom outlets, the orange propeller shaft, blue coolant lines and the air intake grate on the deck](docs/images/engine-room.png)
 
-![The Humvee preset seen from the rear: hardtop, rear windows, tail lights and a mounted spare wheel](docs/images/land-humvee-rear.png)
+### Cars, aircraft and anything else
 
-### Wiring, pipes and repairs
+Boats are one starting point. The assistant can also start from an empty draft, a land preset
+(a bare chassis, a buggy or a connected four-seat 4x4) or a copy of one of your own vehicles,
+and place any part installed in your game. Saved vehicles, or a box cut out of one, can be
+reused inside another as a prefab. Hinged and pivoting sections are separate bodies that can
+each be shown and edited.
 
-Connect signal and electric wires between part ports, and route real pipes between fluid faces,
-either exposed or enclosed in blocks. Four reusable control assemblies (engine start and idle,
-clutch, brake and reverse, lighting) bind to the parts you choose. `preflight_vehicle` checks the
-fuel, air, exhaust and cooling paths, the driveline, electrical power and controls.
-`plan_vehicle_repairs` turns each finding into a fix you can preview before applying, with the
-problem drawn over the vehicle:
+![The Humvee-shaped 4x4 preset: sand-coloured body with a sloped hood, recessed grille, headlights, raked windscreen and open door bays](docs/images/humvee.png)
 
-![Diagnostic overlay on the Humvee: the front-left wheel with a miswired steering input in red, wheel and steering arrows in blue, and the proposed repair wire in green](docs/images/diagnostics-steering.png)
+Modular engines of any size are assembled from the game's own coupled parts: in-line, boxer or
+compact ring layouts with manifolds, starters, alternators, flywheel and clutch, and a list of
+every connection point to pipe and wire.
 
-Before you test, `prepare_vehicle_validation` exports a separate copy with a seven-point in-game
-checklist tied to that exact file. See [diagnose, repair and verify](docs/vehicle-repair.md).
+![Two engines built by the server: a 3x3 boxer with six cylinders and a flywheel, and a compact 1x1 ring with eight cylinders](docs/images/modular-engines.png)
 
-### Edits to new and existing vehicles
+### Wiring, fault finding and repair
 
-Edit single blocks or whole regions in batches: add, fill, move, rotate, paint, copy, mirror or
-repeat. Each batch can be previewed before you commit it, and undone afterwards. Import one of your
-own vehicles into a separate draft to repaint or extend it; the original file is never changed.
-`check_seal` traces each compartment to the outside and highlights any leak path.
+The assistant connects signal and electric wires between part ports, routes pipes (exposed or
+inside blocks), and applies ready-made control set-ups for engine start, clutch, brakes and
+lights. A preflight check follows fuel, air, exhaust, cooling, the driveline, electric power and
+controls, and a repair plan turns each fault into a fix you can preview before it is applied.
+Other checks trace each compartment for leaks and estimate mass, flotation, thrust and lift.
 
-### Inspection from any angle
+![Diagnostic overlay on the 4x4: the front-left wheel with a miswired steering input in red, steering arrows for each wheel in blue, and the proposed repair wire in green](docs/images/diagnostics.png)
 
-`inspect_view` points a camera at any detail, at any angle and zoom. `open_in_viewer` opens the
-vehicle in an interactive 3D viewer in your browser. The viewer, [viewer/index.html](viewer/index.html),
-also works on its own with any vehicle file.
+Before you test, the assistant can export a separate copy with an in-game checklist tied to that
+exact file. See [diagnose, repair and verify](docs/vehicle-repair.md).
 
-<p>
-  <img src="docs/images/inspect-closeup.png" width="49%" alt="Close-up of the battleship superstructure showing doorways">
-  <img src="docs/images/viewer.png" width="49%" alt="The 3D viewer showing the battleship">
-</p>
+### Checking its own work
+
+Every change comes back as a picture: a 3/4 view from above and below plus front, side and top
+views with metre rulers. The assistant can also point a camera at any detail, hide the bodywork
+to look at the parts inside, or open the vehicle in an interactive 3D viewer in your browser.
+Edits go in batches that can be previewed first and undone afterwards.
+
+![The standard preview: 3/4 views from above and below, and front, side and top views with 1 m grids, of the coast guard cutter](docs/images/preview-panels.png)
 
 ## Install
 
-### Windows desktop app (recommended)
+You need Windows 10 or 11, Stormworks installed through Steam, and an MCP client on the same PC.
 
-You need Windows 10 or 11 (x64), Stormworks installed through Steam, and Claude Desktop or the
-ChatGPT / Codex Windows app on the same PC. The download includes Python and every dependency; you
-do not need to install Python, uv or Git.
+1. Download the installer (`-setup.exe`) from the
+   [latest release](https://github.com/macery12/Stormworks-MCP/releases/latest) and run it. It
+   can add itself to Claude Desktop and the ChatGPT / Codex app for you.
+2. Open **Stormworks MCP** from the Start menu and press **Start server**.
+3. Restart your AI client. Keep the Stormworks MCP window open while you build.
 
-1. Download `stormworks-mcp-0.3.0-windows-x64-setup.exe` from
-   [Releases](https://github.com/macery12/Stormworks-MCP/releases) and run it. It installs for
-   you only by default (no admin); choose all users on the first page if you want, which asks
-   for admin. Pick another folder if you like. A newer installer finds the existing install and
-   offers to upgrade or repair it in place, or to uninstall it. Prefer no installer? Download
-   the portable `stormworks-mcp-0.3.0-windows-x64.exe` instead, move it to a permanent folder
-   and double-click it.
-   Coming from an older version? Remove the old Stormworks entry from your AI client first.
-2. Open **Stormworks MCP** from the Start menu (or let the installer launch it).
-3. If the installer did not add it to your client already ("Add to Claude Desktop" /
-   "Add to ChatGPT / Codex"), close your AI client. In the app, open **MCP > Set up Claude Desktop** or
-   **MCP > Set up ChatGPT / Codex**, check the configuration path it shows, and press
-   **Add to client**. Your other settings are kept, and the file is backed up first. To replace an
-   existing Stormworks entry, tick the replacement checkbox.
-4. Press **Start server**, then open your client again.
+The [install guide](docs/install.md) covers the portable version, running from source, setting
+up other clients by hand, upgrading, troubleshooting and configuration.
 
-The app checks GitHub for a newer release when it starts and shows a download link if there is
-one (**Help > Check for updates**; untick **Check for updates at startup** to stop it). With
-winget: `winget install macery12.StormworksMCP`, once the package is accepted there.
-
-The window shows the server status and a live log. Keep it open while you build: every client
-connects to this one shared server, and closing the window stops it and disconnects them. After you
-start the server again, reconnect or restart your client. A second copy of the app refuses to start.
-
-For other clients, **MCP > Custom client / raw configuration** copies MCP JSON, Codex TOML or a
-PowerShell add command. The **View** menu has diagnostics and log copy/clear. Setup records the
-EXE's current location; an installed copy keeps its folder across upgrades. If you move the
-portable file, reopen it and replace its client entries.
-
-The same configuration serves Codex CLI and the IDE extension on that PC. ChatGPT on the web and
-cloud tasks use a separate connection path that this app does not set up; see
-[OpenAI's MCP guide](https://learn.chatgpt.com/docs/extend/mcp?surface=app). To check that a
-download was built from this repository, see [verify a download](docs/releases.md#verify-a-download).
-
-**Upgrading from an older setup:** close your clients and any older server, replace the EXE, and use
-the replacement checkbox to update each client entry to `--connect`. Remove any duplicate Stormworks
-entry or extension. Entries that launch `server.py` directly start their own separate server and
-must be replaced to use the shared one.
-
-### Run from source
-
-You need Windows with Stormworks installed through Steam (tested on Windows 11), a supported client,
-and [uv](https://docs.astral.sh/uv/getting-started/installation/), which installs Python and the
-dependencies for you.
-
-```bash
-git clone https://github.com/macery12/Stormworks-MCP.git
-cd Stormworks-MCP
-uv sync --locked
-```
-
-Open the desktop window from the repository root, set up your client from the **MCP** menu, and
-press **Start server**:
-
-```powershell
-uv run python launcher.py
-```
-
-To configure a client yourself, print the exact configuration for this checkout:
-
-```powershell
-uv run python launcher.py --config json      # MCP JSON
-uv run python launcher.py --config toml      # Codex TOML
-uv run python launcher.py --config command   # codex mcp add command
-uv run python launcher.py --doctor           # check paths and game assets without changing files
-```
-
-For Claude Desktop, open **Settings > Developer > Edit Config** and add a `stormworks` entry
-under `mcpServers`, using the folder you cloned into:
-
-```json
-{
-  "mcpServers": {
-    "stormworks": {
-      "command": "C:\\path\\to\\Stormworks-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\path\\to\\Stormworks-MCP\\launcher.py", "--connect"]
-    }
-  }
-}
-```
-
-`--connect` relays to the running desktop server and never starts one, so keep the window open with
-the server running. Quit and reopen the client after changing its configuration. For Claude Desktop,
-right-click the tray icon and choose **Quit**; in the ChatGPT / Codex app, check the entry under
-**Settings > MCP servers** and restart its connection.
-
-## Build your first vehicle
+## Your first boat
 
 1. Start a new chat and ask:
 
-   > List the Stormworks hull presets.
+   > Design me a chunky fishing boat for a small workbench. Show me a preview, then save it.
 
-   The assistant calls `list_hull_presets` and lists 10 archetypes, from `runabout` to `barge`. If
-   the tool is missing, check the server entry under Claude's **Settings > Developer** or the
-   ChatGPT / Codex app's **Settings > MCP servers**, and check the desktop app's log.
+2. Look at the previews as they come in and ask for changes: "taller wheelhouse", "make it
+   navy grey", "add an engine room".
+3. In Stormworks, open a workbench, press **Load** and pick the name the assistant gave it.
 
-2. Ask for a boat:
-
-   > Design me a chunky fishing boat for bench size S. Show me a preview, then save it.
-
-   The assistant reads the design guide, previews and refines the hull, and saves it.
-
-3. In Stormworks, open a workbench, choose **Load**, and pick the name the assistant gave the
-   vehicle.
-
-Load it and check it against the [in-game checklist](docs/in-game-testing.md#checking-a-boat): many
-features have not been verified in game yet. The [building walkthrough](docs/building.md) covers
-stages, units and exact edits.
+Then check it against the [in-game checklist](docs/in-game-testing.md#checking-a-boat). The
+[building walkthrough](docs/building.md) covers stages, units and exact edits.
 
 ## Example prompts
 
@@ -231,183 +145,58 @@ stages, units and exact edits.
 
 - "Give me three different 10 m rescue boat hulls and show them side by side."
 - "Take the tugboat preset but make it longer and sleeker, like a pilot boat."
-- "Add an interior: engine room aft with a large engine, crew quarters amidships, and a bridge."
-- "Try it with wedge smoothing" or "open it in the viewer".
-- "Build the tugboat through the propulsion stage, show every automatic choice, then save it."
+- "Add an engine room aft, crew quarters amidships and a bridge, then show me the deck plans."
+- "Build a 1:4 scale model of a 110 m destroyer that fits my workbench."
+- "Paint it in the coast guard livery with hull number 47."
 
-**Road vehicles**
+**Other vehicles and parts**
 
-- "Build the Humvee preset for bench S, then show me the equipment with the bodywork hidden."
-- "Find the wheeled vehicles in my saves and compare their wheelbases."
+- "Build the 4x4 preset, then show me the equipment with the bodywork hidden."
+- "Make a six-cylinder 3x3 boxer engine with a flywheel and two alternators."
+- "Turn the engine bay of my 'Old Trawler' into a prefab and drop it into this new hull."
+- "Estimate how my plane's lift compares to its weight."
+
+**Checking and fixing**
+
 - "Run preflight on my 4x4 and preview the repairs before applying any."
-- "Export a test copy of the 4x4 and give me the in-game checklist."
+- "Check whether the engine room is watertight."
+- "Export a test copy and give me the in-game checklist."
+- "Import my 'Old Trawler' into a draft, repaint the bridge and save it as a new vehicle."
 
-**Existing vehicles**
+## Good to know
 
-- "Look at my vehicle 'Old Trawler' and design a new hull in the same style."
-- "Import Old Trawler into a draft, repaint the bridge, and save a separate copy."
-- "Add a block-built diesel tank, check its enclosure, and show the outlet and vent connections."
-
-## Tools
-
-You do not call these yourself: describe what you want, and the assistant picks the tools. Before
-building, it reads `get_guide` (`topic="start"` covers any vehicle; `hull_*` topics cover the boat
-hull generator and `land` the road presets). Hull dimensions are in metres; exact edits use integer
-blocks of 0.25 m. Saving refuses to overwrite a vehicle file the server did not create, and replacing
-one it did create needs `overwrite=true`.
-
-| Area | Tools | Guide |
-| --- | --- | --- |
-| Guides and setup | `get_guide`, `get_runtime_status`, `list_workbenches` | [Start](docs/start.md) |
-| Hull design | `list_hull_presets`, `get_hull_spec`, `preview_hull`, `preview_interior`, `deck_profile`, `save_hull` | [Building](docs/building.md) |
-| Designs and drafts | `create_vehicle`, `import_vehicle`, `store_design`, `list_designs`, `load_design`, `preview_vehicle`, `save_vehicle` | [Start](docs/start.md) |
-| Part editing | `query_parts`, `edit_parts`, `undo_edits` | [Staged builder](docs/staged-builder.md) |
-| Road vehicles | `create_vehicle` land presets, `analyze_land_vehicle` | [Land vehicles](docs/land-vehicles.md) |
-| Wiring and pipes | `query_connections`, `edit_connections`, `route_connections`, `list_vehicle_assemblies`, `apply_vehicle_assembly` | [Vehicle repair](docs/vehicle-repair.md) |
-| Faults and repairs | `preflight_vehicle`, `plan_vehicle_repairs`, `repair_vehicle`, `preview_vehicle_diagnostics`, `check_seal` | [Vehicle repair](docs/vehicle-repair.md) |
-| In-game test records | `prepare_vehicle_validation`, `record_vehicle_validation`, `get_vehicle_validation`, `get_calibration_observations` | [In-game testing](docs/in-game-testing.md) |
-| Part catalogue | `search_parts` (with a family filter), `get_part_definition`, `get_part_orientation` | [Start](docs/start.md) |
-| Physics estimates | `analyze_physics` | [Start](docs/start.md) |
-| Inspection and analysis | `inspect_view`, `open_in_viewer`, `list_game_vehicles`, `preview_game_vehicle`, `analyze_vehicle`, `analyze_hull`, `suggest_hull_blocks` | [Hull smoothing](docs/hull-smoothing.md) |
-
-## Configuration
-
-A standard Windows and Steam install needs no configuration. To override a default, set these
-environment variables before starting the desktop app:
-
-| Variable | Default | Used for |
-| --- | --- | --- |
-| `SW_VEHICLES_DIR` | `%APPDATA%\Stormworks\data\vehicles` | Where vehicles are read and saved. |
-| `SW_GAME_DIR` | Found through your Steam libraries | Stormworks install, for part definitions and workbench locations. |
-| `SW_DEFINITIONS_DIR` | `<game>\rom\data\definitions` | Part definitions directly. |
-| `SW_WORKSHOP_DIR` | Found through your Steam libraries | Installed workshop vehicles used as references. |
-| `SW_DESIGNS_DIR` | `%APPDATA%\stormworks-hull-mcp\designs` | Stored designs and drafts. |
-| `SW_TOOL_TIMEOUT` | `300` | Seconds a build or render may run before the server stops it. |
-| `SW_BUILD_CACHE` | `1` | Set to `0` to turn off geometry caching. |
-| `SW_RENDERER` | `auto` | Preview lighting: `auto` (GPU, else CPU), `gpu`, `cpu`, or `flat` (unlit, fastest). |
-| `SW_BUILD_CACHE_DIR` | `%TEMP%\stormworks-mcp-builds` | Shared geometry cache, capped at 20 entries / 512 MiB. |
-| `SW_MCP_PORT` | `38473` | Loopback port of the shared desktop server (1024 to 65535). |
-| `SW_MCP_RUNTIME_DIR` | `%LOCALAPPDATA%\stormworks-hull-mcp\runtime` | Runtime files of the shared desktop server. |
-
-Without game definitions, plain blocks, slopes and structural editing still work. Installed
-components need definitions: automatic fit-out reports what it skipped, and a seal check that meets
-unknown component geometry reports the result as indeterminate.
-
-## Status and limitations
-
-This is an early release (0.2). The server writes files without running the game, so the game is the
-only real test. [In-game testing](docs/in-game-testing.md) tracks the status of every feature.
-
-- **Verified in game:** vehicles load centred in the workbench, blocks-only hulls float, and Wedge
-  1x1/1x2/1x4, Pyramid and Inverse Pyramid rotate correctly in all 40 tested orientations.
-  A player-tested 15 m patrol boat drove and steered, with working fuel and cooling after one minor
-  manual block adjustment; see the [test record](docs/in-game-testing.md#whole-vehicle-check).
-- **Player-tested, with a fix awaiting a check:** the connected Humvee's controls, engine and
-  steering work, but W drove it backward because the gearbox's off ratio was reverse. The
-  replacement cube gearbox has not been checked in game yet.
-- **Not yet verified in game:** the larger Pyramid sizes; interiors, doors and hatches;
-  block-built tanks; many shape and paint options; and operating the utility buggy and utility 4x4.
-- **Placed parts still need a systems check.** The boat powertrain stage routes its pipes and
-  shaft but needs control and electric wiring. Other fit-out stages and the utility buggy need
-  their systems completed with the connection tools, then tested in game.
-- **Nothing is simulated.** Preflight checks that paths and links exist; it does not simulate
-  physics, fluid flow, engine load or driving. Control logic comes from the connected 4x4 presets
-  and the four control assemblies.
-- **Imports** accept single-body, version-3 vehicles only. Some configured original parts can only
-  be repainted. Save the result under a new name.
-- **Paint** is per face, but the order of a part's left/right and front/back faces in the file
-  is not yet confirmed in game, so those pairs share a colour (`tools/paint_faces_exhibit.py`
-  writes the test vehicle). Edits repaint whole parts.
-- **Large designs:** a 118 m, 184k-part ship previews in about 15 s, or about 35 s with wedge
-  smoothing. The game appears to drop components past 131,072 on spawn; this is not yet confirmed.
-- **The 3D viewer** loads three.js from a CDN, so it needs internet access.
-
-## How it works
-
-A hull spec describes a continuous shape: plan-view taper, keel rise, sections with deadrise and
-bilge radius, sheer, and superstructure. The server voxelizes that shape at 0.25 m per block, hollows
-it to a watertight skin, adds interior structure, and can skin it with slope pieces. Once stored, any
-design (hull, land or imported) can be changed part by part: the editing, connection and repair tools
-apply revision-checked batches with undo. The result is written as Stormworks vehicle XML. Previews
-are drawn in Python with Pillow from the same geometry, using the installed component meshes.
-
-Heavy builds and renders run in a child process that the server stops when a call is cancelled or
-exceeds `SW_TOOL_TIMEOUT`, so one slow ship cannot stall later calls.
-[docs/vehicle-format.md](docs/vehicle-format.md) documents the file format, including the details
-that are easy to get wrong: a missing `r` attribute is not the identity rotation, `x` in the paint
-string means unpainted, and the game's axes are left-handed.
+- **The game is the only real test.** The server writes files without running Stormworks.
+  [In-game testing](docs/in-game-testing.md) tracks which features have been checked in game;
+  load what you build and tell the assistant what you see.
+- **Nothing is simulated.** Preflight checks that the right parts are present and connected;
+  physics numbers are estimates. Driving, flying and floating are decided in game.
+- **Your vehicles are safe.** Saving never overwrites a vehicle the server did not create.
+  Imported vehicles are copied into a draft, and the original file is left alone.
+- **Very large ships** are fine to design, but the game spawns at most 131,072 parts. The build
+  summary shows the part count against that limit.
+- **The 3D viewer** loads three.js from a CDN, so it needs an internet connection.
 
 ## Documentation
 
 | Guide | Read it to |
 | --- | --- |
+| [Install and set up](docs/install.md) | Install, connect a client, troubleshoot and configure. |
 | [Building walkthrough](docs/building.md) | Make a first build, keep units straight, edit exactly and diagnose a result. |
-| [Staged builder](docs/staged-builder.md) | Build in stages, edit parts, import vehicles, and add components, access, propulsion, engine rooms, seals and tanks. |
+| [Building any vehicle](docs/start.md) | Build from an empty draft: parts, connections, modular engines, prefabs, bodies and physics. |
+| [Staged builder](docs/staged-builder.md) | Build a boat in stages: components, access, propulsion, engine rooms, seals and tanks. |
 | [Land vehicles](docs/land-vehicles.md) | Use the land presets, the chassis spec, parts, connections and preflight. |
-| [Diagnose, repair and verify](docs/vehicle-repair.md) | Repair faults, apply control assemblies and record in-game tests. |
+| [Diagnose, repair and verify](docs/vehicle-repair.md) | Repair faults, apply control set-ups and record in-game tests. |
 | [Hull smoothing](docs/hull-smoothing.md) | Choose slope pieces and check hull depth. |
 | [In-game testing](docs/in-game-testing.md) | Check a vehicle in game and see what is verified. |
 | [Vehicle file format](docs/vehicle-format.md) | Read or write Stormworks vehicle XML from your own tools. |
-| [Releases](docs/releases.md) | Verify a download, build the EXE locally or publish a release. |
-| [Advanced testing](docs/advanced-testing.md) | Run placement suites, analyze reference vehicles and generate calibration exhibits. |
+| [Releases](docs/releases.md) | Verify a download or build the Windows app yourself. |
+| [Development](docs/development.md) | Run the tests, regenerate these images and find your way around the code. |
 
-## Development
+## Contributing
 
-```bash
-uv sync --locked                  # install locked dependencies, including pytest and ruff
-uv run pytest                     # unit tests; engine tests skip when the game is not installed
-uv run ruff check .               # lint
-uv run tools/smoke_test.py out    # build and render every preset in both modes into ./out
-uv run tools/client_test.py       # drive the server over MCP stdio, like Claude Desktop does
-uv run tools/staged_builder_test.py out/staged-builder --benchmark
-uv run tools/diagnostic_milestone.py out/diagnostic-review  # three-fault repair milestone
-uv run python tools/package_test.py # two clients, shared host, guide assets, workers, export and stop
-```
-
-On Windows, build the portable desktop executable and the installer (needs Inno Setup 6:
-`winget install JRSoftware.InnoSetup`):
-
-```powershell
-uv sync --locked --group build
-uv run --group build python tools/build_windows.py
-uv run python tools/package_test.py --exe dist/stormworks-mcp.exe
-uv run python tools/desktop_test.py --exe dist/stormworks-mcp.exe
-uv run python tools/build_installer.py
-uv run python tools/installer_test.py   # refuses to run over a real install
-```
-
-Tagging `v0.3.0` runs the tests, builds and tests the executable, and uploads it to a
-draft GitHub release with checksums and signed build provenance; see
-[releasing and verification](docs/releases.md). Changes must pass lint and tests. Geometry changes
-also need a rendered review and a specific in-game check, as described in [CLAUDE.md](CLAUDE.md).
-
-Design notes and history: [feature requests and bugs](docs/feature-requests.md),
-[project audit](docs/project-audit.md), [hull smoothing research](docs/hull-smoothing-research.md)
-and [surface design plan](docs/surface-design-plan.md).
-
-| Path | Contents |
-| --- | --- |
-| [server.py](server.py) | MCP tool definitions |
-| [launcher.py](launcher.py) | Desktop app entry point and `--connect` client relay |
-| [swhull/hull.py](swhull/hull.py), [presets.py](swhull/presets.py) | Hull spec to solid voxels; the 10 archetypes |
-| [swhull/smooth.py](swhull/smooth.py) | Hollow, watertight skin and slope-piece fitting |
-| [swhull/interior.py](swhull/interior.py), [access.py](swhull/access.py) | Decks, rooms and doorways; complete doors and hatches |
-| [swhull/components.py](swhull/components.py), [tanks.py](swhull/tanks.py) | Component fit-out; block-built fluid tanks |
-| [swhull/land_build.py](swhull/land_build.py), [land_presets.py](swhull/land_presets.py) | Land chassis and presets |
-| [swhull/networks.py](swhull/networks.py), [routing.py](swhull/routing.py) | Typed wiring and preflight; pipe routing |
-| [swhull/repairs.py](swhull/repairs.py), [assemblies.py](swhull/assemblies.py), [validation.py](swhull/validation.py) | Repair suggestions, control assemblies and in-game test records |
-| [swhull/editing.py](swhull/editing.py), [drafts.py](swhull/drafts.py) | Transactional part edits and lossless imports |
-| [swhull/seal.py](swhull/seal.py) | Compartment air connectivity |
-| [swhull/pieces.py](swhull/pieces.py), [vehicle.py](swhull/vehicle.py) | Piece geometry and the rotation convention; vehicle XML |
-| [swhull/render.py](swhull/render.py), [meshes.py](swhull/meshes.py) | PNG previews using installed component meshes |
-| [swhull/definitions.py](swhull/definitions.py), [benches.py](swhull/benches.py) | Game install detection, part definitions and workbench sizes |
-| [swhull/jobs.py](swhull/jobs.py), [cache.py](swhull/cache.py) | Killable worker processes; shared geometry cache |
-| [swhull/setup_gui.py](swhull/setup_gui.py), [desktop_runtime.py](swhull/desktop_runtime.py) | Desktop window and shared server |
-| [docs/start.md](docs/start.md), [swhull/guide.md](swhull/guide.md) | Guides served by `get_guide` (any vehicle; hull generator) |
-| [swhull/physics.py](swhull/physics.py), [game_constants.py](swhull/game_constants.py) | Read-only physics estimates and the base-game constants they use |
-| [swhull/style.py](swhull/style.py) | Optional style rule sets checked by `preflight_vehicle(style=...)` |
-| [viewer/](viewer) | Standalone 3D viewer |
-| [tools/](tools) | Smoke, client, package and desktop tests; in-game calibration vehicles |
+Issues and pull requests are welcome. Changes must pass `uv run pytest` and
+`uv run ruff check .`; changes to geometry also need a rendered review and an in-game check.
+See [development](docs/development.md).
 
 ## License
 

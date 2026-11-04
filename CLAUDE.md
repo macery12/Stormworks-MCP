@@ -10,6 +10,7 @@ uv sync
 uv run pytest            # must pass; engine tests skip without a Stormworks install
 uv run ruff check .      # must pass
 uv run tools/smoke_test.py out   # renders every preset to ./out; look at the PNGs after geometry changes
+uv run tools/readme_images.py    # re-renders the README screenshots into docs/images
 ```
 
 ## Rules learned in game (do not regress)
