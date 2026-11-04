@@ -1,6 +1,6 @@
 [project]
 name = "stormworks-hull-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local MCP server for designing, inspecting and editing Stormworks vehicles"
 readme = "README.md"
 license = "MIT"
