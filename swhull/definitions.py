@@ -5,7 +5,6 @@ Pieces retain editor-footprint cubes for placement; renderers separately read na
 """
 import os
 import re
-import sys
 import xml.etree.ElementTree as ET
 from functools import cache
 
@@ -21,19 +20,13 @@ _REL = os.path.join("rom", "data", "definitions")
 
 def _steam_roots():
     roots = []
-    if sys.platform == "win32":
-        try:
-            import winreg  # noqa: PLC0415 - Windows-only module
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-                roots.append(winreg.QueryValueEx(key, "SteamPath")[0])
-        except OSError:
-            pass
-        roots += [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"]
-    else:
-        home = os.path.expanduser("~")
-        roots += [os.path.join(home, ".steam", "steam"), os.path.join(home, ".local", "share", "Steam"),
-                  os.path.join(home, "Library", "Application Support", "Steam")]
-    return roots
+    try:
+        import winreg  # noqa: PLC0415
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            roots.append(winreg.QueryValueEx(key, "SteamPath")[0])
+    except OSError:
+        pass
+    return roots + [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"]
 
 
 def _steam_libraries():

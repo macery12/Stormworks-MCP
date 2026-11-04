@@ -18,8 +18,6 @@ def _stdin_is_stream():
 
     if sys.stdin is None:
         return False
-    if sys.platform != "win32":
-        return not sys.stdin.isatty()
     import ctypes  # noqa: PLC0415
 
     kernel = ctypes.WinDLL("kernel32")
@@ -36,7 +34,7 @@ def _console(new):
     it for CLI output. Does nothing when the streams already work (source runs, redirection)."""
     import sys  # noqa: PLC0415
 
-    if sys.platform != "win32" or (sys.stdout is not None and (not new or sys.stdin is not None)):
+    if sys.stdout is not None and (not new or sys.stdin is not None):
         return
     import ctypes  # noqa: PLC0415
 

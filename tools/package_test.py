@@ -21,22 +21,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def alive(pid):
-    if sys.platform == "win32":
-        import ctypes  # noqa: PLC0415
+    import ctypes  # noqa: PLC0415
 
-        kernel = ctypes.WinDLL("kernel32")
-        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-        if not handle:
-            return False
-        try:
-            return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
-        finally:
-            kernel.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-    except OSError:
+    kernel = ctypes.WinDLL("kernel32")
+    handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if not handle:
         return False
-    return True
+    try:
+        return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def wait_gone(pid, seconds):
@@ -70,8 +64,7 @@ def orphaned_server(command, args, env, cwd):
     finally:
         parent.stdin.close()
         if alive(pid):
-            subprocess.run(["taskkill", "/F", "/PID", str(pid)] if sys.platform == "win32" else ["kill", "-9", str(pid)],
-                           capture_output=True, check=False)
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, check=False)
 
 
 def menu(command, args, env, cwd, keys):

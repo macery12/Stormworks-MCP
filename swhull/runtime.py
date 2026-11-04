@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 
 from ._version import __version__
@@ -27,7 +26,7 @@ def data_dir():
     """Logs and update state; SW_MCP_DATA_DIR overrides %LOCALAPPDATA%\\Stormworks MCP."""
     if os.environ.get("SW_MCP_DATA_DIR"):
         return Path(os.environ["SW_MCP_DATA_DIR"])
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home() / ".local" / "share")
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     return Path(base) / "Stormworks MCP"
 
 
@@ -105,26 +104,21 @@ def configure_logging():
 
 
 def _watch_parent(parent_pid, stop):
-    if sys.platform == "win32":
-        import ctypes  # noqa: PLC0415
-        from ctypes import wintypes  # noqa: PLC0415
+    import ctypes  # noqa: PLC0415
+    from ctypes import wintypes  # noqa: PLC0415
 
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-        handle = kernel.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
-        if handle:
-            try:
-                kernel.WaitForSingleObject(handle, 0xFFFFFFFF)
-            finally:
-                kernel.CloseHandle(handle)
-        stop()
-    else:
-        while os.getppid() == parent_pid:
-            time.sleep(0.5)
-        stop()
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
+    if handle:
+        try:
+            kernel.WaitForSingleObject(handle, 0xFFFFFFFF)
+        finally:
+            kernel.CloseHandle(handle)
+    stop()
 
 
 def _windows_parents():
@@ -180,8 +174,6 @@ def client_pid():
     """The process that started this server. A venv's python.exe is a launcher plus a child
     running the same executable; skip such layers and watch the client above them."""
     pid = os.getppid()
-    if sys.platform != "win32":
-        return pid
     me = os.path.normcase(os.path.abspath(sys.executable))
     parents = None
     for _ in range(4):

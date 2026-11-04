@@ -30,7 +30,7 @@ def prefabs_dir():
         return Path(os.environ["SW_PREFABS_DIR"])
     if os.environ.get("SW_DESIGNS_DIR"):
         return Path(os.environ["SW_DESIGNS_DIR"]).parent / "prefabs"
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
     return Path(base) / "stormworks-hull-mcp" / "prefabs"
 
 

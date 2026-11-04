@@ -56,7 +56,7 @@ def designs_dir():
     """Where saved design specs live (outside the repo, per user). SW_DESIGNS_DIR overrides."""
     if os.environ.get("SW_DESIGNS_DIR"):
         return Path(os.environ["SW_DESIGNS_DIR"])
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
     return Path(base) / "stormworks-hull-mcp" / "designs"
 
 

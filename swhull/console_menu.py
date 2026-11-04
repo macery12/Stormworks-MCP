@@ -2,7 +2,6 @@
 starts the server by itself and nothing has to stay open."""
 
 import os
-import sys
 import webbrowser
 
 from ._version import __version__
@@ -65,8 +64,7 @@ def open_log():
         print(f"  Could not create {path}: {exc}")
         return
     print(f"\n  {path}")
-    if sys.platform == "win32":
-        os.startfile(path)  # noqa: S606 - opens the log in the player's text editor
+    os.startfile(path)  # noqa: S606 - opens the log in the player's text editor
 
 
 def check_updates():

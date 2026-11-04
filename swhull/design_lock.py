@@ -1,6 +1,6 @@
 """One lock over stored designs, shared by every running server (each client starts its own)."""
 
-import sys
+import msvcrt
 import threading
 import time
 from pathlib import Path
@@ -44,15 +44,8 @@ def _lock_file(path):
     deadline = time.monotonic() + WAIT
     while True:
         try:
-            if sys.platform == "win32":
-                import msvcrt  # noqa: PLC0415
-
-                file.seek(0)
-                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl  # noqa: PLC0415
-
-                fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            file.seek(0)
+            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
             return file
         except OSError:
             if time.monotonic() > deadline:
@@ -63,10 +56,7 @@ def _lock_file(path):
 
 def _unlock_file(file):
     try:
-        if sys.platform == "win32":
-            import msvcrt  # noqa: PLC0415
-
-            file.seek(0)
-            msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
     finally:
-        file.close()  # closing also releases a POSIX flock
+        file.close()

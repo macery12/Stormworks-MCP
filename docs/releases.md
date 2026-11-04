@@ -30,7 +30,7 @@ be replaced by this workflow; publish a new tag/version for a changed executable
 
 ## What CI checks
 
-- Ruff and portable tests on Linux/Python 3.10, Linux/Python 3.12 and Windows/Python 3.12.
+- Ruff and portable tests on Windows/Python 3.12 (Stormworks MCP is Windows only).
 - Two source clients, each starting its own server over stdio (one through a v0.3 `--connect`
   entry), and one with no arguments at all: initialization, guides, parallel calls,
   worker-rendered PNG, cache reuse, XML export, invalid-spec errors, the shared design lock, log
