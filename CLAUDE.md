@@ -77,3 +77,13 @@ verified.
   guards the piece catalogue against the game files, symmetry, spike tips and watertightness.
 - Never commit game files (`rom/`), users' vehicles, or saved designs.
 - Do not add `Co-Authored-By` lines or other AI attribution to commit messages or PR descriptions.
+
+## Release notes
+
+- Draft them in `release.md` at the repo root. It is git-ignored: never commit it, and delete it
+  once the release is published.
+- The GitHub release **title** is only `Stormworks MCP vX.Y.Z` (for example `Stormworks MCP v0.3.1`).
+- The **description** opens with the full title as a heading, then the notes:
+  `# Stormworks MCP v0.3.1: your AI client starts the server by itself`.
+- Pushing the tag creates the draft release with the downloads; then set the title and notes
+  with `gh release edit vX.Y.Z --title ... --notes-file ...`. The maintainer publishes it.

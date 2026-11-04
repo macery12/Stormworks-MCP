@@ -1,7 +1,24 @@
+<div align="center">
+
 # Stormworks MCP
 
-Describe a vehicle to your AI assistant and get a file you can load at a workbench in
-[Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/).
+**Describe a vehicle to your AI assistant. Load it at a workbench in
+[Stormworks: Build and Rescue](https://store.steampowered.com/app/573090/).**
+
+[![Latest release](https://img.shields.io/github/v/release/macery12/Stormworks-MCP?label=release&color=0a7bbb)](https://github.com/macery12/Stormworks-MCP/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/macery12/Stormworks-MCP/total?color=0a7bbb)](https://github.com/macery12/Stormworks-MCP/releases)
+[![GitHub stars](https://img.shields.io/github/stars/macery12/Stormworks-MCP?style=flat&logo=github&color=e3b341)](https://github.com/macery12/Stormworks-MCP/stargazers)
+[![MCP server](https://img.shields.io/badge/MCP-server-6b4fbb?logo=modelcontextprotocol)](https://modelcontextprotocol.io)
+[![Made for Stormworks](https://img.shields.io/badge/made%20for-Stormworks-1b2838?logo=steam)](https://store.steampowered.com/app/573090/)
+
+[![Download for Windows](https://img.shields.io/github/v/release/macery12/Stormworks-MCP?label=Download%20for%20Windows&style=for-the-badge&logo=windows&logoColor=white&color=0a7bbb)](https://github.com/macery12/Stormworks-MCP/releases/latest)
+
+[Install guide](docs/install.md) · [Building walkthrough](docs/building.md) ·
+[Example prompts](#example-prompts) · [What is verified in game](docs/in-game-testing.md)
+
+![A 32 m coast guard cutter built with the hull generator: white hull with a red and navy bow flash and hull number 47, a two-level deckhouse and bridge, a lattice mast with a radar dome, railings and a painted helideck aft](docs/images/hero.png)
+
+</div>
 
 Stormworks MCP is a local [MCP](https://modelcontextprotocol.io) server for Claude Desktop, the
 ChatGPT / Codex Windows app and other MCP clients. It gives the assistant tools to shape boat
@@ -11,12 +28,6 @@ and saves the result to your Stormworks vehicles folder.
 
 Everything runs on your PC. Part definitions are read from your own game install, and game files
 are never changed.
-
-**[Download for Windows](https://github.com/macery12/Stormworks-MCP/releases/latest)** ·
-[Install guide](docs/install.md) · [Building walkthrough](docs/building.md) ·
-[What is verified in game](docs/in-game-testing.md)
-
-![A 32 m coast guard cutter built with the hull generator: white hull with a red and navy bow flash and hull number 47, a two-level deckhouse and bridge, a lattice mast with a radar dome, railings and a painted helideck aft](docs/images/hero.png)
 
 ## How it works
 
