@@ -190,3 +190,6 @@ telemetry/
 .DS_Store
 Thumbs.db
 tmp/*
+
+# Draft release notes: pasted into the GitHub release, then deleted
+release.md
